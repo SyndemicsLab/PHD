@@ -300,10 +300,11 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     tx_sum = sum(detox, methadone, bup, naltrexone);
 
     IF detox = 1 THEN treatment = "Detox";
+    ELSE IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD",
     ELSE IF methadone = 1 THEN treatment = "Methadone";
     ELSE IF bup = 1 THEN treatment = "Buprenorphine";
     ELSE IF naltrexone = 1 THEN treatment = "Naltrexone";
-    ELSE IF tx_sum > 1 THEN treatment = "Multiple";
+    ELSE IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
     ELSE treatment = "None";
     
     IF treatment = "None" THEN DELETE;
