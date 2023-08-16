@@ -494,8 +494,8 @@ DATA oud_monthly;
                         oud_death oud_matris
                         oud_pmp oud_bsas
                         oud_pharm;
-        DO i=1 TO dim(oud_flags);
-            IF oud_flags[i] = 9999 THEN oud_flags[i] = 0;
+        DO OVER oud_flags;
+            IF oud_flags = 9999 THEN oud_flags = 0;
     END;
 
     oud_cnt = sum(oud_apcd, oud_cm, oud_death, oud_matris, oud_pmp, oud_bsas, oud_pharm);
@@ -514,8 +514,8 @@ DATA oud_yearly;
                         oud_death oud_matris
                         oud_pmp oud_bsas
                         oud_pharm;
-        DO i=1 TO dim(oud_flags);
-            IF oud_flags[i] = 9999 THEN oud_flags[i] = 0;
+        DO OVER oud_flags;
+            IF oud_flags = 9999 THEN oud_flags = 0;
     END;
 
     oud_cnt = sum(oud_apcd, oud_cm, oud_death, oud_matris, oud_pmp, oud_bsas, oud_pharm);
