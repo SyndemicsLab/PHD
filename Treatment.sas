@@ -2,7 +2,7 @@
 /* Project: RESPOND    			                */
 /* Author: Ryan O'Dea  			                */ 
 /* Created: 1/18/2023		                	*/
-/* Updated: 3/23/2023   			            */
+/* Updated: 8/24/2023   			            */
 /*==============================================*/
 
 /*==============================*/
@@ -41,7 +41,8 @@ PROC FORMAT;
 		999 = '999';
 
 /*=======NDC CODES========= */
-%LET nalt_codes = ('65757030001', '63459030042', 'J2315''54868557400',
+%LET nalt_codes = ('G2073', 'HZ94ZZZ', 'HZ84ZZZ',
+                   '65757030001', '63459030042', 'J2315''54868557400',
                    '54569913900''54569672000','50090307600','50090286600',
                    '16729008101','16729008110','52152010502','52152010530',
                    '53217026130','68084029111','68084029121','52152010504',
@@ -54,7 +55,9 @@ PROC FORMAT;
                    '00056007950','00056001122','51285027502','51285027501',
                    '00056008050','65757030001','63459030042');
 
-%LET meth_codes = ('H0020');
+%LET meth_codes = ('G2067', 'G2078', 'H0020', 'HZ81ZZZ', 'HZ91ZZZ', 'S0109');
+
+%LET extra_bup = ('J0570', 'J0571', 'J0572', 'J0573', 'J0574', 'J0575', 'Q9991', 'Q9992');
 
 PROC SQL;
     CREATE TABLE bupndc AS
@@ -80,22 +83,49 @@ DATA months; DO month = 1 to 12; OUTPUT; END; RUN;
 DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
 
 /*=========APCD DATA=============*/
-DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
+DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
     SET PHDAPCD.PHARMACY(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH
                                PHARM_FILL_DATE_YEAR ID PHARM_AGE);
 
-    IF PHARM_NDC IN &nalt_codes THEN nalt_apcd = 1;
-    ELSE nalt_apcd = 0;
+    IF PHARM_NDC IN &nalt_codes 
+        THEN nalt_pharm = 1;
+    ELSE nalt_pharm = 0;
 
-    IF PHARM_NDC IN &meth_codes THEN meth_apcd = 1;
-    ELSE meth_apcd = 0;
+    IF PHARM_NDC IN (&bup_codes) OR PHARM_NDC IN &extra_bup 
+        THEN bup_pharm = 1;
+    ELSE bup_pharm = 0;
 
-    IF PHARM_NDC IN (&bup_codes) THEN bup_apcd = 1;
-    ELSE bup_apcd = 0;
+    month_pharm = PHARM_FILL_DATE_MONTH;
+    year_pharm = PHARM_FILL_DATE_YEAR;
+    age_pharm = PHARM_AGE;
+RUN;
 
-    month_apcd = PHARM_FILL_DATE_MONTH;
-    year_apcd = PHARM_FILL_DATE_YEAR;
-    age_apcd = PHARM_AGE;
+DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
+    SET PHDAPCD.MEDICAL(KEEP= ID MED_AGE MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
+                              MED_PROC_CODE MED_ICD_PROC1-MED_ICD_PROC7);
+
+    cnt_bup = 0;
+    cnt_meth = 0;
+    cnt_nalt = 0;
+    
+    ARRAY vars{*} MED_PROC_CODE MED_ICD_PROC1-MED_ICD_PROC7;
+        DO i=1 TO dim(vars);
+        IF vars[i] IN (&bup_codes) OR vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
+        IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
+        IF vars[i] IN nalt_codes THEN cnt_nalt = cnt_nalt + 1;
+        END;
+    DROP=i;
+
+    IF cnt_nalt > 0 THEN nalt_apcd = 1;
+        ELSE nalt_apcd = 0;
+    IF cnt_meth > 0 THEN meth_apcd = 1;
+        ELSE meth_apcd = 0;
+    IF cnt_bup > 0 THEN bup_apcd = 1;
+        ELSE bup_apcd = 0;
+
+    age_apcd = MED_AGE;
+	year_apcd = MED_FROM_DATE_YEAR;
+    month_apcd = MED_FROM_DATE_MONTH;
 RUN;
 
 
@@ -113,13 +143,14 @@ RUN;
 /* ED_PROC */
 DATA casemix_ed_proc (KEEP= nalt_ed ED_ID meth_ed bup_ed);
 	SET PHDCM.ED_PROC (KEEP= ED_ID ED_PROC);
+
     IF ED_PROC IN &nalt_codes THEN nalt_ed = 1;
     ELSE nalt_ed = 0;
 
     IF ED_PROC IN &meth_codes THEN meth_ed = 1;
     ELSE meth_ed = 0;
 
-    IF ED_PROC IN (&bup_codes) THEN bup_ed = 1;
+    IF ED_PROC IN (&bup_codes) OR ED_PROC IN &extra_bup THEN bup_ed = 1;
     ELSE bup_ed = 0;
 RUN;
 
@@ -134,6 +165,7 @@ RUN;
 
 DATA hd_proc(KEEP = HD_ID nalt_hd meth_hd bup_hd);
     SET PHDCM.HD_PROC (KEEP = HD_ID HD_PROC);
+
     IF HD_PROC IN &nalt_codes THEN nalt_hd = 1;
     ELSE nalt_hd = 0;
 
@@ -262,7 +294,10 @@ PROC SQL;
                      apcd.month_apcd = demographics.month
     LEFT JOIN casemix ON casemix.ID = demographics.ID AND
                      casemix.year_cm = demographics.year AND
-                     casemix.month_cm = demographics.month;
+                     casemix.month_cm = demographics.month
+    LEFT JOIN pharm ON pharm.ID = demographics.ID AND 
+                     pharm.year_pharm = demographics.year AND 
+                     pharm.month_pharm = demographics.month;
 QUIT;
 
 PROC STDIZE DATA = treatment OUT = treatment reponly missing = 9999; RUN;
@@ -278,11 +313,12 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     IF CLT_ENR_PRIMARY_DRUG IN (5:7, 21, 22, 24, 26) OR
        CLT_ENR_SECONDARY_DRUG IN (5:7, 21, 22, 24, 26) OR
        CLT_ENR_TERTIARY_DRUG IN (5:7, 21, 22, 24, 26) AND 
-       PDM_PRV_SERV_TYPE = 30 THEN detox = 1; /*Need to check on this w/ Liz Erdman*/
+       PDM_PRV_SERV_TYPE = 30 THEN detox = 1;
     ELSE detox = 0;
 
-    IF BUPRENORPHINE_PMP = 1 OR
+    IF BUP_CAT_PMP = 1 OR
         bup_apcd = 1 OR 
+        bup_pharm = 1 OR
         bup_cm = 1 OR 
         METHADONE_BSAS = 2 THEN bup = 1;
     ELSE bup = 0;
@@ -294,18 +330,19 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
 
     IF NDC IN &nalt_codes OR 
         nalt_apcd = 1 OR 
+        nalt_pharm = 1 OR
         nalt_cm = 1 THEN naltrexone = 1;
     ELSE naltrexone = 0;
 
-    tx_sum = sum(detox, methadone, bup, naltrexone);
+    tx_sum = sum(methadone, bup, naltrexone);
 
+    treatment = "None";
     IF detox = 1 THEN treatment = "Detox";
-    ELSE IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD",
-    ELSE IF methadone = 1 THEN treatment = "Methadone";
-    ELSE IF bup = 1 THEN treatment = "Buprenorphine";
-    ELSE IF naltrexone = 1 THEN treatment = "Naltrexone";
-    ELSE IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
-    ELSE treatment = "None";
+    IF methadone = 1 THEN treatment = "Methadone";
+    IF bup = 1 THEN treatment = "Buprenorphine";
+    IF naltrexone = 1 THEN treatment = "Naltrexone";
+    IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
+    IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD";
     
     IF treatment = "None" THEN DELETE;
 RUN;
