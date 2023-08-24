@@ -290,7 +290,7 @@ RUN;
 /* OO */
 DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
     SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
-                        OO_ADMIT_YEAR OO_AGE
+                        OO_ADMIT_YEAR OO_ADMIT_MONTH OO_AGE
                         OO_CPT1-OO_CPT10
                         OO_PRINCIPALEXTERNAL_CAUSECODE
                     WHERE= (OO_ADMIT_YEAR IN &year));
@@ -494,8 +494,9 @@ DATA oud_monthly;
                         oud_death oud_matris
                         oud_pmp oud_bsas
                         oud_pharm;
-        DO OVER oud_flags;
-            IF oud_flags = 9999 THEN oud_flags = 0;
+                        
+    DO i = 1 TO dim(oud_flags);
+        IF oud_flags[i] = 9999 THEN oud_flags[i] = 0;
     END;
 
     oud_cnt = sum(oud_apcd, oud_cm, oud_death, oud_matris, oud_pmp, oud_bsas, oud_pharm);
@@ -514,8 +515,9 @@ DATA oud_yearly;
                         oud_death oud_matris
                         oud_pmp oud_bsas
                         oud_pharm;
-        DO OVER oud_flags;
-            IF oud_flags = 9999 THEN oud_flags = 0;
+                        
+    DO i = 1 TO dim(oud_flags);
+        IF oud_flags[i] = 9999 THEN oud_flags[i] = 0;
     END;
 
     oud_cnt = sum(oud_apcd, oud_cm, oud_death, oud_matris, oud_pmp, oud_bsas, oud_pharm);
@@ -523,7 +525,7 @@ DATA oud_yearly;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-	age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp, age_death);
+    age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp, age_death);
     age_grp_five = put(age, age_grps_five.);
     age_grp_ten = put(age, age_grps_ten.);
 RUN;
@@ -579,7 +581,7 @@ PROC SQL;
                     age_grp_ten,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
-    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, FINAL_RE, FINAL_SEX, year, age_grp_ten;
+    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year;
 QUIT;
 
 PROC EXPORT
