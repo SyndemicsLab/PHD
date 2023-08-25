@@ -42,7 +42,7 @@ PROC FORMAT;
 
 /*=======NDC CODES========= */
 %LET nalt_codes = ('G2073', 'HZ94ZZZ', 'HZ84ZZZ',
-                   '65757030001', '63459030042', 'J2315''54868557400',
+                   '65757030001', '63459030042', 'J2315', '54868557400',
                    '54569913900''54569672000','50090307600','50090286600',
                    '16729008101','16729008110','52152010502','52152010530',
                    '53217026130','68084029111','68084029121','52152010504',
@@ -278,7 +278,7 @@ DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm);
 
     IF bup_oo = 1 OR 
     	bup_hd = 1 OR 
-    	bup_ed = 1 THEN meth_cm = 1;
+    	bup_ed = 1 THEN bup_cm = 1;
     ELSE bup_cm = 0;
 
     age_cm = min(age_oo, age_hd, age_ed);
