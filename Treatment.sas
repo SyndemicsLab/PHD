@@ -332,10 +332,7 @@ PROC SQL;
                      pharm.month_pharm = demographics.month
     LEFT JOIN casemix ON casemix.ID = demographics.ID AND
                      casemix.year_cm = demographics.year AND
-                     casemix.month_cm = demographics.month
-    LEFT JOIN pharm ON pharm.ID = demographics.ID AND 
-                     pharm.year_pharm = demographics.year AND 
-                     pharm.month_pharm = demographics.month;
+                     casemix.month_cm = demographics.month;
 QUIT;
 
 PROC STDIZE DATA = treatment OUT = treatment reponly missing = 9999; RUN;
@@ -344,7 +341,7 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
                      month year);
     SET treatment;
 
-    age = min(age_bsas, age_pmp, age_cm, age_apcd, age_pharm, age_apcd);
+    age = min(age_bsas, age_pmp, age_cm, age_apcd, age_pharm);
     age_grp_ten = put(age, age_grps_ten.);
     age_grp_five = put(age, age_grps_five.);
 
