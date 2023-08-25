@@ -150,14 +150,16 @@ DATA apcd (KEEP= ID oud_apcd year_apcd age_apcd month_apcd);
     month_apcd = MED_FROM_DATE_MONTH;
 RUN;
 
-DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
-    SET PHDAPCD.PHARMACY(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH
+DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID age_pharm);
+    SET PHDAPCD.PHARMACY(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH PHARM_AGE
                                PHARM_FILL_DATE_YEAR PHARM_ICD ID);
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
 
     IF PHARM_NDC IN &ICD OR PHARM_ICD IN &ICD THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
+
+    age_pharm = PHARM_AGE;
 RUN;
 
 /*======CASEMIX DATA==========*/
