@@ -570,6 +570,21 @@ RUN;
 
 /* Data Origin Location */
 PROC SQL;
+    CREATE TABLE stratif_oud_origin_yearly AS
+    SELECT DISTINCT oud_cm AS Casemix,
+                    IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
+                    oud_bsas AS BSAS,
+                    oud_pmp AS PMP,
+                    oud_matris AS Matris,
+                    oud_death AS Death,
+                    FINAL_RE, FINAL_SEX, year,
+                    age_grp_ten,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_yearly
+<<<<<<< Updated upstream
+=======
+    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, FINAL_RE, FINAL_SEX, year, age_grp_ten;
+
     CREATE TABLE oud_origin_yearly AS
     SELECT DISTINCT oud_cm AS Casemix,
                     IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
@@ -581,8 +596,15 @@ PROC SQL;
                     age_grp_ten,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
+>>>>>>> Stashed changes
     GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year;
 QUIT;
+
+PROC EXPORT
+	DATA= stratif_oud_origin_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Stratif_OUDOrigin_Yearly&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
 
 PROC EXPORT
 	DATA= oud_origin_yearly

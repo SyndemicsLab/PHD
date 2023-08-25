@@ -87,17 +87,25 @@ DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
     SET PHDAPCD.PHARMACY(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH
                                PHARM_FILL_DATE_YEAR ID PHARM_AGE);
 
+<<<<<<< Updated upstream
     IF PHARM_NDC IN &nalt_codes 
         THEN nalt_pharm = 1;
     ELSE nalt_pharm = 0;
 
     IF PHARM_NDC IN (&bup_codes) OR PHARM_NDC IN &extra_bup 
         THEN bup_pharm = 1;
+=======
+    IF PHARM_NDC IN &nalt_codes THEN nalt_pharm = 1;
+    ELSE nalt_pharm = 0;
+
+    IF PHARM_NDC IN (&bup_codes) THEN bup_pharm = 1;
+>>>>>>> Stashed changes
     ELSE bup_pharm = 0;
 
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
     age_pharm = PHARM_AGE;
+<<<<<<< Updated upstream
 RUN;
 
 DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
@@ -126,9 +134,39 @@ DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
     age_apcd = MED_AGE;
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
+=======
+>>>>>>> Stashed changes
 RUN;
 
+DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd, meth_apcd, age_apcd, bup_apcd);
+    SET PHDAPCD.MEDICAL(KEEP= ID MED_AGE MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
+                              MED_PROC_CODE MED_ICD_CODE1-MED_ICD_CODE7);
 
+    cnt_bup = 0;
+    cnt_meth = 0;
+    cnt_nalt = 0;
+    
+    ARRAY vars{*} MED_PROC_CODE MED_ICD_CODE1-MED_ICD_CODE7;
+        DO i=1 TO dim(vars);
+        IF vars[i] IN (&bup_codes) OR
+           vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
+        IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
+        IF vars[i] IN nalt_codes THEN cnt_nalt = cnt_nalt + 1;
+        END;
+    DROP=i;
+
+    IF cnt_nalt > 0 THEN nalt_apcd = 1;
+        ELSE nalt_apcd = 0;
+    IF cnt_meth > 0 THEN meth_apcd = 1;
+        ELSE meth_apcd = 0;
+    IF cnt_bup > 0 THEN bup_apcd = 1;
+        ELSE bup_apcd = 0;
+
+    age_apcd = MED_AGE;
+	year_apcd = MED_FROM_DATE_YEAR;
+    month_apcd = MED_FROM_DATE_MONTH;
+RUN;
+    
 /*======CASEMIX DATA==========*/
 /* ED */
 DATA casemix_ed (KEEP= ID ED_ID year_cm month_cm age_ed);
@@ -150,7 +188,12 @@ DATA casemix_ed_proc (KEEP= nalt_ed ED_ID meth_ed bup_ed);
     IF ED_PROC IN &meth_codes THEN meth_ed = 1;
     ELSE meth_ed = 0;
 
+<<<<<<< Updated upstream
     IF ED_PROC IN (&bup_codes) OR ED_PROC IN &extra_bup THEN bup_ed = 1;
+=======
+    IF ED_PROC IN (&bup_codes) OR
+       ED_PROC IN &extra_bup THEN bup_ed = 1;
+>>>>>>> Stashed changes
     ELSE bup_ed = 0;
 RUN;
 
@@ -172,7 +215,8 @@ DATA hd_proc(KEEP = HD_ID nalt_hd meth_hd bup_hd);
     IF HD_PROC IN &meth_codes THEN meth_hd = 1;
     ELSE meth_hd = 0;
 
-    IF HD_PROC IN (&bup_codes) THEN bup_hd = 1;
+    IF HD_PROC IN (&bup_codes) OR
+       HD_PROC IN &extra_bup THEN bup_hd = 1;
     ELSE bup_hd = 0;
 RUN;
 
@@ -206,7 +250,8 @@ DATA oo (KEEP= ID year_oo month_oo age_oo nalt_oo meth_oo bup_oo);
         DO i = 1 TO dim(vars);
             IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
             IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
-            IF vars[i] IN (&bup_codes) THEN cnt_bup = cnt_bup + 1;
+            IF vars[i] IN (&bup_codes) OR
+            IF vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         END;
     
     IF cnt_nalt > 0 THEN nalt_oo = 1;
@@ -246,7 +291,7 @@ DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm);
     IF bup_oo = 1 OR 
     	bup_hd = 1 OR 
     	bup_ed = 1 THEN meth_cm = 1;
-    ELSE meth_cm = 0;
+    ELSE bup_cm = 0;
 
     age_cm = min(age_oo, age_hd, age_ed);
     month_cm = min(month_oo, month_cm, month_hd);
@@ -272,7 +317,7 @@ RUN;
 
 DATA pmp;
     SET PHDPMP.PMP (KEEP=ID DATE_FILLED_YEAR DATE_FILLED_MONTH
-                         BUPRENORPHINE_PMP
+                         BUP_CAT_PMP
                          OPIOID_PMP
                          AGE_PMP
                          NDC);
@@ -283,15 +328,18 @@ RUN;
 PROC SQL;
     CREATE TABLE treatment AS
     SELECT DISTINCT * FROM demographics
+    LEFT JOIN apcd ON apcd.ID = demographics.ID AND
+                      apcd.year_apcd = demographics.year AND 
+                      apcd.month_apcd = demographics.month
     LEFT JOIN bsas ON bsas.ID = demographics.ID AND 
                       bsas.year_bsas = demographics.year AND 
                       bsas.month_bsas = demographics.month
     LEFT JOIN pmp ON pmp.ID = demographics.ID AND
                      pmp.year_pmp = demographics.year AND
                      pmp.month_pmp = demographics.month
-    LEFT JOIN apcd ON apcd.ID = demographics.ID AND 
-                     apcd.year_apcd = demographics.year AND
-                     apcd.month_apcd = demographics.month
+    LEFT JOIN pharm ON pharm.ID = demographics.ID AND 
+                     pharm.year_pharm = demographics.year AND
+                     pharm.month_pharm = demographics.month
     LEFT JOIN casemix ON casemix.ID = demographics.ID AND
                      casemix.year_cm = demographics.year AND
                      casemix.month_cm = demographics.month
@@ -306,7 +354,7 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
                      month year);
     SET treatment;
 
-    age = min(age_bsas, age_pmp, age_cm, age_apcd);
+    age = min(age_bsas, age_pmp, age_cm, age_apcd, age_pharm, age_apcd);
     age_grp_ten = put(age, age_grps_ten.);
     age_grp_five = put(age, age_grps_five.);
 
@@ -317,20 +365,30 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     ELSE detox = 0;
 
     IF BUP_CAT_PMP = 1 OR
+<<<<<<< Updated upstream
         bup_apcd = 1 OR 
         bup_pharm = 1 OR
+=======
+        bup_pharm = 1 OR 
+>>>>>>> Stashed changes
         bup_cm = 1 OR 
+        bup_apcd = 1 OR
         METHADONE_BSAS = 2 THEN bup = 1;
     ELSE bup = 0;
 
-    IF METHADONE_BSAS = 1 OR 
-        meth_apcd = 1 OR 
+    IF METHADONE_BSAS = 1 OR
+        meth_apcd = 1 OR
         meth_cm = 1 THEN methadone = 1;
     ELSE methadone = 0;
 
     IF NDC IN &nalt_codes OR 
+<<<<<<< Updated upstream
         nalt_apcd = 1 OR 
         nalt_pharm = 1 OR
+=======
+        nalt_pharm = 1 OR 
+        nalt_apcd = 1 OR
+>>>>>>> Stashed changes
         nalt_cm = 1 THEN naltrexone = 1;
     ELSE naltrexone = 0;
 
@@ -341,8 +399,13 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     IF methadone = 1 THEN treatment = "Methadone";
     IF bup = 1 THEN treatment = "Buprenorphine";
     IF naltrexone = 1 THEN treatment = "Naltrexone";
+<<<<<<< Updated upstream
     IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
     IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD";
+=======
+    IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD",
+    IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
+>>>>>>> Stashed changes
     
     IF treatment = "None" THEN DELETE;
 RUN;
