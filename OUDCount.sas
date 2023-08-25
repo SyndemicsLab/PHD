@@ -525,7 +525,7 @@ DATA oud_yearly;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-    age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp, age_death);
+    age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp, age_death, age_pharm);
     age_grp_five = put(age, age_grps_five.);
     age_grp_ten = put(age, age_grps_ten.);
 RUN;
