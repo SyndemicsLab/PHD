@@ -581,8 +581,6 @@ PROC SQL;
                     age_grp_ten,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
-<<<<<<< Updated upstream
-=======
     GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, FINAL_RE, FINAL_SEX, year, age_grp_ten;
 
     CREATE TABLE oud_origin_yearly AS
@@ -596,7 +594,6 @@ PROC SQL;
                     age_grp_ten,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
->>>>>>> Stashed changes
     GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year;
 QUIT;
 
