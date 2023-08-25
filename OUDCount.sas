@@ -589,9 +589,7 @@ PROC SQL;
                     oud_bsas AS BSAS,
                     oud_pmp AS PMP,
                     oud_matris AS Matris,
-                    oud_death AS Death,
-                    FINAL_RE, FINAL_SEX, year,
-                    age_grp_ten,
+                    oud_death AS Death, year,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
     GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year;
