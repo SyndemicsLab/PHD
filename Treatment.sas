@@ -116,7 +116,7 @@ DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
         DO i=1 TO dim(vars);
         IF vars[i] IN (&bup_codes) OR vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
-        IF vars[i] IN nalt_codes THEN cnt_nalt = cnt_nalt + 1;
+        IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
         END;
     DROP=i;
 
@@ -145,7 +145,7 @@ DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd, meth_apcd, age_apcd, bup_apc
         IF vars[i] IN (&bup_codes) OR
            vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
-        IF vars[i] IN nalt_codes THEN cnt_nalt = cnt_nalt + 1;
+        IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
         END;
     DROP=i;
 
@@ -239,8 +239,7 @@ DATA oo (KEEP= ID year_oo month_oo age_oo nalt_oo meth_oo bup_oo);
         DO i = 1 TO dim(vars);
             IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
             IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
-            IF vars[i] IN (&bup_codes) OR
-            IF vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
+            IF vars[i] IN (&bup_codes) OR vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         END;
     
     IF cnt_nalt > 0 THEN nalt_oo = 1;
