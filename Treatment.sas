@@ -106,17 +106,14 @@ DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
     age_pharm = PHARM_AGE;
 RUN;
 
-DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
+DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd);
     SET PHDAPCD.MEDICAL(KEEP= ID MED_AGE MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
                               MED_PROC_CODE MED_ICD_PROC1-MED_ICD_PROC7);
-
-    cnt_bup = 0;
     cnt_meth = 0;
     cnt_nalt = 0;
     
     ARRAY vars{*} MED_PROC_CODE MED_ICD_PROC1-MED_ICD_PROC7;
         DO i=1 TO dim(vars);
-        IF vars[i] IN (&bup_codes) OR vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
         IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
         END;
@@ -126,43 +123,12 @@ DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
         ELSE nalt_apcd = 0;
     IF cnt_meth > 0 THEN meth_apcd = 1;
         ELSE meth_apcd = 0;
-    IF cnt_bup > 0 THEN bup_apcd = 1;
-        ELSE bup_apcd = 0;
 
     age_apcd = MED_AGE;
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
 RUN;
 
-DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd, meth_apcd, age_apcd, bup_apcd);
-    SET PHDAPCD.MEDICAL(KEEP= ID MED_AGE MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
-                              MED_PROC_CODE MED_ICD_CODE1-MED_ICD_CODE7);
-
-    cnt_bup = 0;
-    cnt_meth = 0;
-    cnt_nalt = 0;
-    
-    ARRAY vars{*} MED_PROC_CODE MED_ICD_CODE1-MED_ICD_CODE7;
-        DO i=1 TO dim(vars);
-        IF vars[i] IN (&bup_codes) OR
-           vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
-        IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
-        IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
-        END;
-    DROP=i;
-
-    IF cnt_nalt > 0 THEN nalt_apcd = 1;
-        ELSE nalt_apcd = 0;
-    IF cnt_meth > 0 THEN meth_apcd = 1;
-        ELSE meth_apcd = 0;
-    IF cnt_bup > 0 THEN bup_apcd = 1;
-        ELSE bup_apcd = 0;
-
-    age_apcd = MED_AGE;
-	year_apcd = MED_FROM_DATE_YEAR;
-    month_apcd = MED_FROM_DATE_MONTH;
-RUN;
-    
 /*======CASEMIX DATA==========*/
 /* ED */
 DATA casemix_ed (KEEP= ID ED_ID year_cm month_cm age_ed);
@@ -352,10 +318,8 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     ELSE detox = 0;
 
     IF BUP_CAT_PMP = 1 OR
-        bup_apcd = 1 OR 
         bup_pharm = 1 OR
         bup_cm = 1 OR 
-        bup_apcd = 1 OR
         METHADONE_BSAS = 2 THEN bup = 1;
     ELSE bup = 0;
 
