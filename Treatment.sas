@@ -57,7 +57,9 @@ PROC FORMAT;
 
 %LET meth_codes = ('G2067', 'G2078', 'H0020', 'HZ81ZZZ', 'HZ91ZZZ', 'S0109');
 
-%LET extra_bup = ('J0570', 'J0571', 'J0572', 'J0573', 'J0574', 'J0575', 'Q9991', 'Q9992');
+%LET extra_bup = ('G2068', 'G2069', 'G2070', 'G2071', 'G2072', 'G2079', 
+                   'J0570', 'J0571', 'J0572', 'J0573', 'J0574', 'J0575',
+                   'Q9991', 'Q9992');
 
 PROC SQL;
     CREATE TABLE bupndc AS
