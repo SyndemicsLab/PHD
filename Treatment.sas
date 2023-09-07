@@ -232,7 +232,7 @@ PROC SQL;
         AND casemix.month_cm = oo.month_oo;
 QUIT;
 
-DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm);
+DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm bup_cm);
     SET casemix;
     IF nalt_oo = 1 OR 
     	nalt_hd = 1 OR 
