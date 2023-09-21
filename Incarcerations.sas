@@ -609,19 +609,25 @@ PROC SQL;
 	SELECT DISTINCT doc_status, year, FINAL_RE, FINAL_SEX, age_grp_ten,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM incar_yearly
-	GROUP BY year, FINAL_RE, FINAL_SEX, age_grp_ten;
+	GROUP BY year, FINAL_RE, FINAL_SEX, age_grp_ten, doc_status;
 
 	CREATE TABLE incar_yearly_five AS
 	SELECT DISTINCT doc_status, year, FINAL_RE, FINAL_SEX, age_grp_five,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM incar_yearly
-	GROUP BY  year, FINAL_RE, FINAL_SEX, age_grp_five;
+	GROUP BY  year, FINAL_RE, FINAL_SEX, age_grp_five, doc_status;
 
 	CREATE TABLE incar_monthly AS
 	SELECT DISTINCT doc_status, year, month, FINAL_RE, FINAL_SEX, age_grp,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM incar_monthly
-	GROUP BY year, month, FINAL_RE, FINAL_SEX, age_grp;
+	GROUP BY year, month, FINAL_RE, FINAL_SEX, age_grp, doc_status;
+	
+	CREATE TABLE incar_nostrat AS
+	SELECT DISTINCT doc_status, year,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM incar_yearly
+	GROUP BY year, month, doc_status;
 QUIT;
 
 PROC EXPORT
@@ -639,5 +645,11 @@ RUN;
 PROC EXPORT
 	DATA= incar_monthly
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= incar_nostrat
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
