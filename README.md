@@ -23,16 +23,16 @@ RESPOND relies primarily on four unique scripts, and uses information derived fr
 # In the Repo
 Within this Repo there are scripts that have been approved through the PHD by their internal Data Brief process. Output naming conventions for data are *_Ten* or *_Five* indicate age bins, *Monthly* indicates that the counting method is by month rather than year. These scripts output:
 1. *OUDCount*
-  1. OUDCountMonthly; OUDCount_Ten; OUDCount_Five
-  2. OUDOrigin_Yearly
+  A. OUDCountMonthly; OUDCount_Ten; OUDCount_Five
+  B. OUDOrigin_Yearly
 2. *DeathCount*
-  1. DeathCount_Ten; DeathCount_Five; DeathCountMonthly
+  A. DeathCount_Ten; DeathCount_Five; DeathCountMonthly
 3. *Incarcerations*: 
-  1. IncarcerationsMonthly; Incarcerations_Ten; Incarcerations_Five
+  A. IncarcerationsMonthly; Incarcerations_Ten; Incarcerations_Five
 4. *Treatment*: 
-  1. TreatmentStarts_Ten; TreatmentStarts_Five
-  2. TreatmentCounts_Ten; TreatmentCounts_Five
+  A. TreatmentStarts_Ten; TreatmentStarts_Five
+  B. TreatmentCounts_Ten; TreatmentCounts_Five
 5. *ICDFreq*:
-  1. ICDFreq
+  A. ICDFreq
 # More Documentation
 For full documentation on processes and logic within these scripts, please see either https://ryan-odea.shinyapps.io/PHD-Documentation/, which is the hosted version of https://github.com/SyndemicsLab/PHD-Documentation. 
