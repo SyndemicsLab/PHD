@@ -102,6 +102,8 @@ DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
     age_pharm = PHARM_AGE;
+
+    IF bup_pharm = 0 AND nalt_pharm = 0 THEN DELETE;
 RUN;
 
 DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd);
@@ -125,6 +127,8 @@ DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd);
     age_apcd = MED_AGE;
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
+
+    IF nalt_apcd = 0 AND meth_apcd = 0 THEN DELETE;
 RUN;
 
 /*======CASEMIX DATA==========*/
@@ -251,6 +255,8 @@ DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm bup_cm);
     age_cm = min(age_oo, age_hd, age_ed);
     month_cm = min(month_oo, month_cm, month_hd);
     year_cm = min(year_oo, year_cm, year_hd);
+
+    IF nalt_cm = 0 AND meth_cm = 0 AND bup_cm = 0 THEN DELETE;
 RUN;
 
 /* BSAS */
