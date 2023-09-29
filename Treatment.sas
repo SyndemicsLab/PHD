@@ -92,14 +92,12 @@ DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
         THEN nalt_pharm = 1;
     ELSE nalt_pharm = 0;
 
-    IF PHARM_NDC IN (&bup_codes) OR PHARM_NDC IN &extra_bup 
+    IF PHARM_NDC IN (&bup_codes) OR 
+        PHARM_NDC IN &extra_bup 
         THEN bup_pharm = 1;
 
     IF PHARM_NDC IN &nalt_codes THEN nalt_pharm = 1;
     ELSE nalt_pharm = 0;
-
-    IF PHARM_NDC IN (&bup_codes) THEN bup_pharm = 1;
-    ELSE bup_pharm = 0;
 
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
@@ -150,7 +148,8 @@ DATA casemix_ed_proc (KEEP= nalt_ed ED_ID meth_ed bup_ed);
     IF ED_PROC IN &meth_codes THEN meth_ed = 1;
     ELSE meth_ed = 0;
 
-    IF ED_PROC IN (&bup_codes) OR ED_PROC IN &extra_bup THEN bup_ed = 1;
+    IF ED_PROC IN (&bup_codes) OR 
+        ED_PROC IN &extra_bup THEN bup_ed = 1;
     ELSE bup_ed = 0;
 RUN;
 
@@ -331,7 +330,8 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     IF NDC IN &nalt_codes OR 
         nalt_apcd = 1 OR 
         nalt_pharm = 1 OR
-        nalt_cm = 1 THEN naltrexone = 1;
+        nalt_cm = 1  OR 
+        METHADONE_BSAS = 3 THEN naltrexone = 1;
     ELSE naltrexone = 0;
 
     tx_sum = sum(methadone, bup, naltrexone);

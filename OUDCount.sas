@@ -156,7 +156,9 @@ DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID age_pharm);
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
 
-    IF PHARM_NDC IN &ICD OR PHARM_ICD IN &ICD THEN oud_pharm = 1;
+    IF PHARM_NDC IN &ICD OR 
+        PHARM_ICD IN &ICD OR 
+        PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
 
     age_pharm = PHARM_AGE;
@@ -167,7 +169,8 @@ RUN;
 DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm age_ed month_cm);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
 				  WHERE= (ED_ADMIT_YEAR IN &year));
-	IF ED_DIAG1 in &ICD OR ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
+	IF ED_DIAG1 in &ICD OR 
+        ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
 	ELSE oud_cm_ed = 0;
 	
 	age_ed = ED_AGE;
@@ -228,9 +231,11 @@ RUN;
 
 /* HD DATA */
 DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd age_hd month_hd);
-	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH
+	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
 					WHERE= (HD_ADMIT_YEAR IN &year));
-	IF HD_DIAG1 in &ICD OR HD_PROC1 in &ICD THEN oud_hd_raw = 1;
+	IF HD_DIAG1 in &ICD OR
+     HD_PROC1 in &ICD OR
+     HD_ECODE IN &ICD THEN oud_hd_raw = 1;
 	ELSE oud_hd_raw = 0;
 
 	age_hd = HD_AGE;
@@ -412,7 +417,8 @@ RUN;
 DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp age_pmp);
     SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year AGE_PMP date_filled_month
                     WHERE= (date_filled_year IN &year));
-    IF BUPRENORPHINE_PMP = 1 THEN oud_pmp = 1;
+    IF BUPRENORPHINE_PMP = 1 AND 
+        BUP_CAT_PMP = 1 THEN oud_pmp = 1;
     ELSE oud_pmp = 0;
     IF oud_pmp = 0 THEN DELETE;
 
@@ -484,6 +490,10 @@ PROC SQL;
 		AND pmp.year_pmp = demographics_yearly.year
     LEFT JOIN pharm ON pharm.ID = demographics_yearly.ID
         AND pharm.year_pharm = demographics_yearly.year;
+
+    CREATE TABLE oud_yearly AS
+    SELECT DISTINCT * 
+    FROM oud_yearly;
 QUIT;
 
 PROC STDIZE DATA = oud_monthly OUT = oud_monthly reponly missing = 9999; RUN;
