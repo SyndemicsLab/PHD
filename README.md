@@ -22,17 +22,10 @@ RESPOND relies primarily on four unique scripts, and uses information derived fr
 5. *ICDFreq*: While not a necesary script, this allows us to gather information about what ICD codes are 'hit' given their frequencies respective to our question of gathering people with OUD.
 # In the Repo
 Within this Repo there are scripts that have been approved through the PHD by their internal Data Brief process. Output naming conventions for data are *_Ten* or *_Five* indicate age bins, *Monthly* indicates that the counting method is by month rather than year. These scripts output:
-1. *OUDCount*
-  - OUDCountMonthly; OUDCount_Ten; OUDCount_Five
-  - OUDOrigin_Yearly
-2. *DeathCount*
-  - DeathCount_Ten; DeathCount_Five; DeathCountMonthly
-3. *Incarcerations*:
-  - IncarcerationsMonthly; Incarcerations_Ten; Incarcerations_Five
-4. *Treatment*:
-  - TreatmentStarts_Ten; TreatmentStarts_Five
-  - TreatmentCounts_Ten; TreatmentCounts_Five
-6. *ICDFreq*:
-  - ICDFreq
+1. *OUDCount* OUDCountMonthly; OUDCount_Ten; OUDCount_Five; OUDOrigin_Yearly
+2. *DeathCount* DeathCount_Ten; DeathCount_Five; DeathCountMonthly
+3. *Incarcerations*: IncarcerationsMonthly; Incarcerations_Ten; Incarcerations_Five
+4. *Treatment*: TreatmentStarts_Ten; TreatmentStarts_Five; TreatmentCounts_Ten; TreatmentCounts_Five
+6. *ICDFreq*: ICDFreq
 # More Documentation
 For full documentation on processes and logic within these scripts, please see either https://ryan-odea.shinyapps.io/PHD-Documentation/, which is the hosted version of https://github.com/SyndemicsLab/PHD-Documentation. 
