@@ -408,6 +408,12 @@ PROC SQL;
     FROM treatment
     GROUP BY year, month, treatment, age_grp_five, FINAL_SEX, FINAL_RE;
 
+    CREATE TABLE counts_nostrat AS
+    SELECT DISTINCT year, month, treatment,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM treatment
+    GROUP BY year, month, treatment;
+
 /* Treatment STARTS Per Year-Month */
     CREATE TABLE out_table_10 AS
     SELECT DISTINCT age_grp_ten, FINAL_RE, FINAL_SEX, year, month, treatment,
@@ -420,6 +426,12 @@ PROC SQL;
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM out_sorted
     GROUP BY year, month, treatment, age_grp_five, FINAL_SEX, FINAL_RE;
+
+    CREATE TABLE starts_nostrat AS
+    SELECT DISTINCT year, month, treatment,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM out_sorted
+    GROUP BY year, month, treatment;
 QUIT;
 
 PROC EXPORT
@@ -443,5 +455,17 @@ RUN;
 PROC EXPORT
 	DATA= out_5
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/TreatmentCounts_Five_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= counts_nostrat
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/TreatmentCounts_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= starts_nostrat
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/TreatmentStarts_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
