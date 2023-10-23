@@ -158,15 +158,22 @@ DATA casemix_ed_proc (KEEP= nalt_ed ED_ID meth_ed bup_ed);
 RUN;
 
 /* HD DATA */
-DATA hd (KEEP= HD_ID ID year_hd month_hd age_hd);
-	SET PHDCM.HD (KEEP= ID HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH
+DATA hd (KEEP= HD_ID ID year_hd month_hd age_hd nalt_hd meth_hd);
+	SET PHDCM.HD (KEEP= ID HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_PROC1
 					WHERE= (HD_ADMIT_YEAR IN &years));
+
+    IF HD_PROC1 IN &nalt_codes THEN nalt_hd = 1;
+    ELSE nalt_hd = 0;
+
+    IF HD_PROC1 IN &meth_codes THEN meth_hd = 1;
+    ELSE meth_hd = 0;
+
     month_hd = HD_ADMIT_MONTH;
 	age_hd = HD_AGE;
 	year_hd = HD_ADMIT_YEAR;
 RUN;
 
-DATA hd_proc(KEEP = HD_ID nalt_hd meth_hd bup_hd);
+DATA hd_proc(KEEP = HD_ID nalt_hd_proc meth_hd_proc bup_hd_proc);
     SET PHDCM.HD_PROC (KEEP = HD_ID HD_PROC);
 
     IF HD_PROC IN &nalt_codes THEN nalt_hd = 1;
@@ -238,11 +245,13 @@ DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm bup_cm);
     SET casemix;
     IF nalt_oo = 1 OR 
     	nalt_hd = 1 OR 
+        nalt_hd_proc = 1 OR
     	nalt_ed = 1 THEN nalt_cm = 1;
     ELSE nalt_cm = 0;
 
     IF meth_oo = 1 OR 
     	meth_hd = 1 OR 
+        meth_hd_proc = 1 OR
     	meth_ed = 1 THEN meth_cm = 1;
     ELSE meth_cm = 0;
 
@@ -365,6 +374,16 @@ PROC SORT data = treatment_dis;
     BY ID year month;
 RUN;
 
+/*
+This section atempts to capture novel starts on MATs:
+If patient A receives BUP in 12-2015 and BUP again in 01-2016, this would be flagged as 0 (adherence) and deleted
+If patient B receives NALT in 02-2018 and NALT again in 05-2018, this would be flagged as 1 (non-adherence) and taken as a 'Start'
+If patient C receives BUP in 04-2019 and Methadone in 05-2019, the latter would be flagged as 1 (non-adherence) and taken as a 'Start' on Methadone
+
+The code follows that, 
+    - For BUP and Methadone, an adherent record would have a month difference < 1 month
+    - For Naltrexone, an adherent record would have a month difference < 2 months 
+*/
 DATA out_sorted;
     SET treatment_dis;
     BY ID;
@@ -372,6 +391,8 @@ DATA out_sorted;
     last_month = lag(month);
     last_year = lag(year);
 
+    /*By ID - calculate month difference and year difference from previous recorded (sorted), 
+    ensuring the first record sets the difference value to missing*/
     IF FIRST.ID THEN DO;
         month_diff = .;
         year_diff = .;
@@ -380,16 +401,22 @@ DATA out_sorted;
         month_diff = month - last_month;
         year_diff = year - last_year;
     END;
-
+    /*Initialize 'start' flag to zero all cases 
+    (assumed adherence unless detected otherwise by below)*/
     flag = 0;
+
+    /*If First record -> 'Start'*/
     IF missing(month_diff) THEN flag = flag + 1;
 
+    /*If Methadone/Bup + if the difference in months is strictly greater than 0 (ge 1) -> 'Start' */
     IF treatment IN ("Methadone", "Buprenorphine") AND year_diff = 0 AND month_diff > 0 THEN flag = flag + 1;
         ELSE IF treatment IN ("Methadone", "Buprenorphine") AND year_diff = 1 AND month_diff < 0 THEN flag = flag + 1;
         ELSE IF treatment IN ("Methadone", "Buprenorphine") AND year_diff > 1 THEN flag = flag + 1;
-        
+
+    /*If Detox -> 'Start'*/
     IF treatment = "Detox" THEN flag = flag + 1;
 
+    /*If Naltrexone + if the difference in months is strictly greater than 1 (ge 2) -> 'Start'*/
     IF treatment = "Naltrexone" AND year_diff = 0 AND month_diff > 1 THEN flag = flag + 1;
         ELSE IF treatment = "Naltrexone" AND year_diff = 1 AND month_diff < -1 THEN flag = flag + 1;
         ELSE IF treatment = "Naltrexone" AND year_diff > 1 THEN flag = flag + 1;
