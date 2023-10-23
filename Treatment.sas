@@ -256,7 +256,7 @@ DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm bup_cm);
     ELSE meth_cm = 0;
 
     IF bup_oo = 1 OR 
-    	bup_hd = 1 OR 
+    	bup_hd_proc = 1 OR 
     	bup_ed = 1 THEN bup_cm = 1;
     ELSE bup_cm = 0;
 
@@ -360,7 +360,7 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     IF naltrexone = 1 THEN treatment = "Naltrexone";
     IF nalt_bup = 1 THEN treatment = "Multiple MOUD";
     IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
-    IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD";
+    IF detox = 1 AND tx_sum > 0 THEN treatment = "Detox and MOUD";
     
     IF treatment = "None" THEN DELETE;
 RUN;
@@ -376,13 +376,16 @@ RUN;
 
 /*
 This section atempts to capture novel starts on MATs:
-If patient A receives BUP in 12-2015 and BUP again in 01-2016, this would be flagged as 0 (adherence) and deleted
-If patient B receives NALT in 02-2018 and NALT again in 05-2018, this would be flagged as 1 (non-adherence) and taken as a 'Start'
-If patient C receives BUP in 04-2019 and Methadone in 05-2019, the latter would be flagged as 1 (non-adherence) and taken as a 'Start' on Methadone
+If patient A receives BUP in 12-2015 and BUP again in 01-2016, this would be flagged as 0 (non-start) and deleted
+If patient B receives NALT in 02-2018 and NALT again in 05-2018, this would be flagged as 1 (start) and taken as a 'Start'
+If patient C receives BUP in 04-2019 and Methadone in 05-2019, the latter would be flagged as 1 (start) and taken as a 'Start' on Methadone
 
 The code follows that, 
     - For BUP and Methadone, an adherent record would have a month difference < 1 month
     - For Naltrexone, an adherent record would have a month difference < 2 months 
+
+    Amy Comment: Some of these medications last a month to 6 months, you are over-estimating non-adherence with this calculation
+        - Clarify what can last six months?
 */
 DATA out_sorted;
     SET treatment_dis;
@@ -408,18 +411,13 @@ DATA out_sorted;
     /*If First record -> 'Start'*/
     IF missing(month_diff) THEN flag = flag + 1;
 
-    /*If Methadone/Bup + if the difference in months is strictly greater than 0 (ge 1) -> 'Start' */
-    IF treatment IN ("Methadone", "Buprenorphine") AND year_diff = 0 AND month_diff > 0 THEN flag = flag + 1;
-        ELSE IF treatment IN ("Methadone", "Buprenorphine") AND year_diff = 1 AND month_diff < 0 THEN flag = flag + 1;
-        ELSE IF treatment IN ("Methadone", "Buprenorphine") AND year_diff > 1 THEN flag = flag + 1;
+    /*If the difference in months is strictly greater than 1 -> 'Start' */
+    IF  year_diff = 0 AND month_diff > 1 THEN flag = flag + 1;
+        ELSE IF year_diff = 1 AND month_diff != -11 THEN flag = flag + 1;
+        ELSE IF year_diff > 1 THEN flag = flag + 1;
 
     /*If Detox -> 'Start'*/
     IF treatment = "Detox" THEN flag = flag + 1;
-
-    /*If Naltrexone + if the difference in months is strictly greater than 1 (ge 2) -> 'Start'*/
-    IF treatment = "Naltrexone" AND year_diff = 0 AND month_diff > 1 THEN flag = flag + 1;
-        ELSE IF treatment = "Naltrexone" AND year_diff = 1 AND month_diff < -1 THEN flag = flag + 1;
-        ELSE IF treatment = "Naltrexone" AND year_diff > 1 THEN flag = flag + 1;
 
     IF flag = 0 THEN DELETE;
 RUN;
