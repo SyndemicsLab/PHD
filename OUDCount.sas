@@ -96,6 +96,13 @@ PROC FORMAT;
             'Q9991', 'Q9992');
 
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
+
+PROC SQL;
+    CREATE TABLE bupndc AS
+    SELECT DISTINCT NDC 
+    FROM PHDPMP.PMP
+    WHERE BUP_CAT_PMP = 1;
+QUIT;
             
 /*===============================*/            
 /*			DATA PULL			 */
