@@ -381,11 +381,7 @@ If patient B receives NALT in 02-2018 and NALT again in 05-2018, this would be f
 If patient C receives BUP in 04-2019 and Methadone in 05-2019, the latter would be flagged as 1 (start) and taken as a 'Start' on Methadone
 
 The code follows that, 
-    - For BUP and Methadone, an adherent record would have a month difference < 1 month
-    - For Naltrexone, an adherent record would have a month difference < 2 months 
-
-    Amy Comment: Some of these medications last a month to 6 months, you are over-estimating non-adherence with this calculation
-        - Clarify what can last six months?
+    - For MOUD, an adherent record would have a month difference <= 1 month
 */
 DATA out_sorted;
     SET treatment_dis;
