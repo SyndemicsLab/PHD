@@ -43,7 +43,7 @@ PROC FORMAT;
 /*=======NDC CODES========= */
 %LET nalt_codes = ('G2073', 'HZ94ZZZ', 'HZ84ZZZ',
                    '65757030001', '63459030042', 'J2315', '54868557400',
-                   '54569913900''54569672000','50090307600','50090286600',
+                   '54569913900','54569672000','50090307600','50090286600',
                    '16729008101','16729008110','52152010502','52152010530',
                    '53217026130','68084029111','68084029121','52152010504',
                    '42291063230','63629104701','63629104601','68115068030',
@@ -92,12 +92,8 @@ DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
         THEN nalt_pharm = 1;
     ELSE nalt_pharm = 0;
 
-    IF PHARM_NDC IN (&bup_codes) OR 
-        PHARM_NDC IN &extra_bup 
+    IF PHARM_NDC IN (&bup_codes)
         THEN bup_pharm = 1;
-
-    IF PHARM_NDC IN &nalt_codes THEN nalt_pharm = 1;
-    ELSE nalt_pharm = 0;
 
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
@@ -106,16 +102,18 @@ DATA pharm (KEEP= ID year_pharm month_pharm nalt_pharm age_pharm bup_pharm);
     IF bup_pharm = 0 AND nalt_pharm = 0 THEN DELETE;
 RUN;
 
-DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd);
+DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd bup_apcd);
     SET PHDAPCD.MEDICAL(KEEP= ID MED_AGE MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
                               MED_PROC_CODE MED_ICD_PROC1-MED_ICD_PROC7);
     cnt_meth = 0;
     cnt_nalt = 0;
+    cnt_bup = 0;
     
     ARRAY vars{*} MED_PROC_CODE MED_ICD_PROC1-MED_ICD_PROC7;
         DO i=1 TO dim(vars);
         IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
         IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
+        IF vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         END;
     DROP=i;
 
@@ -123,12 +121,15 @@ DATA apcd (KEEP= ID year_apcd month_apcd nalt_apcd meth_apcd age_apcd);
         ELSE nalt_apcd = 0;
     IF cnt_meth > 0 THEN meth_apcd = 1;
         ELSE meth_apcd = 0;
+    IF cnt_bup > 0 THEN bup_apcd = 1;
+        ELSE bup_apcd = 0;
+
+    IF nalt_apcd = 0 AND meth_apcd = 0 AND bup_apcd = 0 THEN DELETE;
 
     age_apcd = MED_AGE;
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
 
-    IF nalt_apcd = 0 AND meth_apcd = 0 THEN DELETE;
 RUN;
 
 /*======CASEMIX DATA==========*/
@@ -152,21 +153,27 @@ DATA casemix_ed_proc (KEEP= nalt_ed ED_ID meth_ed bup_ed);
     IF ED_PROC IN &meth_codes THEN meth_ed = 1;
     ELSE meth_ed = 0;
 
-    IF ED_PROC IN (&bup_codes) OR 
-        ED_PROC IN &extra_bup THEN bup_ed = 1;
+    IF ED_PROC IN &extra_bup THEN bup_ed = 1;
     ELSE bup_ed = 0;
 RUN;
 
 /* HD DATA */
-DATA hd (KEEP= HD_ID ID year_hd month_hd age_hd);
-	SET PHDCM.HD (KEEP= ID HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH
+DATA hd (KEEP= HD_ID ID year_hd month_hd age_hd nalt_hd meth_hd);
+	SET PHDCM.HD (KEEP= ID HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_PROC1
 					WHERE= (HD_ADMIT_YEAR IN &years));
+
+    IF HD_PROC1 IN &nalt_codes THEN nalt_hd = 1;
+    ELSE nalt_hd = 0;
+
+    IF HD_PROC1 IN &meth_codes THEN meth_hd = 1;
+    ELSE meth_hd = 0;
+
     month_hd = HD_ADMIT_MONTH;
 	age_hd = HD_AGE;
 	year_hd = HD_ADMIT_YEAR;
 RUN;
 
-DATA hd_proc(KEEP = HD_ID nalt_hd meth_hd bup_hd);
+DATA hd_proc(KEEP = HD_ID nalt_hd_proc meth_hd_proc bup_hd_proc);
     SET PHDCM.HD_PROC (KEEP = HD_ID HD_PROC);
 
     IF HD_PROC IN &nalt_codes THEN nalt_hd = 1;
@@ -175,8 +182,7 @@ DATA hd_proc(KEEP = HD_ID nalt_hd meth_hd bup_hd);
     IF HD_PROC IN &meth_codes THEN meth_hd = 1;
     ELSE meth_hd = 0;
 
-    IF HD_PROC IN (&bup_codes) OR
-       HD_PROC IN &extra_bup THEN bup_hd = 1;
+    IF HD_PROC IN &extra_bup THEN bup_hd = 1;
     ELSE bup_hd = 0;
 RUN;
 
@@ -196,7 +202,7 @@ QUIT;
 
 /* OO */
 DATA oo (KEEP= ID year_oo month_oo age_oo nalt_oo meth_oo bup_oo);
-    SET PHDCM.OO (KEEP= ID OO_CPT1-OO_CPT10 OO_ADMIT_YEAR OO_AGE OO_ADMIT_MONTH
+    SET PHDCM.OO (KEEP= ID OO_CPT1-OO_CPT10 OO_PROC1-OO_PROC4 OO_ADMIT_YEAR OO_AGE OO_ADMIT_MONTH
                     WHERE= (OO_ADMIT_YEAR IN &years));
     cnt_nalt = 0;
     cnt_meth = 0;
@@ -206,11 +212,11 @@ DATA oo (KEEP= ID year_oo month_oo age_oo nalt_oo meth_oo bup_oo);
     meth_oo = 0;
     bup_oo = 0;
 
-    ARRAY vars {*} OO_CPT1-OO_CPT10;
+    ARRAY vars {*} OO_CPT1-OO_CPT10 OO_PROC1-OO_PROC4;
         DO i = 1 TO dim(vars);
             IF vars[i] IN &nalt_codes THEN cnt_nalt = cnt_nalt + 1;
             IF vars[i] IN &meth_codes THEN cnt_meth = cnt_meth + 1;
-            IF vars[i] IN (&bup_codes) OR vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
+            IF vars[i] IN &extra_bup THEN cnt_bup = cnt_bup + 1;
         END;
     
     IF cnt_nalt > 0 THEN nalt_oo = 1;
@@ -239,24 +245,26 @@ DATA casemix (KEEP = ID nalt_cm year_cm month_cm age_cm meth_cm bup_cm);
     SET casemix;
     IF nalt_oo = 1 OR 
     	nalt_hd = 1 OR 
+        nalt_hd_proc = 1 OR
     	nalt_ed = 1 THEN nalt_cm = 1;
     ELSE nalt_cm = 0;
 
     IF meth_oo = 1 OR 
     	meth_hd = 1 OR 
+        meth_hd_proc = 1 OR
     	meth_ed = 1 THEN meth_cm = 1;
     ELSE meth_cm = 0;
 
     IF bup_oo = 1 OR 
-    	bup_hd = 1 OR 
+    	bup_hd_proc = 1 OR 
     	bup_ed = 1 THEN bup_cm = 1;
     ELSE bup_cm = 0;
+
+    IF nalt_cm = 0 AND meth_cm = 0 AND bup_cm = 0 THEN DELETE;
 
     age_cm = min(age_oo, age_hd, age_ed);
     month_cm = min(month_oo, month_cm, month_hd);
     year_cm = min(year_oo, year_cm, year_hd);
-
-    IF nalt_cm = 0 AND meth_cm = 0 AND bup_cm = 0 THEN DELETE;
 RUN;
 
 /* BSAS */
@@ -325,6 +333,7 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     IF BUP_CAT_PMP = 1 OR
         bup_pharm = 1 OR
         bup_cm = 1 OR 
+        bup_apcd = 1 OR
         METHADONE_BSAS = 2 THEN bup = 1;
     ELSE bup = 0;
 
@@ -333,12 +342,14 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
         meth_cm = 1 THEN methadone = 1;
     ELSE methadone = 0;
 
-    IF NDC IN &nalt_codes OR 
-        nalt_apcd = 1 OR 
+    IF nalt_apcd = 1 OR 
         nalt_pharm = 1 OR
         nalt_cm = 1  OR 
         METHADONE_BSAS = 3 THEN naltrexone = 1;
     ELSE naltrexone = 0;
+
+    IF METHADONE_BSAS = 4 THEN nalt_bup = 1;
+    ELSE nalt_bup = 0;
 
     tx_sum = sum(methadone, bup, naltrexone);
 
@@ -347,8 +358,9 @@ DATA treatment(KEEP= ID FINAL_RE FINAL_SEX age_grp_ten age_grp_five treatment ag
     IF methadone = 1 THEN treatment = "Methadone";
     IF bup = 1 THEN treatment = "Buprenorphine";
     IF naltrexone = 1 THEN treatment = "Naltrexone";
+    IF nalt_bup = 1 THEN treatment = "Multiple MOUD";
     IF detox = 0 AND tx_sum > 1 THEN treatment = "Multiple MOUD";
-    IF detox = 1 AND tx_sum > 1 THEN treatment = "Detox and MOUD";
+    IF detox = 1 AND tx_sum > 0 THEN treatment = "Detox and MOUD";
     
     IF treatment = "None" THEN DELETE;
 RUN;
@@ -362,6 +374,15 @@ PROC SORT data = treatment_dis;
     BY ID year month;
 RUN;
 
+/*
+This section atempts to capture novel starts on MATs:
+If patient A receives BUP in 12-2015 and BUP again in 01-2016, this would be flagged as 0 (non-start) and deleted
+If patient B receives NALT in 02-2018 and NALT again in 05-2018, this would be flagged as 1 (start) and taken as a 'Start'
+If patient C receives BUP in 04-2019 and Methadone in 05-2019, the latter would be flagged as 1 (start) and taken as a 'Start' on Methadone
+
+The code follows that, 
+    - For MOUD, an adherent record would have a month difference <= 1 month
+*/
 DATA out_sorted;
     SET treatment_dis;
     BY ID;
@@ -369,6 +390,8 @@ DATA out_sorted;
     last_month = lag(month);
     last_year = lag(year);
 
+    /*By ID - calculate month difference and year difference from previous recorded (sorted), 
+    ensuring the first record sets the difference value to missing*/
     IF FIRST.ID THEN DO;
         month_diff = .;
         year_diff = .;
@@ -377,19 +400,20 @@ DATA out_sorted;
         month_diff = month - last_month;
         year_diff = year - last_year;
     END;
-
+    /*Initialize 'start' flag to zero all cases 
+    (assumed adherence unless detected otherwise by below)*/
     flag = 0;
+
+    /*If First record -> 'Start'*/
     IF missing(month_diff) THEN flag = flag + 1;
 
-    IF treatment IN ("Methadone", "Buprenorphine") AND year_diff = 0 AND month_diff > 0 THEN flag = flag + 1;
-        ELSE IF treatment IN ("Methadone", "Buprenorphine") AND year_diff = 1 AND month_diff < 0 THEN flag = flag + 1;
-        ELSE IF treatment IN ("Methadone", "Buprenorphine") AND year_diff > 1 THEN flag = flag + 1;
-        
-    IF treatment = "Detox" THEN flag = flag + 1;
+    /*If the difference in months is strictly greater than 1 -> 'Start' */
+    IF  year_diff = 0 AND month_diff > 1 THEN flag = flag + 1;
+        ELSE IF year_diff = 1 AND month_diff != -11 THEN flag = flag + 1;
+        ELSE IF year_diff > 1 THEN flag = flag + 1;
 
-    IF treatment = "Naltrexone" AND year_diff = 0 AND month_diff > 1 THEN flag = flag + 1;
-        ELSE IF treatment = "Naltrexone" AND year_diff = 1 AND month_diff < -1 THEN flag = flag + 1;
-        ELSE IF treatment = "Naltrexone" AND year_diff > 1 THEN flag = flag + 1;
+    /*If Detox -> 'Start'*/
+    IF treatment = "Detox" THEN flag = flag + 1;
 
     IF flag = 0 THEN DELETE;
 RUN;

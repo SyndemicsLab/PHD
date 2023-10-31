@@ -62,8 +62,7 @@ PROC FORMAT;
             'F11220', 'F11221', 'F11222', 'F11229',
             'F1123', 'F1124', 'F11250', 'F11251',
             'F11259', 'F11281', 'F11282', 'F11288',
-            'F1129', 'F11920', 'F11921',
-            'F11922', 'F11929','F1193', 
+            'F1129', 'F11920',
 			'F1199', 'F1110', 'F1111', /* Additional for HCS */
             'F1113', 'J0592', 'G2068',
             'G2069', 'G2070', 'G2071', 'G2072',
@@ -97,6 +96,13 @@ PROC FORMAT;
             'Q9991', 'Q9992');
 
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
+
+PROC SQL;
+    CREATE TABLE bupndc AS
+    SELECT DISTINCT NDC 
+    FROM PHDPMP.PMP
+    WHERE BUP_CAT_PMP = 1;
+QUIT;
             
 /*===============================*/            
 /*			DATA PULL			 */
