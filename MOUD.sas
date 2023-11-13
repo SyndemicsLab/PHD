@@ -9,8 +9,11 @@
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
-DATA moud_expanded(KEEP= ID, month, year, treatment);
+DATA moud_expanded(KEEP= ID month year treatment
+                   WHERE=(DATE_END_YEAR_MOUD IN &year));
     SET PHDSPINE.MOUD;
+    treatment = TYPE_MOUD;
+
     FORMAT year 4. month 2.;
     
     num_months = intck('month', input(put(DATE_START_YEAR_MOUD, 4.) || put(DATE_START_MONTH_MOUD, z2.), yymmn6.), 
@@ -22,8 +25,6 @@ DATA moud_expanded(KEEP= ID, month, year, treatment);
       month = month(new_date);
       OUTPUT;
     END;
-
-    treatment = TYPE_MOUD;
 RUN;
 
 PROC SQL;
@@ -32,12 +33,13 @@ PROC SQL;
            DATE_START_YEAR_MOUD AS year,
            TYPE_MOUD AS treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-           FROM PHDSPINE.MOUD
+    FROM PHDSPINE.MOUD
+    WHERE year BETWEEN %SCAN(&year,1,':') AND %SCAN(&year,2,':')
     GROUP BY month, year, treatment;
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
-    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment;
 QUIT;

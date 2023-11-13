@@ -18,14 +18,14 @@ RESPOND relies primarily on four unique scripts, and uses information derived fr
 1. *OUDCount*: Develops the Opioid Use Disorder (OUD) cohort by looking through APCD, Casemix, Death, Matris, PMP, and BSAS. This script forms the basis for other scripts when involving the 'OUD Cohort'
 2. *DeathCount*: Creates counts of fatal overdoses and aids in output parameter tuning of RESPOND
 3. *Incarcerations*: Creates the count of Incarcerated people with OUD - Because incarceration status indicates non-existence elsewhere in the data, if someone is tagged as 'OUD' prior to their incarceration duration, the 'OUD' status is forwarded through incarceration period and counted as such.
-4. *Treatment*: Utilizes Casemix, APCD, PMP and BSAS to determine how many people are starting, or in, either methadone, buprenorphine, naltrexone, or detox treatment programs.
+4. *MOUD*: Utilizes the PHD created MOUD Spine dataset to determine how many people are starting, or in, either methadone, buprenorphine, naltrexone treatments.
 5. *ICDFreq*: While not a necesary script, this allows us to gather information about what ICD codes are 'hit' given their frequencies respective to our question of gathering people with OUD.
 # In the Repo
 Within this Repo there are scripts that have been approved through the PHD by their internal Data Brief process. Output naming conventions for data are *_Ten* or *_Five* indicate age bins, *Monthly* indicates that the counting method is by month rather than year. These scripts output:
 1. *OUDCount* OUDCountMonthly; OUDCount_Ten; OUDCount_Five; OUDOrigin_Yearly
 2. *DeathCount* DeathCount_Ten; DeathCount_Five; DeathCountMonthly
 3. *Incarcerations*: IncarcerationsMonthly; Incarcerations_Ten; Incarcerations_Five
-4. *Treatment*: TreatmentStarts_Ten; TreatmentStarts_Five; TreatmentCounts_Ten; TreatmentCounts_Five
+4. *MOUD*: MOUDStarts; MOUDCounts
 6. *ICDFreq*: ICDFreq
 # More Documentation
 For full documentation on processes and logic within these scripts, please see either https://ryan-odea.shinyapps.io/PHD-Documentation/, which is the hosted version of https://github.com/SyndemicsLab/PHD-Documentation. 
