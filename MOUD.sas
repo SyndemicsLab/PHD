@@ -5,12 +5,10 @@
 /* Updated:            			*/
 /*==============================*/
 
-%LET year = (2015:2021);
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
-DATA moud_expanded(KEEP= ID month year treatment
-                   WHERE=(DATE_END_YEAR_MOUD IN &year));
+DATA moud_expanded(KEEP= ID month year treatment);
     SET PHDSPINE.MOUD;
     treatment = TYPE_MOUD;
 
@@ -41,6 +39,7 @@ PROC SQL;
     SELECT year, month, treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
+    WHERE year BETWEEN %SCAN(&year,1,':') AND %SCAN(&year,2,':')
     GROUP BY month, year, treatment;
 QUIT;
 
