@@ -84,8 +84,10 @@ PROC FORMAT;
 			'T40603A', 'T40603D', 'T40604A', 'T40604D', 
 			'T40691A', 'T40692A', 'T40693A', 'T40694A', 
 			'T40691D', 'T40692D', 'T40693D', 'T40694D', /* T codes */
-			'E8500', 'E8501', 'E8502', /* Principle Encodes */
-			'G2067', 'G2068', 'G2069', 'G2070', 
+			'E8500', 'E8501', 'E8502', /* Principle Encodes */;
+			
+            
+%LET PROC = ('G2067', 'G2068', 'G2069', 'G2070', 
 			'G2071', 'G2072', 'G2073', 'G2074', 
 			'G2075', /* MAT Opioid */
 			'G2076', 'G2077', 'G2078', 'G2079', 
@@ -93,7 +95,7 @@ PROC FORMAT;
  			'J0570', 'J0571', 'J0572', 'J0573', 
  			'J0574', 'J0575', 'J0592', 'S0109', 
             'G2215', 'G2216', 'G1028', /* Naloxone*/
-            'Q9991', 'Q9992');
+            'Q9991', 'Q9992', 'H0020', 'HZ81ZZZ', 'HZ91ZZZ');
 
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
@@ -162,12 +164,11 @@ DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID age_pharm);
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
 
-    IF PHARM_NDC IN &ICD OR 
-        PHARM_ICD IN &ICD OR 
+    IF  PHARM_ICD IN &ICD OR 
         PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
 
-    age_pharm = PHARM_AGE;
+    IF oud_pharm > 0 THEN age_pharm = PHARM_AGE;
 RUN;
 
 /*======CASEMIX DATA==========*/
@@ -179,9 +180,11 @@ DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm age_ed month_cm);
         ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
 	ELSE oud_cm_ed = 0;
 	
+	IF oud_cm_ed > 0 THEN do;
 	age_ed = ED_AGE;
 	year_cm = ED_ADMIT_YEAR;
-    month_cm = ED_ADMIT_MONTH;
+    	month_cm = ED_ADMIT_MONTH;
+    end;
 RUN;
 
 /* ED_DIAG */
@@ -194,7 +197,7 @@ RUN;
 /* ED_PROC */
 DATA casemix_ed_proc (KEEP= oud_cm_ed_proc ED_ID);
 	SET PHDCM.ED_PROC (KEEP= ED_ID ED_PROC);
-	IF ED_PROC in &ICD THEN oud_cm_ed_proc = 1;
+	IF ED_PROC in &PROC THEN oud_cm_ed_proc = 1;
 	ELSE oud_cm_ed_proc = 0;
 RUN;
 
@@ -240,13 +243,15 @@ DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd age_hd month_hd);
 	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
 					WHERE= (HD_ADMIT_YEAR IN &year));
 	IF HD_DIAG1 in &ICD OR
-     HD_PROC1 in &ICD OR
+     HD_PROC1 in &PROC OR
      HD_ECODE IN &ICD THEN oud_hd_raw = 1;
 	ELSE oud_hd_raw = 0;
 
-	age_hd = HD_AGE;
-	year_hd = HD_ADMIT_YEAR;
+IF oud_hd_raw > 0 THEN do;
+    age_hd = HD_AGE;
+    year_hd = HD_ADMIT_YEAR;
     month_hd = HD_ADMIT_MONTH;
+end;
 RUN;
 
 /* HD DIAG DATA */
@@ -259,7 +264,7 @@ RUN;
 /* HD PROC DATA */
 DATA hd_proc(KEEP= HD_ID oud_hd_proc);
 	SET PHDCM.HD_PROC(KEEP = HD_ID HD_PROC);
-	IF HD_PROC IN &ICD THEN oud_hd_proc = 1;
+	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
 	ELSE oud_hd_proc = 0;
 RUN;
 
@@ -308,19 +313,25 @@ DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
                         OO_PRINCIPALEXTERNAL_CAUSECODE
                     WHERE= (OO_ADMIT_YEAR IN &year));
 	cnt_oud_oo = 0;
-    ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 
+ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 
                     OO_PROC1-OO_PROC4
                     OO_CPT1-OO_CPT10
                     OO_PRINCIPALEXTERNAL_CAUSECODE;
-        DO k = 1 TO dim(vars2);
-        IF vars2[k] IN &ICD
-        THEN cnt_oud_oo = cnt_oud_oo + 1;
-		END;
-		DROP= k;
+
+    DO k = 1 TO dim(vars2);
+        IF SUBSTR(VNAME(vars2[k]), 1, 8) = 'OO_PROC'
+        THEN IF vars2[k] IN &PROC
+             THEN cnt_oud_oo = cnt_oud_oo + 1;
+        ELSE
+             IF vars2[k] IN &ICD
+             THEN cnt_oud_oo = cnt_oud_oo + 1;
+    END;
+
+    DROP k;
 
     IF cnt_oud_oo > 0 THEN oud_oo = 1;
-	ELSE oud_oo = 0;
-	IF oud_oo = 0 THEN DELETE;
+    ELSE oud_oo = 0;
+    IF oud_oo = 0 THEN DELETE;
 
 	age_oo = OO_AGE;
 	year_oo = OO_ADMIT_YEAR;

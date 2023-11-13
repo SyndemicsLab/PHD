@@ -223,9 +223,12 @@ DATA oo (KEEP= ID year_oo month_oo age_oo nalt_oo meth_oo bup_oo);
     IF cnt_meth > 0 THEN meth_oo = 1;
     IF cnt_bup > 0 THEN bup_oo = 1;
 
+IF NALT_OO =1 or METH_OO =1 or BUP_OO=1 THEN 
+    DO;
     month_oo = OO_ADMIT_MONTH;
 	age_oo = OO_AGE;
-	year_oo = OO_ADMIT_YEAR;
+	year_oo = OO_ADMIT_YEAR; 
+	END;
 RUN;
 
 /* MERGE ALL CM */
