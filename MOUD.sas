@@ -4,7 +4,7 @@
 /* Created: 11/13/2023 			*/
 /* Updated:            			*/
 /*==============================*/
-
+%LET year = (2015:2021)
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
