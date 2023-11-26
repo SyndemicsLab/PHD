@@ -695,7 +695,7 @@ RUN;
 
 PROC EXPORT
 	DATA= stratif_moud_counts
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Stratif_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Stratif_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
