@@ -635,7 +635,7 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
-DATA moud_expanded(KEEP= ID month year treatment, FINAL_SEX, FINAL_RE);
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -652,14 +652,18 @@ DATA moud_expanded(KEEP= ID month year treatment, FINAL_SEX, FINAL_RE);
     END;
 RUN;
 
+DATA moud_expanded;
+	SET moud_expanded;
+	WHERE year IN &year;
+RUN;
+
 PROC SQL;
     CREATE TABLE moud_starts AS
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
            TYPE_MOUD AS treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM PHDSPINE.MOUD
-    WHERE year BETWEEN %SCAN(&year,1,':') AND %SCAN(&year,2,':')
+    FROM moud_demo
     GROUP BY month, year, treatment;
 
     CREATE TABLE stratif_moud_starts AS
@@ -668,22 +672,19 @@ PROC SQL;
            TYPE_MOUD AS treatment,
            FINAL_RE, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM PHDSPINE.MOUD
-    WHERE year BETWEEN %SCAN(&year,1,':') AND %SCAN(&year,2,':')
+    FROM moud_demo
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX;
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    WHERE year BETWEEN %SCAN(&year,1,':') AND %SCAN(&year,2,':')
     GROUP BY month, year, treatment;
 
     CREATE TABLE stratif_moud_counts AS
     SELECT year, month, treatment, FINAL_RE, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    WHERE year BETWEEN %SCAN(&year,1,':') AND %SCAN(&year,2,':')
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX;
 QUIT;
 
