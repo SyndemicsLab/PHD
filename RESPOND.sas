@@ -634,7 +634,7 @@ PROC SQL;
     SELECT ID, 
            MED_AGE AS age_apcd, 
            MED_ADM_DATE_MONTH AS month_apcd,
-           MED_ADM_DATE_YEAR AS year_apcd,
+           MED_ADM_DATE_YEAR AS year_apcd
     FROM PHDAPCD.MEDICAL;
 
     CREATE TABLE pharm_age AS
