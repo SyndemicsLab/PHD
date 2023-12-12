@@ -697,7 +697,7 @@ QUIT;
 PROC STDIZE DATA = age OUT = age reponly missing = 9999; RUN;
 
 DATA age (KEEP= ID age year month);
-    SET age_monthly;
+    SET age;
     age_raw = min(age_apcd, age_pharm, age_bsas, age_hocmoud, age_doc, age_pmp);
     age = put(age_raw, age_grps_five.);
 RUN;
