@@ -711,7 +711,8 @@ RUN;
 PROC SQL;
     CREATE TABLE age AS 
     SELECT DISTINCT * FROM age;
-
+    
+PROC SQL;
     CREATE TABLE moud_demo AS
     SELECT MOUD.*, DEMO.FINAL_RE, DEMO.FINAL_SEX
     FROM PHDSPINE.MOUD
@@ -754,7 +755,7 @@ PROC SQL;
     LEFT JOIN age ON age.ID = moud_expanded.ID 
                   AND age.year = moud_expanded.year
                   AND age.month = moud_expanded.month;
-
+                  
     CREATE TABLE moud_starts AS
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
