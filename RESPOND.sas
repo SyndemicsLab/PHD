@@ -694,10 +694,16 @@ PROC SQL;
                           AND pmp_age.month_pmp = demographics_monthly.month;      
 QUIT;
 
-PROC STDIZE DATA = age OUT = age reponly missing = 9999; RUN;
-
 DATA age (KEEP= ID age year month);
     SET age;
+    ARRAY age_flags {*} age_apcd age_pharm
+    					age_bsas age_hocmoud
+    					age_doc age_pmp;
+                        
+    DO i = 1 TO dim(age_flags);
+        IF missing(age_flags[i]) THEN age_flags[i] = 9999;
+    END;
+    
     age_raw = min(age_apcd, age_pharm, age_bsas, age_hocmoud, age_doc, age_pmp);
     age = put(age_raw, age_grps_five.);
 RUN;
@@ -712,7 +718,7 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE);
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -755,7 +761,7 @@ PROC SQL;
            TYPE_MOUD AS treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY month, year, treatment;
+    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD;
 
     CREATE TABLE stratif_moud_starts AS
     SELECT DATE_START_MONTH_MOUD AS month,
@@ -764,7 +770,7 @@ PROC SQL;
            FINAL_RE, FINAL_SEX, age,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age;
+    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE, FINAL_SEX, age;
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
