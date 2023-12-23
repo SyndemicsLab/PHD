@@ -62,7 +62,7 @@ PROC FORMAT;
 			'T40603A', 'T40603D', 'T40604A', 'T40604D', 
 			'T40691A', 'T40692A', 'T40693A', 'T40694A', 
 			'T40691D', 'T40692D', 'T40693D', 'T40694D', /* T codes */
-			'E8500', 'E8501', 'E8502', /* Principle Encodes */;
+			'E8500', 'E8501', 'E8502') /* Principle Encodes */;
 			
             
 %LET PROC = ('G2067', 'G2068', 'G2069', 'G2070', 
