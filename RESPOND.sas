@@ -628,8 +628,6 @@ RUN;
 /*==============================*/
 /*         MOUD Counts          */
 /*==============================*/
-<<<<<<< Updated upstream
-=======
 /* Age Demography Creation */
 PROC SQL;
     CREATE TABLE medical_age AS 
@@ -714,7 +712,6 @@ PROC SQL;
     CREATE TABLE age AS 
     SELECT DISTINCT * FROM age;
     
->>>>>>> Stashed changes
 PROC SQL;
     CREATE TABLE moud_demo AS
     SELECT MOUD.*, DEMO.FINAL_RE, DEMO.FINAL_SEX
@@ -722,11 +719,7 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
-<<<<<<< Updated upstream
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE);
-=======
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
->>>>>>> Stashed changes
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -764,11 +757,7 @@ PROC SQL;
            FINAL_RE, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-<<<<<<< Updated upstream
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX;
-=======
     GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
->>>>>>> Stashed changes
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
@@ -780,11 +769,7 @@ PROC SQL;
     SELECT year, month, treatment, FINAL_RE, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-<<<<<<< Updated upstream
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX;
-=======
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
->>>>>>> Stashed changes
 QUIT;
 
 PROC EXPORT
