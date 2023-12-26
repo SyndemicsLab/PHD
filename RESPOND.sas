@@ -628,6 +628,93 @@ RUN;
 /*==============================*/
 /*         MOUD Counts          */
 /*==============================*/
+<<<<<<< Updated upstream
+=======
+/* Age Demography Creation */
+PROC SQL;
+    CREATE TABLE medical_age AS 
+    SELECT ID, 
+           MED_AGE AS age_apcd, 
+           MED_ADM_DATE_MONTH AS month_apcd,
+           MED_ADM_DATE_YEAR AS year_apcd
+    FROM PHDAPCD.MEDICAL;
+
+    CREATE TABLE pharm_age AS
+    SELECT ID, 
+           PHARM_AGE AS age_pharm, 
+           PHARM_FILL_DATE_MONTH AS month_pharm, 
+           PHARM_FILL_DATE_YEAR AS year_pharm
+    FROM PHDAPCD.PHARMACY;
+
+    CREATE TABLE bsas_age AS
+    SELECT ID, 
+           AGE_BSAS AS age_bsas,
+           ENR_YEAR_BSAS AS year_bsas,
+           ENR_MONTH_BSAS AS month_bsas
+    FROM PHDBSAS.BSAS;
+
+    CREATE TABLE hocmoud_age AS 
+    SELECT ID,
+           enroll_age AS age_hocmoud,
+           enroll_year AS year_hocmoud,
+           enroll_month AS month_hocmoud
+    FROM PHDBSAS.HOCMOUD;
+    
+    CREATE TABLE doc_age AS
+    SELECT ID,
+           ADMIT_RECENT_AGE_DOC AS age_doc,
+           ADMIT_RECENT_MONTH_DOC AS month_doc,
+           ADMIT_RECENT_YEAR_DOC AS year_doc
+    FROM PHDDOC.DOC;
+
+    CREATE TABLE pmp_age AS 
+    SELECT ID,
+           AGE_PMP AS age_pmp,
+           DATE_FILLED_MONTH AS month_pmp,
+           DATE_FILLED_YEAR AS year_pmp
+    FROM PHDPMP.PMP; 
+
+    CREATE TABLE age AS
+    SELECT * FROM demographics_monthly
+    LEFT JOIN medical_age ON medical_age.ID = demographics_monthly.ID 
+                          AND medical_age.year_apcd = demographics_monthly.year
+                          AND medical_age.month_apcd = demographics_monthly.month
+    LEFT JOIN pharm_age ON pharm_age.ID = demographics_monthly.ID
+                          AND pharm_age.year_pharm = demographics_monthly.year
+                          AND pharm_age.month_pharm = demographics_monthly.month
+    LEFT JOIN bsas_age ON bsas_age.ID = demographics_monthly.ID
+                          AND bsas_age.year_bsas = demographics_monthly.year
+                          AND bsas_age.month_bsas = demographics_monthly.month
+    LEFT JOIN hocmoud_age ON hocmoud_age.ID = demographics_monthly.ID
+                          AND hocmoud_age.year_hocmoud = demographics_monthly.year
+                          AND hocmoud_age.month_hocmoud = demographics_monthly.month
+    LEFT JOIN doc_age ON doc_age.ID = demographics_monthly.ID
+                          AND doc_age.year_doc = demographics_monthly.year
+                          AND doc_age.month_doc = demographics_monthly.month
+    LEFT JOIN pmp_age ON pmp_age.ID = demographics_monthly.ID
+                          AND pmp_age.year_pmp = demographics_monthly.year
+                          AND pmp_age.month_pmp = demographics_monthly.month;      
+QUIT;
+
+DATA age (KEEP= ID age_grp_five year month);
+    SET age;
+    ARRAY age_flags {*} age_apcd age_pharm
+    					age_bsas age_hocmoud
+    					age_doc age_pmp;
+                        
+    DO i = 1 TO dim(age_flags);
+        IF missing(age_flags[i]) THEN age_flags[i] = 9999;
+    END;
+    
+    age_raw = min(age_apcd, age_pharm, age_bsas, age_hocmoud, age_doc, age_pmp);
+    age_grp_five = put(age_raw, age_grps_five.);
+RUN;
+
+PROC SQL;
+    CREATE TABLE age AS 
+    SELECT DISTINCT * FROM age;
+    
+>>>>>>> Stashed changes
 PROC SQL;
     CREATE TABLE moud_demo AS
     SELECT MOUD.*, DEMO.FINAL_RE, DEMO.FINAL_SEX
@@ -635,7 +722,11 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
+<<<<<<< Updated upstream
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE);
+=======
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
+>>>>>>> Stashed changes
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -673,7 +764,11 @@ PROC SQL;
            FINAL_RE, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
+<<<<<<< Updated upstream
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX;
+=======
+    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
+>>>>>>> Stashed changes
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
@@ -685,7 +780,11 @@ PROC SQL;
     SELECT year, month, treatment, FINAL_RE, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
+<<<<<<< Updated upstream
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX;
+=======
+    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
+>>>>>>> Stashed changes
 QUIT;
 
 PROC EXPORT
