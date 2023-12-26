@@ -719,6 +719,7 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
+
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
     SET moud_demo;
     treatment = TYPE_MOUD;
@@ -742,22 +743,37 @@ DATA moud_expanded;
 RUN;
 
 PROC SQL;
+    CREATE TABLE moud_demo AS 
+    SELECT * 
+    FROM moud_demo
+    LEFT JOIN age ON age.ID = moud_demo.ID 
+                  AND age.year = moud_demo.DATE_START_YEAR_MOUD 
+                  AND age.month = moud_demo.DATE_START_MONTH_MOUD;
+    
+    CREATE TABLE moud_expanded AS 
+    SELECT * 
+    FROM moud_expanded 
+    LEFT JOIN age ON age.ID = moud_expanded.ID 
+                  AND age.year = moud_expanded.year
+                  AND age.month = moud_expanded.month;
+                  
     CREATE TABLE moud_starts AS
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
            TYPE_MOUD AS treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY month, year, treatment;
+    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD;
 
     CREATE TABLE stratif_moud_starts AS
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
            TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX,
+           FINAL_RE, FINAL_SEX, age,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
     GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
+
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
@@ -766,7 +782,7 @@ PROC SQL;
     GROUP BY month, year, treatment;
 
     CREATE TABLE stratif_moud_counts AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX,
+    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
