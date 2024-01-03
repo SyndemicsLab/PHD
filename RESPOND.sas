@@ -62,7 +62,7 @@ PROC FORMAT;
 			'T40603A', 'T40603D', 'T40604A', 'T40604D', 
 			'T40691A', 'T40692A', 'T40693A', 'T40694A', 
 			'T40691D', 'T40692D', 'T40693D', 'T40694D', /* T codes */
-			'E8500', 'E8501', 'E8502', /* Principle Encodes */;
+			'E8500', 'E8501', 'E8502') /* Principle Encodes */;
 			
             
 %LET PROC = ('G2067', 'G2068', 'G2069', 'G2070', 
@@ -694,7 +694,7 @@ PROC SQL;
                           AND pmp_age.month_pmp = demographics_monthly.month;      
 QUIT;
 
-DATA age (KEEP= ID age year month);
+DATA age (KEEP= ID age_grp_five year month);
     SET age;
     ARRAY age_flags {*} age_apcd age_pharm
     					age_bsas age_hocmoud
@@ -705,7 +705,7 @@ DATA age (KEEP= ID age year month);
     END;
     
     age_raw = min(age_apcd, age_pharm, age_bsas, age_hocmoud, age_doc, age_pmp);
-    age = put(age_raw, age_grps_five.);
+    age_grp_five = put(age_raw, age_grps_five.);
 RUN;
 
 PROC SQL;
@@ -719,7 +719,8 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age);
+
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -771,7 +772,8 @@ PROC SQL;
            FINAL_RE, FINAL_SEX, age,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE, FINAL_SEX, age;
+    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
+
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
@@ -783,7 +785,7 @@ PROC SQL;
     SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age;
+    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
 QUIT;
 
 PROC EXPORT
