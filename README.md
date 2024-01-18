@@ -12,18 +12,10 @@ The PHD has four structural cornerstones to support itself:
 ## Utilizing the PHD
 The PHD has several evolving tools to aid researchings in their collaboration and exploration of the database. This involves the PHD Technical Documentation, including attribution to data set sources, brief descriptions of their available datasets, and data dictionaries for exploring column level specifics of each data set. Also included are the PHD Synthetic Datasets: [PHD Techincal Documentation](https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation)
 On a weekly basis, the PHD will also send out updates to variable changes or database additions.
-# The PHD-RESPOND Project
-The purpose of MA DPH's PHDW integration with the RESPOND model is the provide raw data for use in estimation of model parameters, and parameter tuning through providing outcome targets. This documentation and the RESPOND project are kept up through [Boston Medical Center's Syndemics Lab](https://www.syndemicslab.org/)
-RESPOND relies primarily on four unique scripts, and uses information derived from a fifth:
-1. *RESPOND*: Develops the Opioid Use Disorder (OUD) cohort by looking through APCD, Casemix, Death, Matris, PMP, and BSAS. This script forms the basis for other scripts when involving the 'OUD Cohort.' The second part of the script Utilizes the PHD created MOUD Spine dataset to determine how many people are starting, or in, either methadone, buprenorphine, and/or naltrexone treatments.
-3. *DeathCount*: Creates counts of fatal overdoses and aids in output parameter tuning of RESPOND
-4. *Incarcerations*: Creates the count of Incarcerated people with OUD - Because incarceration status indicates non-existence elsewhere in the data, if someone is tagged as 'OUD' prior to their incarceration duration, the 'OUD' status is forwarded through incarceration period and counted as such.
-5. *ICDFreq*: While not a necesary script, this allows us to gather information about what ICD codes are 'hit' given their frequencies respective to our question of gathering people with OUD.
-# In the Repo
-Within this Repo there are scripts that have been approved through the PHD by their internal Data Brief process. Output naming conventions for data are *_Ten* or *_Five* indicate age bins, *Monthly* indicates that the counting method is by month rather than year. These scripts output:
-1. *RESPOND* OUDCount; OUDCount_Stratif; OUDCountMonthly; OUDCountMonthly_Stratif; OUDOrigin; OUDOrigin_Stratif; MOUDCounts; MOUDCounts_Stratif; MOUDStarts; MOUDStarts_Stratif
-2. *DeathCount* DeathCount_Ten; DeathCount_Five; DeathCountMonthly
-3. *Incarcerations*: IncarcerationsMonthly; Incarcerations_Ten; Incarcerations_Five
-6. *ICDFreq*: ICDFreq
+# The PHD-PreVenT Project
+The purpose of MA DPH's PHDW integration with the PreVenT model is asses disparities in race/ethnicity and age the OUD care cascade for women of reproductive age in Massachusetts
+PreVenT relies primarily on these scripts:
+1. *RESPOND*: Develops the Opioid Use Disorder (OUD) cohort by looking through APCD, Casemix, Death, Matris, PMP, and BSAS. This script forms the basis for other scripts when involving the 'OUD Cohort.' The second part of the script Utilizes the PHD created MOUD Spine dataset to determine how many people are starting, or in, either methadone, buprenorphine, and/or naltrexone treatments. Up until this point, the script is the same as the RESPOND model scripts. The final portion of the script differs from the RESPOND model (or, rather, is in addition to) and uses APCD medical and pharmacy records to pull HCV testing and linkage data to define the cascade of care.
+2. *PHD_Infant_cascade*: Characterizes the HCV care cascade of infants born to mothers seropositive for HCV by looking through HCV, BIRTH_MOM, and BIRTH_INFANT datasets
 # More Documentation
 For full documentation on processes and logic within these scripts, please see either https://ryan-odea.shinyapps.io/PHD-Documentation/, which is the hosted version of https://github.com/SyndemicsLab/PHD-Documentation. 
