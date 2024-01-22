@@ -115,10 +115,9 @@ PROC SQL;
     SELECT * FROM demographics, years;
 QUIT;
 
-/*=========APCD DATA=============
-Dataset name updated by EErdman from MOUD_MEDICALto  RE_MEDICAL_FILTERED to 1/12/24 */
+/*=========APCD DATA=============*/
 DATA apcd (KEEP= ID oud_apcd year_apcd age_apcd month_apcd);
-    SET PHDAPCD.RE_MEDICAL_FILTERED (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE
+    SET PHDAPCD.MOUD_MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE
 								MED_ICD_PROC1-MED_ICD_PROC7
 								MED_ICD1-MED_ICD25
 								MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
@@ -144,9 +143,8 @@ DATA apcd (KEEP= ID oud_apcd year_apcd age_apcd month_apcd);
     month_apcd = MED_FROM_DATE_MONTH;
 RUN;
 
-/*Dataset name updated by EErdman from MOUD_PHARM to  RE_PHARM_FILTERED to 1/12/24 */
 DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID age_pharm);
-    SET PHDAPCD.RE_PHARM_FILTERED(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH PHARM_AGE
+    SET PHDAPCD.MOUD_PHARM(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH PHARM_AGE
                                PHARM_FILL_DATE_YEAR PHARM_ICD ID);
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
@@ -587,7 +585,7 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
