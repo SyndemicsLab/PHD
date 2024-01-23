@@ -585,7 +585,7 @@ PROC SQL;
     LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
 QUIT;
 
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE);
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -621,7 +621,19 @@ PROC SQL;
     LEFT JOIN age ON age.ID = moud_expanded.ID 
                   AND age.year = moud_expanded.year
                   AND age.month = moud_expanded.month;
-                  
+ QUIT;
+
+DATA moud_demo;
+    SET moud_demo;
+    WHERE FINAL_SEX = 2 and age_grp_five ne ' ' and age_grp_five ne '999';
+RUN;
+
+DATA moud_expanded;
+    SET moud_expanded;
+    WHERE FINAL_SEX = 2 and age_grp_five ne ' ' and age_grp_five ne '999';
+RUN;
+
+PROC SQL;                  
     CREATE TABLE moud_starts AS
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
@@ -634,7 +646,7 @@ PROC SQL;
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
            TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_five,
+           FINAL_SEX, age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
     GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, age_grp_five;
@@ -643,7 +655,7 @@ PROC SQL;
     SELECT DATE_START_MONTH_MOUD AS month,
            DATE_START_YEAR_MOUD AS year,
            TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_five,
+           FINAL_SEX, FINAL_RE,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
     GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE;
@@ -655,13 +667,13 @@ PROC SQL;
     GROUP BY month, year, treatment;
 
     CREATE TABLE stratif_moud_counts_age AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_five,
+    SELECT year, month, treatment, FINAL_SEX, age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment, age_grp_five;
 
     CREATE TABLE stratif_moud_counts_RE AS
-    SELECT year, month, treatment, FINAL_RE, age_grp_five,
+    SELECT year, month, treatment, FINAL_SEX, FINAL_RE,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment, FINAL_RE;
@@ -808,7 +820,7 @@ PROC SORT data=ab1;
 RUN;
 
 /* Transpose for long table */
-PROC TRANSPOSE data=ab1 out=ab_wide (KEEP = ID AB_TEST_DATE_1-AB_TEST_DATE_54);
+PROC TRANSPOSE data=ab1 out=ab_wide (KEEP = ID AB_TEST_DATE:) PREFIX=AB_TEST_DATE_;
 BY ID;
 VAR MED_FROM_DATE;
 RUN;
@@ -846,7 +858,7 @@ PROC SORT data=rna;
   by ID MED_FROM_DATE;
 RUN;
 
-PROC TRANSPOSE data=rna out=rna_wide (KEEP = ID RNA_TEST_DATE_1-RNA_TEST_DATE_57);
+PROC TRANSPOSE data=rna out=rna_wide (KEEP = ID RNA_TEST_DATE:) PREFIX=RNA_TEST_DATE_;
 BY ID;
 VAR MED_FROM_DATE;
 RUN;
@@ -866,7 +878,7 @@ PROC SORT data=geno;
   by ID MED_FROM_DATE;
 RUN;
 
-PROC TRANSPOSE data=geno out=geno_wide (KEEP = ID GENO_TEST_DATE_1-GENO_TEST_DATE_23);
+PROC TRANSPOSE data=geno out=geno_wide (KEEP = ID GENO_TEST_DATE:) PREFIX=GENO_TEST_DATE_;
 BY ID;
 VAR MED_FROM_DATE;
 RUN;
