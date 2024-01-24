@@ -76,10 +76,15 @@ PROC FORMAT;
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
 PROC SQL;
-    CREATE TABLE bupndc AS
+    CREATE TABLE ndc AS
     SELECT DISTINCT NDC 
     FROM PHDPMP.PMP
     WHERE BUP_CAT_PMP = 1;
+QUIT;
+
+PROC SQL noprint;
+    SELECT quote(trim(ndc), "'") into :BUP_NDC separated by ','
+    FROM ndc;
 QUIT;
             
 /*===============================*/            
@@ -289,20 +294,18 @@ DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
                         OO_PRINCIPALEXTERNAL_CAUSECODE
                     WHERE= (OO_ADMIT_YEAR IN &year));
 	cnt_oud_oo = 0;
-ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 
+    ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 
                     OO_PROC1-OO_PROC4
                     OO_CPT1-OO_CPT10
                     OO_PRINCIPALEXTERNAL_CAUSECODE;
 
     DO k = 1 TO dim(vars2);
-        IF SUBSTR(VNAME(vars2[k]), 1, 8) = 'OO_PROC'
-        THEN IF vars2[k] IN &PROC
-             THEN cnt_oud_oo = cnt_oud_oo + 1;
-        ELSE
-             IF vars2[k] IN &ICD
-             THEN cnt_oud_oo = cnt_oud_oo + 1;
+        IF SUBSTR(VNAME(vars2[k]), 1) = 'OO_PROC' THEN 
+            IF vars2[k] IN &PROC THEN 
+               cnt_oud_oo = cnt_oud_oo + 1;
+            ELSE IF vars2[k] IN &ICD THEN 
+               cnt_oud_oo = cnt_oud_oo + 1;
     END;
-
     DROP k;
 
     IF cnt_oud_oo > 0 THEN oud_oo = 1;
