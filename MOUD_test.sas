@@ -1,6 +1,7 @@
 %LET MOUD_leniency = 7;
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
+%LET year = (2015:2021);
 
 PROC FORMAT;
 	VALUE age_grps_five
@@ -16,7 +17,20 @@ PROC FORMAT;
 		91-95 = '19' 96-998 = '20'
 		999 = '999';
 
+DATA demographics;
+    SET PHDSPINE.DEMO (KEEP= ID FINAL_RE FINAL_SEX);
+RUN;
+        
+%let start_year=%scan(%substr(&year,2,%length(&year)-2),1,':');
+%let end_year=%scan(%substr(&year,2,%length(&year)-2),2,':');
+        
+DATA months; DO month = 1 to 12; OUTPUT; END; RUN;
+DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
+
 PROC SQL;
+    CREATE TABLE demographics_monthly AS
+    SELECT * FROM demographics, months, years;
+
     CREATE TABLE medical_age AS 
     SELECT ID, 
            MED_AGE AS age_apcd, 
