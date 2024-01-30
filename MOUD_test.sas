@@ -58,14 +58,14 @@ PROC SQL;
            enroll_year AS year_hocmoud,
            enroll_month AS month_hocmoud
     FROM PHDBSAS.HOCMOUD;
-    
+
     CREATE TABLE doc_age AS
     SELECT ID,
            ADMIT_RECENT_AGE_DOC AS age_doc,
            ADMIT_RECENT_MONTH_DOC AS month_doc,
            ADMIT_RECENT_YEAR_DOC AS year_doc
     FROM PHDDOC.DOC;
-
+    
     CREATE TABLE pmp_age AS 
     SELECT ID,
            AGE_PMP AS age_pmp,
@@ -133,49 +133,55 @@ RUN;
 
 DATA moud_demo;
     SET moud_demo;
-    BY ID;
+    by ID;
+    retain episode_num;
 
-    RETAIN start_date start_month start_year
-    	   end_date end_month end_year  
-    	   TYPE_MOUD lag_end;
+    lag_date = lag(DATE_END_MOUD);
+    IF FIRST.ID THEN lag_date = .;
+    IF FIRST.ID THEN episode_num = 1;
+    
+    diff = DATE_START_MOUD - lag_date;
+    
+    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
+    IF flag = 1 THEN episode_num = episode_num + 1;
 
-    IF first.ID THEN DO;
-        start_date = DATE_START_MOUD;
+    episode_id = catx("_", ID, episode_num);
+RUN;
+
+PROC SORT data=moud_demo; 
+    BY episode_id;
+RUN;
+
+DATA moud_demo; 
+    SET moud_demo;
+
+    by episode_id;
+    retain DATE_START_MOUD;
+
+    IF FIRST.episode_id THEN DO;
         start_month = DATE_START_MONTH_MOUD;
         start_year = DATE_START_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
+        start_date = DATE_START_MOUD;
+    END;
+    IF LAST.episode_id THEN DO;
         end_month = DATE_END_MONTH_MOUD;
         end_year = DATE_END_YEAR_MOUD;
-        lag_end = .;
-        treatment = TYPE_MOUD;
+        end_date = DATE_END_MOUD;
     END;
-    ELSE DO;
-        diff = DATE_START_MOUD - lag_end;
-
-        IF diff <= &MOUD_leniency THEN DO;
-            end_date = DATE_END_MOUD;
-            end_month = DATE_END_MONTH_MOUD;
-            end_year = DATE_END_YEAR_MOUD;
-        END;
-        ELSE DO;
-            OUTPUT;
-            start_date = DATE_START_MOUD;
-            start_month = DATE_START_MONTH_MOUD;
-            start_year = DATE_START_YEAR_MOUD;
-            end_date = DATE_END_MOUD;
-            end_month = DATE_END_MONTH_MOUD;
-            end_year = DATE_END_YEAR_MOUD;
-        END;
-    END;
-
-    lag_end = DATE_END_MOUD;
-
-    IF last.ID THEN OUTPUT;
-
-    KEEP ID start_date start_month start_year
-            end_date end_month end_year  
-            TYPE_MOUD FINAL_RE FINAL_SEX;
+        
+   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
 RUN;
+
+PROC SORT data=moud_demo (KEEP= start_date start_month start_year
+					  			end_date end_month end_year 
+					  			ID FINAL_RE FINAL_SEX TYPE_MOUD);
+    BY ID;
+RUN;
+
+PROC SQL;
+ CREATE TABLE moud_demo 
+ AS SELECT DISTINCT * FROM moud_demo;
+QUIT;
 
 DATA moud_demo;
     SET moud_demo;
@@ -183,7 +189,8 @@ DATA moud_demo;
 	
 	IF end_date - start_date < &MOUD_leniency THEN DELETE;
 	
-    diff = start_date- lag(end_date);
+	IF FIRST.ID THEN diff = .; 
+	ELSE diff = start_date - lag(end_date);
     IF end_date > lag(end_date) THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
@@ -193,14 +200,6 @@ DATA moud_demo;
 
     IF flag_mim = 1 THEN DELETE;
 RUN;
-
-PROC SQL;
-	CREATE TABLE moud_demo AS
-	SELECT DISTINCT * FROM moud_demo
-	LEFT JOIN age ON age.ID = moud_demo.ID AND 
-					 age.month = moud_demo.start_month AND 
-					 age.year = moud_demo.start_year;
-QUIT;
 
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
     SET moud_demo;
@@ -218,6 +217,14 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       OUTPUT;
     END;
 RUN;
+
+PROC SQL;
+	CREATE TABLE moud_demo AS
+	SELECT DISTINCT * FROM moud_demo
+	LEFT JOIN age ON age.ID = moud_demo.ID AND 
+					 age.month = moud_demo.start_month AND 
+					 age.year = moud_demo.start_year;
+QUIT;
 
 DATA moud_expanded;
 	SET moud_expanded;
@@ -251,11 +258,10 @@ PROC SQL;
     SELECT start_month AS month,
            start_year AS year,
            TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age,
+           FINAL_RE, FINAL_SEX, age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
     GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
-
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
@@ -264,7 +270,7 @@ PROC SQL;
     GROUP BY month, year, treatment;
 
     CREATE TABLE stratif_moud_counts AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age,
+    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
