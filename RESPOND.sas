@@ -292,7 +292,7 @@ RUN;
 
 /* OO */
 DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
-    SET PHD.CASEMIX_OO_PHD_SYN2 (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
+    SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
                         OO_ADMIT_YEAR OO_ADMIT_MONTH OO_AGE
                         OO_CPT1-OO_CPT10
                         OO_PRINCIPALEXTERNAL_CAUSECODE
@@ -1029,21 +1029,29 @@ PROC CONTENTS data=OUD_HCV_DAA;
 title "Contents of Final Dataset";
 run;
 
-DATA TESTING; SET OUD_HCV_DAA;
+DATA TESTING; 
+SET OUD_HCV_DAA;
 	EOT_RNA_TEST = 0;
 	SVR12_RNA_TEST = 0;
 	IF RNA_TEST_DATE_1 = .  THEN DELETE;
 	IF FIRST_DAA_DATE = .  THEN DELETE;
-	ARRAY test_date_array {57} RNA_TEST_DATE_1-RNA_TEST_DATE_57;
-	ARRAY time_since_array {57} time_since_last_daa1 - time_since_last_daa57;
-		do i = 1 to 57;
-		time_since_array{i} = test_date_array{i} - FIRST_DAA_DATE;
-	    IF time_since_array{i} > 84   THEN EOT_RNA_TEST = 1;
-        IF time_since_array{i} >= 140 THEN SVR12_RNA_TEST = 1;
-		end;
-	DROP i;
-run;
 
+	/* Determine the number of variables dynamically */
+    array test_date_array (*) RNA_TEST_DATE_:;
+    num_tests = dim(test_date_array);
+
+    /* Loop through the determined number of variables */
+    do i = 1 to num_tests;
+        if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
+            time_since = test_date_array{i} - FIRST_DAA_DATE;
+
+            if time_since > 84 then EOT_RNA_TEST = 1;
+            if time_since >= 140 then SVR12_RNA_TEST = 1;
+        end;
+    end;
+
+    DROP i time_since;
+RUN;
 
 /*====================*/
 /*  FREQUENCY TABLES */

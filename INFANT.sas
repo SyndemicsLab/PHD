@@ -403,46 +403,59 @@ DATA INFANT_TESTING;
 Proc sort data=INFANT_TESTING; by INFANT_ID; run; *actually, not sure the sort, by statement or retains are needed bc there's only one row per infant, right?;
 
 DATA INFANT_TESTING;
-	SET INFANT_TESTING;
+    SET INFANT_TESTING;
     by INFANT_ID;
-    array RNA_TEST_DATE_ (57) RNA_TEST_DATE_1-RNA_TEST_DATE_57;
-    array AB_TEST_DATE_ (57) AB_TEST_DATE_1-AB_TEST_DATE_57;
+
+    /* Determine the number of variables dynamically */
+    array RNA_TESTS (*) RNA_TEST_DATE_:;
+    array AB_TESTS (*) AB_TEST_DATE_:;
+    num_rna_tests = dim(RNA_TESTS);
+    num_ab_tests = dim(AB_TESTS);
+
+    /* Retain statement */
     retain APPROPRIATE_AB_Testing APPROPRIATE_RNA_Testing APPROPRIATE_Testing 
            AGE_AT_FIRST_TEST AGE_AT_FIRST_AB_TEST AGE_AT_FIRST_RNA_TEST;
-	
-    /* APPRORIATE TESTING */
 
-    IF first.INFANT_ID then do; 
-            APPROPRIATE_AB_Testing = 0 ; APPROPRIATE_RNA_Testing = 0;
-            APPROPRIATE_Testing = 0 ; AGE_AT_FIRST_TEST = . ; AGE_AT_FIRST_AB_TEST = . ; AGE_AT_FIRST_RNA_TEST = .;
-            AGE_YRS_AT_FIRST_AB_TEST = .; AGE_YRS_AT_FIRST_RNA_TEST= . ; 
-            end;
+    /* Initialize variables at the start of each group */
+    IF first.INFANT_ID THEN DO;
+        APPROPRIATE_AB_Testing = 0; APPROPRIATE_RNA_Testing = 0;
+        APPROPRIATE_Testing = 0; AGE_AT_FIRST_TEST = .; AGE_AT_FIRST_AB_TEST = .; AGE_AT_FIRST_RNA_TEST = .;
+    END;
 
-    Do i=1 to 57;
-        if AGE_AT_FIRST_RNA_TEST = . and RNA_TEST_DATE_(i) ne . then AGE_AT_FIRST_RNA_TEST = floor((RNA_TEST_DATE_(i) - DOB_INFANT_TBL)/30.4);   
-        if AGE_AT_FIRST_AB_TEST = . and AB_TEST_DATE_(i) ne . then AGE_AT_FIRST_AB_TEST = floor((AB_TEST_DATE_(i) - DOB_INFANT_TBL)/30.4);
-		IF (RNA_TEST_DATE_(i) - DOB_INFANT_TBL) > 60 then do; 
-            APPROPRIATE_RNA_Testing = 1; * Had an RNA test at >=2mo of age;   
-        end;
-        IF (AB_TEST_DATE_(i) - DOB_INFANT_TBL) > 547 then do; 
-            APPROPRIATE_AB_Testing = 1;  * Had an Ab test at >=18mo of age;
-        end;
-    end;
+    /* Loop through the determined number of variables for RNA tests */
+    DO i=1 TO num_rna_tests;
+        IF AGE_AT_FIRST_RNA_TEST = . AND RNA_TESTS(i) NE . THEN
+            AGE_AT_FIRST_RNA_TEST = FLOOR((RNA_TESTS(i) - DOB_INFANT_TBL)/30.4);
+        IF (RNA_TESTS(i) - DOB_INFANT_TBL) > 60 THEN
+            APPROPRIATE_RNA_Testing = 1; /* Had an RNA test at >=2mo of age; */
+    END;
 
-    IF APPROPRIATE_AB_Testing = 1 or APPROPRIATE_RNA_Testing = 1 then APPROPRIATE_Testing = 1; 
-    
-    IF AGE_AT_FIRST_AB_TEST ne . and AGE_AT_FIRST_RNA_TEST ne . then
-             AGE_AT_FIRST_TEST = min(AGE_AT_FIRST_AB_TEST, AGE_AT_FIRST_RNA_TEST); *only if niether are missing;
-    ELSE if AGE_AT_FIRST_AB_TEST ne . then AGE_AT_FIRST_TEST = AGE_AT_FIRST_AB_TEST;
-    ELSE if AGE_AT_FIRST_RNA_TEST ne . then AGE_AT_FIRST_TEST = AGE_AT_FIRST_RNA_TEST;
+    /* Loop through the determined number of variables for AB tests */
+    DO i=1 TO num_ab_tests;
+        IF AGE_AT_FIRST_AB_TEST = . AND AB_TESTS(i) NE . THEN
+            AGE_AT_FIRST_AB_TEST = FLOOR((AB_TESTS(i) - DOB_INFANT_TBL)/30.4);
+        IF (AB_TESTS(i) - DOB_INFANT_TBL) > 547 THEN
+            APPROPRIATE_AB_Testing = 1; /* Had an Ab test at >=18mo of age; */
+    END;
 
-  *format the ages at first tests to reduce suppression but keep precision -- ie convert to age in yrs if >2.5-3yrs bc that's where suppression starts;
+    /* Determine if any appropriate testing occurred */
+    IF APPROPRIATE_AB_Testing = 1 OR APPROPRIATE_RNA_Testing = 1 THEN
+        APPROPRIATE_Testing = 1;
 
-    if AGE_AT_FIRST_AB_TEST > 30 then AGE_YRS_AT_FIRST_AB_TEST = floor(AGE_AT_FIRST_AB_TEST/12);
-    if AGE_AT_FIRST_RNA_TEST > 18 then AGE_YRS_AT_FIRST_RNA_TEST = floor(AGE_AT_FIRST_RNA_TEST/12);
-	If AGE_AT_FIRST_TEST > 30 then AGE_YRS_AT_FIRST_TEST = floor(AGE_AT_FIRST_TEST/12);
-  
-run; 
+    /* Determine the minimum age at first test */
+    IF AGE_AT_FIRST_AB_TEST NE . AND AGE_AT_FIRST_RNA_TEST NE . THEN
+        AGE_AT_FIRST_TEST = MIN(AGE_AT_FIRST_AB_TEST, AGE_AT_FIRST_RNA_TEST);
+    ELSE IF AGE_AT_FIRST_AB_TEST NE . THEN
+        AGE_AT_FIRST_TEST = AGE_AT_FIRST_AB_TEST;
+    ELSE IF AGE_AT_FIRST_RNA_TEST NE . THEN
+        AGE_AT_FIRST_TEST = AGE_AT_FIRST_RNA_TEST;
+
+    /* Format the ages at first tests to reduce suppression */
+    IF AGE_AT_FIRST_AB_TEST > 30 THEN AGE_YRS_AT_FIRST_AB_TEST = FLOOR(AGE_AT_FIRST_AB_TEST/12);
+    IF AGE_AT_FIRST_RNA_TEST > 18 THEN AGE_YRS_AT_FIRST_RNA_TEST = FLOOR(AGE_AT_FIRST_RNA_TEST/12);
+    IF AGE_AT_FIRST_TEST > 30 THEN AGE_YRS_AT_FIRST_TEST = FLOOR(AGE_AT_FIRST_TEST/12);
+
+RUN;
 
 /* ========================================================== */
 /*                   HCV STATUS FROM MAVEN                    */
@@ -568,22 +581,29 @@ run;
 		 */
 
 
-DATA TESTING; SET INFANT_DAA;
-	EOT_RNA_TEST = 0;
-	SVR12_RNA_TEST = 0;
-	*IF RNA_TEST_DATE_1 = . THEN DELETE;
-	*IF FIRST_DAA_DATE = . THEN DELETE;
-	ARRAY test_date_array {57} RNA_TEST_DATE_1-RNA_TEST_DATE_57;
-	ARRAY time_since_array {57} time_since_last_daa1 - time_since_last_daa57; 
-		do i = 1 to 57;
-		if TEST_DATE_ARRAY{i}>0 and FIRST_DAA_DATE>0 then
-		time_since_array{i} = test_date_array{i} - FIRST_DAA_DATE;
-		else Time_since_array{i}=.;
-	    IF time_since_array{i} > 84   THEN EOT_RNA_TEST = 1;
-        IF time_since_array{i} >= 140 THEN SVR12_RNA_TEST = 1;
-		end;
-	DROP i;
-run;
+DATA TESTING;
+    SET INFANT_DAA;
+    EOT_RNA_TEST = 0;
+    SVR12_RNA_TEST = 0;
+    *IF RNA_TEST_DATE_1 = "." THEN DELETE;
+    *IF FIRST_DAA_DATE = "." THEN DELETE;
+
+    /* Determine the number of variables dynamically */
+    array test_date_array (*) RNA_TEST_DATE_:;
+    num_tests = dim(test_date_array);
+
+    /* Loop through the determined number of variables */
+    do i = 1 to num_tests;
+        if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
+            time_since = test_date_array{i} - FIRST_DAA_DATE;
+
+            if time_since > 84 then EOT_RNA_TEST = 1;
+            if time_since >= 140 then SVR12_RNA_TEST = 1;
+        end;
+    end;
+
+    DROP i time_since;
+RUN;
 
 /* ========================================================== */
 /*                       CASCADE TABLES                           */
@@ -630,6 +650,8 @@ Ab is lost. Therefore cohort for testing = born 2014-2019 */
 
 /* Newly in July 2023, excluding those diagnosed at age >=3 or only probable status because they are 
 not technically perinatal cases */
+
+ods html file='/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/all_tables_output.html' style=meadow;
 
 /* Table 1 */
 proc freq data=TESTING;
@@ -748,7 +770,7 @@ proc print data=Table8; run;
 
 /* Table 9 */
 proc freq data=PHDBIRTH.BIRTH_INFANT;
-TITLE "Total Number of Infants Born by YEAR, , 2014-2021";
+TITLE "Total Number of Infants Born by YEAR, 2014-2021";
 TABLE YEAR_BIRTH / out=Table9 nocol nopercent norow;
 run;
 
@@ -827,22 +849,30 @@ PROC SQL;
     LEFT JOIN demographics ON demographics.ID = DAA15.ID;
 QUIT;
 
-DATA TRT_TESTING15; SET DAA15; *RE changed the dataset being set here from testing15 to daa15 so has the daainfo on 8/3;
-	EOT_RNA_TEST = 0;
-	SVR12_RNA_TEST = 0;
-	*IF RNA_TEST_DATE_1 = . THEN DELETE;
-	*IF FIRST_DAA_DATE = . THEN DELETE; 
-	ARRAY test_date_array {57} RNA_TEST_DATE_1-RNA_TEST_DATE_57;
-	ARRAY time_since_array {57} time_since_last_daa1 - time_since_last_daa57;
-		do i = 1 to 57;
-		if test_date_array{i}>0 and FIRST_DAA_DATE>0 then 
-		    time_since_array{i} = test_date_array{i} - FIRST_DAA_DATE;
-		else Time_since_array{i}=.; *added this else back in 8/1/23 RE;
-	    IF time_since_array{i} > 84   THEN EOT_RNA_TEST = 1; 
-        IF time_since_array{i} >= 140 THEN SVR12_RNA_TEST = 1; *removed the else =0 here bc if missing a later rna it'll get set back to zero i think;
-		end;
-	DROP i;
-run;
+DATA TRT_TESTING15;
+    SET DAA15;
+    EOT_RNA_TEST = 0;
+    SVR12_RNA_TEST = 0;
+    *IF RNA_TEST_DATE_1 = "." THEN DELETE;
+    *IF FIRST_DAA_DATE = "." THEN DELETE;
+
+    /* Determine the number of variables dynamically */
+    array test_date_array (*) RNA_TEST_DATE_:;
+    num_tests = dim(test_date_array);
+
+    /* Loop through the determined number of variables */
+    do i = 1 to num_tests;
+            if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
+                time_since = test_date_array{i} - FIRST_DAA_DATE;
+
+                if time_since > 84 then EOT_RNA_TEST = 1;
+                if time_since >= 140 then SVR12_RNA_TEST = 1;
+            end;
+            else time_since = .; /* Added this else back in 8/1/23 RE */
+        end;
+
+    DROP i time_since;
+RUN;
 
 /*=================================	*/
 /*        <=15 Year Old   TABLES    */
@@ -950,3 +980,5 @@ FORMAT final_re racefmt_comb.;
 run;
 
 proc print data=Table19; run;
+
+ods html close;
