@@ -16,6 +16,7 @@ run ;
 /*  	GLOBAL VARIABLES   	 */
 /*==============================*/
 %LET year = (2015:2021);
+%LET MOUD_leniency = 7;
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
@@ -496,6 +497,10 @@ QUIT;
 
 /* Age Demography Creation */
 PROC SQL;
+    CREATE TABLE demographics_monthly AS
+    SELECT * FROM demographics, months, years;
+
+PROC SQL;
     CREATE TABLE medical_age AS 
     SELECT ID, 
            MED_AGE AS age_apcd, 
@@ -574,16 +579,97 @@ DATA age (KEEP= ID age_grp_five year month);
     age_grp_five = put(age_raw, age_grps_five.);
 RUN;
 
+DATA moud;
+    SET PHDSPINE.MOUD;
+RUN;
+
+PROC SORT data=moud;
+    by ID DATE_START_MOUD;
+RUN;
+
 PROC SQL;
-    CREATE TABLE age AS 
+	CREATE TABLE age AS 
     SELECT DISTINCT * FROM age;
     
-PROC SQL;
     CREATE TABLE moud_demo AS
-    SELECT MOUD.*, DEMO.FINAL_RE, DEMO.FINAL_SEX
-    FROM PHDSPINE.MOUD
-    LEFT JOIN PHDSPINE.DEMO ON MOUD.ID = DEMO.ID;
+    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX
+    FROM moud
+    LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
 QUIT;
+
+PROC SORT DATA=moud_demo;
+    by ID DATE_START_MOUD TYPE_MOUD;
+RUN;
+
+DATA moud_demo;
+    SET moud_demo;
+    by ID;
+    retain episode_num;
+
+    lag_date = lag(DATE_END_MOUD);
+    IF FIRST.ID THEN lag_date = .;
+    IF FIRST.ID THEN episode_num = 1;
+    
+    diff = DATE_START_MOUD - lag_date;
+    
+    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
+    IF flag = 1 THEN episode_num = episode_num + 1;
+
+    episode_id = catx("_", ID, episode_num);
+RUN;
+
+PROC SORT data=moud_demo; 
+    BY episode_id;
+RUN;
+
+DATA moud_demo; 
+    SET moud_demo;
+
+    by episode_id;
+    retain DATE_START_MOUD;
+
+    IF FIRST.episode_id THEN DO;
+        start_month = DATE_START_MONTH_MOUD;
+        start_year = DATE_START_YEAR_MOUD;
+        start_date = DATE_START_MOUD;
+    END;
+    IF LAST.episode_id THEN DO;
+        end_month = DATE_END_MONTH_MOUD;
+        end_year = DATE_END_YEAR_MOUD;
+        end_date = DATE_END_MOUD;
+    END;
+        
+   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+RUN;
+
+PROC SORT data=moud_demo (KEEP= start_date start_month start_year
+					  			end_date end_month end_year 
+					  			ID FINAL_RE FINAL_SEX TYPE_MOUD);
+    BY ID;
+RUN;
+
+PROC SQL;
+ CREATE TABLE moud_demo 
+ AS SELECT DISTINCT * FROM moud_demo;
+QUIT;
+
+DATA moud_demo;
+    SET moud_demo;
+    BY ID;
+	
+	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+	
+	IF FIRST.ID THEN diff = .; 
+	ELSE diff = start_date - lag(end_date);
+    IF end_date > lag(end_date) THEN temp_flag = 1;
+    ELSE temp_flag = 0;
+
+    IF first.ID THEN flag_mim = 0;
+    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
+    ELSE flag_mim = 0;
+
+    IF flag_mim = 1 THEN DELETE;
+RUN;
 
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
     SET moud_demo;
@@ -591,16 +677,24 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
 
     FORMAT year 4. month 2.;
     
-    num_months = intck('month', input(put(DATE_START_YEAR_MOUD, 4.) || put(DATE_START_MONTH_MOUD, z2.), yymmn6.), 
-                       input(put(DATE_END_YEAR_MOUD, 4.) || put(DATE_END_MONTH_MOUD, z2.), yymmn6.));
+    num_months = intck('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), 
+                       input(put(end_year, 4.) || put(end_month, z2.), yymmn6.));
 
     DO i = 0 to num_months;
-      new_date = intnx('month', input(put(DATE_START_YEAR_MOUD, 4.) || put(DATE_START_MONTH_MOUD, z2.), yymmn6.), i);
+      new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
       year = year(new_date);
       month = month(new_date);
       OUTPUT;
     END;
 RUN;
+
+PROC SQL;
+	CREATE TABLE moud_demo AS
+	SELECT DISTINCT * FROM moud_demo
+	LEFT JOIN age ON age.ID = moud_demo.ID AND 
+					 age.month = moud_demo.start_month AND 
+					 age.year = moud_demo.start_year;
+QUIT;
 
 DATA moud_expanded;
 	SET moud_expanded;
@@ -612,8 +706,8 @@ PROC SQL;
     SELECT * 
     FROM moud_demo
     LEFT JOIN age ON age.ID = moud_demo.ID 
-                  AND age.year = moud_demo.DATE_START_YEAR_MOUD 
-                  AND age.month = moud_demo.DATE_START_MONTH_MOUD;
+                  AND age.year = moud_demo.start_year
+                  AND age.month = moud_demo.start_month;
     
     CREATE TABLE moud_expanded AS 
     SELECT * 
@@ -621,7 +715,7 @@ PROC SQL;
     LEFT JOIN age ON age.ID = moud_expanded.ID 
                   AND age.year = moud_expanded.year
                   AND age.month = moud_expanded.month;
- QUIT;
+QUIT;
 
 DATA moud_demo;
     SET moud_demo;
@@ -633,33 +727,33 @@ DATA moud_expanded;
     WHERE FINAL_SEX = 2 and age_grp_five ne ' ' and age_grp_five ne '999';
 RUN;
 
-PROC SQL;                  
+PROC SQL;          
     CREATE TABLE moud_starts AS
-    SELECT DATE_START_MONTH_MOUD AS month,
-           DATE_START_YEAR_MOUD AS year,
+    SELECT start_month AS month,
+           start_year AS year,
            TYPE_MOUD AS treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD;
+    GROUP BY start_month, start_year, TYPE_MOUD;
 
     CREATE TABLE stratif_moud_starts_age AS
-    SELECT DATE_START_MONTH_MOUD AS month,
-           DATE_START_YEAR_MOUD AS year,
+    SELECT start_month AS month,
+           start_year AS year,
            TYPE_MOUD AS treatment,
            FINAL_SEX, age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, age_grp_five;
+    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_five;
 
     CREATE TABLE stratif_moud_starts_RE AS
-    SELECT DATE_START_MONTH_MOUD AS month,
-           DATE_START_YEAR_MOUD AS year,
+    SELECT start_month AS month,
+           start_year AS year,
            TYPE_MOUD AS treatment,
            FINAL_SEX, FINAL_RE,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY DATE_START_MONTH_MOUD, DATE_START_YEAR_MOUD, TYPE_MOUD, FINAL_RE;
-
+    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
+    
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
@@ -671,7 +765,7 @@ PROC SQL;
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment, age_grp_five;
-
+    
     CREATE TABLE stratif_moud_counts_RE AS
     SELECT year, month, treatment, FINAL_SEX, FINAL_RE,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
@@ -746,18 +840,6 @@ RUN;
 		'51167010001','51167010003','59676022507',
 		'59676022528','00085031402');
   
-proc sql;
-create table bupndcf as
-select distinct ndc
-from PHDPMP.PMP
-where BUP_CAT_PMP = 1;
-quit;
-
-proc sql noprint;
-select quote(trim(ndc),"'") into :BUP_NDC separated by ','
-from bupndcf;
-quit;
-
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
   /*============================*/
