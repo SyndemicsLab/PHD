@@ -1226,3 +1226,25 @@ proc freq data=INFANT_DAA_with_covariates; tables &var / missing; run;
 %Table1Stratafreqs (MOUD_DURING_PREG);
 %Table1Stratafreqs (MOUD_AT_DELIVERY);
 %Table1Stratafreqs (OUD_CAPTURE);
+
+%macro Table2Crude (var);
+proc logistic data=INFANT_DAA_with_covariates desc; 
+	class &var (param=ref);
+	model APPROPRIATE_Testing=&var;
+	run;
+%mend;
+
+%Table2Crude (FINAL_SEX);
+%Table2Crude (GESTATIONAL_AGE);
+%Table2Crude (FINAL_RE);
+%Table2Crude (FACILITY_ID_BIRTH);
+%Table2Crude (Res_Code_Birth);
+%Table2Crude (well_child);
+%Table2Crude (NAS_BC_TOTAL);
+%Table2Crude (HOMELESS_HISTORY);
+%Table2Crude (DISCH_WITH_MOM);
+%Table2Crude (INF_VAC_HBIG);
+%Table2Crude (HIV_DIAGNOSIS);
+%Table2Crude (MOUD_DURING_PREG);
+%Table2Crude (MOUD_AT_DELIVERY);
+%Table2Crude (OUD_CAPTURE);
