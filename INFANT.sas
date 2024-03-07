@@ -312,7 +312,8 @@ PROC SQL;
 /* INFANT_COHORT will be our primary cohort of interest */
 PROC SQL;
 CREATE TABLE INFANT_COHORT as
-SELECT DISTINCT INFANT_ID,
+SELECT DISTINCT MOM_ID,
+                INFANT_ID,
 				INFANT_YEAR_BIRTH,
 				MONTH_BIRTH,
 				DOB_INFANT_TBL,
@@ -554,6 +555,9 @@ DATA INFANT_TESTING;
     IF AGE_AT_FIRST_AB_TEST > 30 THEN AGE_YRS_AT_FIRST_AB_TEST = FLOOR(AGE_AT_FIRST_AB_TEST/12);
     IF AGE_AT_FIRST_RNA_TEST > 18 THEN AGE_YRS_AT_FIRST_RNA_TEST = FLOOR(AGE_AT_FIRST_RNA_TEST/12);
     IF AGE_AT_FIRST_TEST > 30 THEN AGE_YRS_AT_FIRST_TEST = FLOOR(AGE_AT_FIRST_TEST/12);
+
+    /* Drop the variable i */
+    DROP i;
 
 RUN;
 
@@ -1113,13 +1117,12 @@ RUN;
 /* Join to add covariates */
 
 proc sql;
-    create table INFANT_DAA_with_covariates as
+    create table FINAL_INFANT_COHORT as
     select INFANT_DAA.*, 
            demographics.FINAL_RE,
            demographics.APCD_anyclaim,
            demographics.NON_MA,
            demographics.SELF_FUNDED,
-           demographics.HOMELESS_HISTORY,
            birthsinfants.DISCH_WITH_MOM,
            birthsinfants.FACILITY_ID_BIRTH,
            birthsinfants.GESTATIONAL_AGE,
@@ -1127,7 +1130,6 @@ proc sql;
            birthsinfants.NAS_BC,
            birthsinfants.NAS_BC_NEW,
            birthsinfants.RES_ZIP_BIRTH,
-           birthsinfants.SEX_BIRTH,
            birthsinfants.Res_Code_Birth,
            case 
                when birthsinfants.NAS_BC = 1 or birthsinfants.NAS_BC_NEW = 1 then 1
@@ -1143,32 +1145,165 @@ proc sql;
       and demographics.NON_MA ne 1;
 quit;
 
+proc sql;
+    create table FINAL_INFANT_COHORT as
+    select FINAL_INFANT_COHORT.*,
+           demographics.FINAL_RE as MOMS_FINAL_RE, 
+           demographics.EVER_INCARCERATED,
+           demographics.FOREIGN_BORN,
+           demographics.HOMELESS_HISTORY,
+           birthsmoms.AGE_BIRTH,
+           birthsmoms.LD_PAY,
+           birthsmoms.KOTELCHUCK,
+           birthsmoms.prenat_site,
+           birthsmoms.LANGUAGE_SPOKEN,
+           birthsmoms.MATINF_HEPC,
+           birthsmoms.MATINF_HEPB,
+           birthsmoms.MOTHER_EDU,
+           hcv.EVER_IDU_HCV
+    from FINAL_INFANT_COHORT
+    left join PHDSPINE.DEMO as demographics
+    on FINAL_INFANT_COHORT.MOM_ID = demographics.ID 
+    left join PHDBIRTH.BIRTH_MOM as birthsmoms
+    on FINAL_INFANT_COHORT.MOM_ID = birthsmoms.ID
+    left join PHDHEPC.HCV as hcv
+    on FINAL_INFANT_COHORT.MOM_ID = hcv.ID;
+quit;
+
+%LET MENTAL_HEALTH = ('F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F28', 'F29',
+                      'F30', 'F31', 'F32', 'F33', 'F34', 'F39', 'F40', 'F41',
+                      'F42', 'F43', 'F44', 'F45', 'F48');
+
+proc sql;
+    create table FINAL_INFANT_COHORT as
+    select FINAL_INFANT_COHORT.*,
+           case
+               when apcd.MED_PROC_CODE in &MENTAL_HEALTH then 1
+               when substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
+               else 0
+           end as mental_health_diag
+    from FINAL_INFANT_COHORT
+    left join PHDAPCD.MOUD_MEDICAL as apcd
+    on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
+quit;
+
+%let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
+           '421', '4211', '4219', '4249*', 'A382', 'B376', 'I011', 'I059',
+           'I079', 'I080', 'I083', 'I089', 'I330', 'I339', 'I358', 'I378',
+           'I38', 'T826', 'I39', '681', '6811', '6819', '682', '6821', '6822',
+           '6823', '6824', '6825', '6826', '6827', '6828', '6829', 'L030',
+           'L031', 'L032', 'L033', 'L038', 'L039', 'M000', 'M001', 'M002',
+           'M008', 'M009', '711', '7114', '7115', '7116', '7118', '7119',
+           'I800', 'I801', 'I802', 'I803', 'I808', 'I809', '451', '4512',
+           '4518', '4519');
+
+proc sql;
+    create table FINAL_INFANT_COHORT as
+    select FINAL_INFANT_COHORT.*, 
+           case when apcd.MED_PROC_CODE in &IJI then 1 else 0 end as iji_diag
+    from FINAL_INFANT_COHORT
+    left join PHDAPCD.MOUD_MEDICAL as apcd
+    on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
+quit;
+
+%LET OTHER_SUBSTANCE_USE = ('2910', '2911', '2912', '2913', '2914', '2915', '2918', '29181', '29182', '29189', '2919',
+                      '30300', '30301', '30302', '30390', '30391', '30392', '30500', '30501',
+                      '30502', '76071', '9800', '3575', '4255', '53530', '53531', '5710', '5711', '5712',
+                      '5713', 'F101', 'F1010', 'F1012', 'F10120', 'F10121', 'F10129', 'F1013',
+                      'F10130', 'F10131', 'F10132', 'F10139', 'F1014', 'F1015', 'F10150', 'F10151', 'F10159',
+                      'F1018', 'F10180', 'F10181', 'F10182', 'F10188', 'F1019', 'F102', 'F1020', 'F1022',
+                      'F10220', 'F10221', 'F10229', 'F1023', 'F10230', 'F10231', 'F10232', 'F10239', 'F1024',
+                      'F1025', 'F10250', 'F10251', 'F10259', 'F1026', 'F1027', 'F1028', 'F10280', 'F10281',
+                      'F10282', 'F10288', 'F1029', 'F109', 'F1090', 'F1092', 'F10920', 'F10921', 'F10929',
+                      'F1093', 'F10930', 'F10931', 'F10932', 'F10939', 'F1094', 'F1095', 'F10950', 'F10951',
+                      'F10959', 'F1096', 'F1097', 'F1098', 'F10980', 'F10981', 'F10982', 'F10988', 'F1099', 'T405X4A', /* AUD */
+                      '30421', '30422', '3056', '30561', '30562', '3044', '30441', '30442',
+                      '9697', '96972', '96973', '96979', 'E8542', 'F14', 'F141', 'F1410', 'F1412',
+                      'F14120', 'F14121', 'F14122', 'F14129', 'F1413', 'F1414', 'F1415', 'F14150', 'F14151',
+                      'F14159', 'F1418', 'F14180', 'F14181', 'F14182', 'F14188', 'F1419', 'F142', 'F1420', 'F1421',
+                      'F1422', 'F14220', 'F14221', 'F14222', 'F14229', 'F1423', 'F1424', 'F1425', 'F14250', 'F14251',
+                      'F14259', 'F1428', 'F14280', 'F14281', 'F14282', 'F14288', 'F1429', 'F149', 'F1490', 'F1491',
+                      'F1492', 'F14920', 'F14921', 'F14922', 'F14929', 'F1493', 'F1494', 'F1495', 'F14950', 'F14951',
+                      'F14959', 'F1498', 'F14980', 'F14981', 'F14982', 'F14988', 'F1499', 'F15', 'F151', 'F1510',
+                      'F1512', 'F15120', 'F15121', 'F15122', 'F15129', 'F1513', 'F1514', 'F1515', 'F15150',
+                      'F15151', 'F15159', 'F1518', 'F15180', 'F15181', 'F15182', 'F15188', 'F1519', 'F152',
+                      'F1520', 'F1522', 'F15220', 'F15221', 'F15222', 'F15229', 'F1523', 'F1524', 'F1525',
+                      'F15250', 'F15251', 'F15259', 'F1528', 'F15280', 'F15281', 'F15282', 'F15288', 'F1529',
+                      'F159', 'F1590', 'F1592', 'F15920', 'F15921', 'F15922', 'F15929', 'F1593', 'F1594',
+                      'F1595', 'F15950', 'F15951', 'F15959', 'F1598', 'F15980', 'F15981', 'F15982', 'F15988',
+                      'F1599', 'T405', 'T436', 'T405XIA', 'T43601A', 'T43602A', 'T43604A', 'T43611A',
+                      'T43621A', 'T43624A', 'T43631A', 'T43634A', 'T43641A', 'T43644A',
+                      '96970', '96972', '96973', '96979', '97081', '97089', 'E8542', 'E8543', 'E8552',
+                      'T43691A', 'T43694A' /* Stimulants */);
+                      
+proc sql;
+    create table FINAL_INFANT_COHORT as
+    select FINAL_INFANT_COHORT.*,
+           case 
+               when apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE then 1
+               else
+                   case 
+                       when exists (
+                           select * 
+                           from PHDBSAS.BSAS 
+                           where ID = FINAL_INFANT_COHORT.MOM_ID
+                       ) then 1
+                       else 0
+                   end
+           end as OTHER_SUBSTANCE_USE
+    from FINAL_INFANT_COHORT
+    left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = FINAL_INFANT_COHORT.MOM_ID;
+quit;
+
+proc sql;
+    create table FINAL_INFANT_COHORT as
+    select FINAL_INFANT_COHORT.*,
+           case
+               when apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE then 1
+               when BSAS.CLT_ENR_PRIMARY_DRUG in (1,2,3,10,11,12) or
+                    BSAS.CLT_ENR_SECONDARY_DRUG in (1,2,3,10,11,12) or
+                    BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12) then 1
+               else
+                   case
+                       when exists (
+                           select *
+                           from PHDBSAS.BSAS
+                           where ID = FINAL_INFANT_COHORT.MOM_ID
+                       ) then 1
+                       else 0
+                   end
+           end as OTHER_SUBSTANCE_USE
+    from FINAL_INFANT_COHORT
+    left join PHDBSAS.BSAS as bsas on bsas.ID = FINAL_INFANT_COHORT.MOM_ID
+    left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = FINAL_INFANT_COHORT.MOM_ID;
+quit;
+
 %let well_child = ('Z00129', 'Z00121', /* ICD-10 codes */
                     'V202', 'V700', 'V703', 'V705', 'V706', 'V708', 'V709'); /* ICD-9 codes */
 
 proc sql;
-    create table INFANT_DAA_with_covariates as
-	select INFANT_DAA_with_covariates.*,
+    create table FINAL_INFANT_COHORT as
+	select FINAL_INFANT_COHORT.*,
        case when apcd.MED_PROC_CODE in &well_child and age_months between 18 and 36 then 1 else 0 end as well_child
-	from INFANT_DAA_with_covariates
+	from FINAL_INFANT_COHORT
 	left join (
     select apcd.ID, apcd.MED_PROC_CODE,
-           floor((intck('month', INFANT_DAA_with_covariates.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE))/12)*12 +
-           intck('month', INFANT_DAA_with_covariates.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE) as age_months
+           floor((intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE))/12)*12 +
+           intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE) as age_months
     from PHDAPCD.MOUD_MEDICAL as apcd
-    inner join INFANT_DAA_with_covariates
-    on apcd.ID = INFANT_DAA_with_covariates.ID
+    inner join FINAL_INFANT_COHORT
+    on apcd.ID = FINAL_INFANT_COHORT.INFANT_ID
 	) as apcd
-		on INFANT_DAA_with_covariates.ID = apcd.ID;
+		on FINAL_INFANT_COHORT.ID = apcd.INFANT_ID;
 quit;
 
-%let oud_data_path = OUD_HCV_DAA_with_covariates;
+%let oud_data_path = OUD_HCV_DAA;
 
-data INFANT_DAA_with_covariates;
-    merge INFANT_DAA_with_covariates (in=a)
+data FINAL_INFANT_COHORT;
+    merge FINAL_INFANT_COHORT (in=a)
           OUD_HCV_DAA (in=b)
           &oud_data_path (in=b);
-    by ID;
+    by MOM_ID;
 
     OUD_capture = (b = 1) and oud_age < AGE_BIRTH;
     
@@ -1181,32 +1316,47 @@ run;
 /* ========================================================== */
 
 %macro Table1Freqs (var);
-proc freq data=INFANT_DAA_with_covariates; tables &var / missing; run;
+proc freq data=FINAL_INFANT_COHORT; tables &var / missing; run;
 %mend;
 
 %Table1freqs (FINAL_SEX);
 %Table1freqs (GESTATIONAL_AGE);
 %Table1freqs (FINAL_RE);
+%Table1freqs (MOMS_FINAL_RE);
 %Table1freqs (FACILITY_ID_BIRTH);
 %Table1freqs (Res_Code_Birth);
 %Table1freqs (well_child);
 %Table1freqs (NAS_BC_TOTAL);
-%Table1freqs (HOMELESS_HISTORY);
 %Table1freqs (DISCH_WITH_MOM);
 %Table1freqs (INF_VAC_HBIG);
 %Table1freqs (HIV_DIAGNOSIS);
 %Table1freqs (MOUD_DURING_PREG);
 %Table1freqs (MOUD_AT_DELIVERY);
 %Table1freqs (OUD_CAPTURE);
+%Table1freqs (AGE_BIRTH);
+%Table1freqs (EVER_INCARCERATED);
+%Table1freqs (FOREIGN_BORN);
+%Table1freqs (HOMELESS_HISTORY);
+%Table1freqs (LANGUAGE_SPOKEN);
+%Table1freqs (MOTHER_EDU);
+%Table1freqs (LD_PAY);
+%Table1freqs (KOTELCHUCK);
+%Table1freqs (prenat_site);
+%Table1freqs (MATINF_HEPC);
+%Table1freqs (MATINF_HEPB);
+%Table1freqs (EVER_IDU_HCV);
+%Table1freqs (mental_health_diag);
+%Table1freqs (OTHER_SUBSTANCE_USE);
+%Table1freqs (iji_diag);
 
 %macro Table1StrataFreqs(var);
     /* Sort the dataset by APPROPRIATE_Testing */
-    proc sort data=INFANT_DAA_with_covariates;
+    proc sort data=FINAL_INFANT_COHORT;
         by APPROPRIATE_Testing;
     run;
 
     /* Run PROC FREQ with BY statement */
-    proc freq data=INFANT_DAA_with_covariates;
+    proc freq data=FINAL_INFANT_COHORT;
         by APPROPRIATE_Testing;
         tables &var / missing;
     run;
@@ -1215,20 +1365,35 @@ proc freq data=INFANT_DAA_with_covariates; tables &var / missing; run;
 %Table1Stratafreqs (FINAL_SEX);
 %Table1Stratafreqs (GESTATIONAL_AGE);
 %Table1Stratafreqs (FINAL_RE);
+%Table1Stratafreqs (MOMS_FINAL_RE);
 %Table1Stratafreqs (FACILITY_ID_BIRTH);
 %Table1Stratafreqs (Res_Code_Birth);
 %Table1Stratafreqs (well_child);
 %Table1Stratafreqs (NAS_BC_TOTAL);
-%Table1Stratafreqs (HOMELESS_HISTORY);
 %Table1Stratafreqs (DISCH_WITH_MOM);
 %Table1Stratafreqs (INF_VAC_HBIG);
 %Table1Stratafreqs (HIV_DIAGNOSIS);
 %Table1Stratafreqs (MOUD_DURING_PREG);
 %Table1Stratafreqs (MOUD_AT_DELIVERY);
 %Table1Stratafreqs (OUD_CAPTURE);
+%Table1Stratafreqs (AGE_BIRTH);
+%Table1Stratafreqs (EVER_INCARCERATED);
+%Table1Stratafreqs (FOREIGN_BORN);
+%Table1Stratafreqs (HOMELESS_HISTORY);
+%Table1Stratafreqs (LANGUAGE_SPOKEN);
+%Table1Stratafreqs (MOTHER_EDU);
+%Table1Stratafreqs (LD_PAY);
+%Table1Stratafreqs (KOTELCHUCK);
+%Table1Stratafreqs (prenat_site);
+%Table1Stratafreqs (MATINF_HEPC);
+%Table1Stratafreqs (MATINF_HEPB);
+%Table1Stratafreqs (EVER_IDU_HCV);
+%Table1Stratafreqs (mental_health_diag);
+%Table1Stratafreqs (OTHER_SUBSTANCE_USE);
+%Table1Stratafreqs (iji_diag);
 
 %macro Table2Crude (var);
-proc logistic data=INFANT_DAA_with_covariates desc; 
+proc logistic data=FINAL_INFANT_COHORT desc; 
 	class &var (param=ref);
 	model APPROPRIATE_Testing=&var;
 	run;
@@ -1237,14 +1402,29 @@ proc logistic data=INFANT_DAA_with_covariates desc;
 %Table2Crude (FINAL_SEX);
 %Table2Crude (GESTATIONAL_AGE);
 %Table2Crude (FINAL_RE);
+%Table2Crude (MOMS_FINAL_RE);
 %Table2Crude (FACILITY_ID_BIRTH);
 %Table2Crude (Res_Code_Birth);
 %Table2Crude (well_child);
 %Table2Crude (NAS_BC_TOTAL);
-%Table2Crude (HOMELESS_HISTORY);
 %Table2Crude (DISCH_WITH_MOM);
 %Table2Crude (INF_VAC_HBIG);
 %Table2Crude (HIV_DIAGNOSIS);
 %Table2Crude (MOUD_DURING_PREG);
 %Table2Crude (MOUD_AT_DELIVERY);
 %Table2Crude (OUD_CAPTURE);
+%Table2Crude (AGE_BIRTH);
+%Table2Crude (EVER_INCARCERATED);
+%Table2Crude (FOREIGN_BORN);
+%Table2Crude (HOMELESS_HISTORY);
+%Table2Crude (LANGUAGE_SPOKEN);
+%Table2Crude (MOTHER_EDU);
+%Table2Crude (LD_PAY);
+%Table2Crude (KOTELCHUCK);
+%Table2Crude (prenat_site);
+%Table2Crude (MATINF_HEPC);
+%Table2Crude (MATINF_HEPB);
+%Table2Crude (EVER_IDU_HCV);
+%Table2Crude (mental_health_diag);
+%Table2Crude (OTHER_SUBSTANCE_USE);
+%Table2Crude (iji_diag);
