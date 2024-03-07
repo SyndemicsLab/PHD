@@ -315,12 +315,13 @@ DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
     IF cnt_oud_oo > 0 THEN oud_oo = 1;
     ELSE oud_oo = 0;
 
-    IF oud_oo = 0 THEN DELETE;
+    /*IF oud_oo = 0 THEN DELETE;*/
 
     age_oo = OO_AGE;
     year_oo = OO_ADMIT_YEAR;
     month_oo = OO_ADMIT_MONTH;
 RUN;
+
 
 /* MERGE ALL CM */
 PROC SQL;
@@ -346,7 +347,7 @@ DATA casemix (KEEP = ID oud_cm year_cm age_cm month_cm);
 
     IF sum(oud_ed, oud_hd, oud_oo) > 0 THEN oud_cm = 1;
     ELSE oud_cm = 0;
-    IF oud_cm = 0 THEN DELETE;
+    /*IF oud_cm = 0 THEN DELETE;*/
 
 	age_cm = min(age_ed, age_hd, age_oo);
 	year_cm = min(year_oo, year_hd, year_cm);
@@ -421,7 +422,7 @@ DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp age_pmp);
     IF BUPRENORPHINE_PMP = 1 AND 
         BUP_CAT_PMP = 1 THEN oud_pmp = 1;
     ELSE oud_pmp = 0;
-    IF oud_pmp = 0 THEN DELETE;
+    /*IF oud_pmp = 0 THEN DELETE;*/
 
 	year_pmp = date_filled_year;
     month_pmp = date_filled_month;
@@ -476,7 +477,8 @@ DATA oud;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-	age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp);
+	oud_age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp);
+    oud_age = round(oud_age); /* Round oud_age to nearest whole number */
     age_grp_five  = put(age, age_grps_five.);
 	IF age_grp_five  = 999 THEN DELETE;
 RUN;
@@ -487,7 +489,7 @@ RUN;
 
 PROC SQL;
     CREATE TABLE oud_distinct AS
-    SELECT DISTINCT ID, min(age_grp_five) as agegrp, FINAL_RE FROM oud 
+    SELECT DISTINCT ID, oud_age, min(age_grp_five) as agegrp, FINAL_RE FROM oud 
     GROUP BY ID;
 QUIT;
 
@@ -496,10 +498,11 @@ QUIT;
 /*==============================*/
 
 /* Age Demography Creation */
+
 PROC SQL;
     CREATE TABLE demographics_monthly AS
     SELECT * FROM demographics, months, years;
-
+    
 PROC SQL;
     CREATE TABLE medical_age AS 
     SELECT ID, 
@@ -527,7 +530,7 @@ PROC SQL;
            enroll_age AS age_hocmoud,
            enroll_year AS year_hocmoud,
            enroll_month AS month_hocmoud
-    FROM PHDBSAS.HOCMOUD;
+    FROM HOCMOUD_SYN2;
     
     CREATE TABLE doc_age AS
     SELECT ID,
@@ -588,13 +591,13 @@ PROC SORT data=moud;
 RUN;
 
 PROC SQL;
-	CREATE TABLE age AS 
+    CREATE TABLE age AS 
     SELECT DISTINCT * FROM age;
     
     CREATE TABLE moud_demo AS
-    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX
+    SELECT moud.*, PHDSPINE.DEMO.FINAL_RE, PHDSPINE.DEMO.FINAL_SEX
     FROM moud
-    LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
+    LEFT JOIN PHDSPINE.DEMO ON moud.ID = PHDSPINE.DEMO.ID;
 QUIT;
 
 PROC SORT DATA=moud_demo;
@@ -727,7 +730,7 @@ DATA moud_expanded;
     WHERE FINAL_SEX = 2 and age_grp_five ne ' ' and age_grp_five ne '999';
 RUN;
 
-PROC SQL;          
+PROC SQL;                  
     CREATE TABLE moud_starts AS
     SELECT start_month AS month,
            start_year AS year,
@@ -1320,3 +1323,166 @@ run;
 %YearFreq(EVENT_YEAR_HCV, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
 %YearFreq(EVENT_YEAR_HCV, birth_indicator, 0, "Counts per year among probable, by Birth", agefmt_comb., racefmt_all.)
 %YearFreq(FIRST_DAA_START_YEAR, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
+
+/* ========================================================== */
+/*                       Pull Covariates                      */
+/* ========================================================== */
+
+/* Join to add covariates */
+
+proc sql;
+    create table OUD_HCV_DAA_with_covariates as
+    select OUD_HCV_DAA.*, 
+           demographics.EVER_INCARCERATED,
+           demographics.FOREIGN_BORN,
+           demographics.HOMELESS_HISTORY,
+           birthsmoms.AGE_BIRTH,
+           birthsmoms.LD_PAY,
+           birthsmoms.KOTELCHUCK,
+           birthsmoms.prenat_site,
+           birthsmoms.LANGUAGE_SPOKEN,
+           birthsmoms.MATINF_HEPC,
+           birthsmoms.MATINF_HEPB,
+           birthsmoms.MOTHER_EDU,
+           hcv.EVER_IDU_HCV
+    from OUD_HCV_DAA
+    left join PHDSPINE.DEMO as demographics
+    on OUD_HCV_DAA.ID = demographics.ID 
+    left join PHDBIRTH.BIRTH_MOM as birthsmoms
+    on OUD_HCV_DAA.ID = birthsmoms.ID
+    left join PHDHEPC.HCV as hcv
+    on OUD_HCV_DAA.ID = hcv.ID;
+quit;
+
+%LET MENTAL_HEALTH = ('F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F28', 'F29',
+                      'F30', 'F31', 'F32', 'F33', 'F34', 'F39', 'F40', 'F41',
+                      'F42', 'F43', 'F44', 'F45', 'F48');
+
+proc sql;
+    create table OUD_HCV_DAA_with_covariates as
+    select OUD_HCV_DAA_with_covariates.*,
+           case
+               when apcd.MED_PROC_CODE in &MENTAL_HEALTH then 1
+               when substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
+               else 0
+           end as mental_health_diag
+    from OUD_HCV_DAA_with_covariates
+    left join PHDAPCD.MOUD_MEDICAL as apcd
+    on OUD_HCV_DAA_with_covariates.ID = apcd.ID;
+quit;
+
+%let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
+           '421', '4211', '4219', '4249*', 'A382', 'B376', 'I011', 'I059',
+           'I079', 'I080', 'I083', 'I089', 'I330', 'I339', 'I358', 'I378',
+           'I38', 'T826', 'I39', '681', '6811', '6819', '682', '6821', '6822',
+           '6823', '6824', '6825', '6826', '6827', '6828', '6829', 'L030',
+           'L031', 'L032', 'L033', 'L038', 'L039', 'M000', 'M001', 'M002',
+           'M008', 'M009', '711', '7114', '7115', '7116', '7118', '7119',
+           'I800', 'I801', 'I802', 'I803', 'I808', 'I809', '451', '4512',
+           '4518', '4519');
+
+proc sql;
+    create table OUD_HCV_DAA_with_covariates as
+    select OUD_HCV_DAA_with_covariates.*, 
+           case when apcd.MED_PROC_CODE in &IJI then 1 else 0 end as iji_diag
+    from OUD_HCV_DAA_with_covariates
+    left join PHDAPCD.MOUD_MEDICAL as apcd
+    on OUD_HCV_DAA_with_covariates.ID = apcd.ID;
+quit;
+
+%LET OTHER_SUBSTANCE_USE = ('2910', '2911', '2912', '2913', '2914', '2915', '2918', '29181', '29182', '29189', '2919',
+                      '30300', '30301', '30302', '30390', '30391', '30392', '30500', '30501',
+                      '30502', '76071', '9800', '3575', '4255', '53530', '53531', '5710', '5711', '5712',
+                      '5713', 'F101', 'F1010', 'F1012', 'F10120', 'F10121', 'F10129', 'F1013',
+                      'F10130', 'F10131', 'F10132', 'F10139', 'F1014', 'F1015', 'F10150', 'F10151', 'F10159',
+                      'F1018', 'F10180', 'F10181', 'F10182', 'F10188', 'F1019', 'F102', 'F1020', 'F1022',
+                      'F10220', 'F10221', 'F10229', 'F1023', 'F10230', 'F10231', 'F10232', 'F10239', 'F1024',
+                      'F1025', 'F10250', 'F10251', 'F10259', 'F1026', 'F1027', 'F1028', 'F10280', 'F10281',
+                      'F10282', 'F10288', 'F1029', 'F109', 'F1090', 'F1092', 'F10920', 'F10921', 'F10929',
+                      'F1093', 'F10930', 'F10931', 'F10932', 'F10939', 'F1094', 'F1095', 'F10950', 'F10951',
+                      'F10959', 'F1096', 'F1097', 'F1098', 'F10980', 'F10981', 'F10982', 'F10988', 'F1099', 'T405X4A', /* AUD */
+                      '30421', '30422', '3056', '30561', '30562', '3044', '30441', '30442',
+                      '9697', '96972', '96973', '96979', 'E8542', 'F14', 'F141', 'F1410', 'F1412',
+                      'F14120', 'F14121', 'F14122', 'F14129', 'F1413', 'F1414', 'F1415', 'F14150', 'F14151',
+                      'F14159', 'F1418', 'F14180', 'F14181', 'F14182', 'F14188', 'F1419', 'F142', 'F1420', 'F1421',
+                      'F1422', 'F14220', 'F14221', 'F14222', 'F14229', 'F1423', 'F1424', 'F1425', 'F14250', 'F14251',
+                      'F14259', 'F1428', 'F14280', 'F14281', 'F14282', 'F14288', 'F1429', 'F149', 'F1490', 'F1491',
+                      'F1492', 'F14920', 'F14921', 'F14922', 'F14929', 'F1493', 'F1494', 'F1495', 'F14950', 'F14951',
+                      'F14959', 'F1498', 'F14980', 'F14981', 'F14982', 'F14988', 'F1499', 'F15', 'F151', 'F1510',
+                      'F1512', 'F15120', 'F15121', 'F15122', 'F15129', 'F1513', 'F1514', 'F1515', 'F15150',
+                      'F15151', 'F15159', 'F1518', 'F15180', 'F15181', 'F15182', 'F15188', 'F1519', 'F152',
+                      'F1520', 'F1522', 'F15220', 'F15221', 'F15222', 'F15229', 'F1523', 'F1524', 'F1525',
+                      'F15250', 'F15251', 'F15259', 'F1528', 'F15280', 'F15281', 'F15282', 'F15288', 'F1529',
+                      'F159', 'F1590', 'F1592', 'F15920', 'F15921', 'F15922', 'F15929', 'F1593', 'F1594',
+                      'F1595', 'F15950', 'F15951', 'F15959', 'F1598', 'F15980', 'F15981', 'F15982', 'F15988',
+                      'F1599', 'T405', 'T436', 'T405XIA', 'T43601A', 'T43602A', 'T43604A', 'T43611A',
+                      'T43621A', 'T43624A', 'T43631A', 'T43634A', 'T43641A', 'T43644A',
+                      '96970', '96972', '96973', '96979', '97081', '97089', 'E8542', 'E8543', 'E8552',
+                      'T43691A', 'T43694A' /* Stimulants */);
+                      
+proc sql;
+    create table OUD_HCV_DAA_with_covariates as
+    select OUD_HCV_DAA_with_covariates.*,
+           case 
+               when apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE then 1
+               else
+                   case 
+                       when exists (
+                           select * 
+                           from PHDBSAS.BSAS 
+                           where ID = OUD_HCV_DAA_with_covariates.ID
+                       ) then 1
+                       else 0
+                   end
+           end as OTHER_SUBSTANCE_USE
+    from OUD_HCV_DAA_with_covariates
+    left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = OUD_HCV_DAA_with_covariates.ID;
+quit;
+
+proc sql;
+    create table OUD_HCV_DAA_with_covariates as
+    select OUD_HCV_DAA_with_covariates.*,
+           case
+               when apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE then 1
+               when BSAS.CLT_ENR_PRIMARY_DRUG in (1,2,3,10,11,12) or
+                    BSAS.CLT_ENR_SECONDARY_DRUG in (1,2,3,10,11,12) or
+                    BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12) then 1
+               else
+                   case
+                       when exists (
+                           select *
+                           from PHDBSAS.BSAS
+                           where ID = OUD_HCV_DAA_with_covariates.ID
+                       ) then 1
+                       else 0
+                   end
+           end as OTHER_SUBSTANCE_USE
+    from OUD_HCV_DAA_with_covariates
+    left join PHDBSAS.BSAS as bsas on bsas.ID = OUD_HCV_DAA_with_covariates.ID
+    left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = OUD_HCV_DAA_with_covariates.ID;
+quit;
+
+/* ========================================================== */
+/*                       Table 1 and Regressions              */
+/* ========================================================== */
+
+%macro Table1Freqs (var);
+proc freq data=OUD_HCV_DAA_with_covariates; tables &var / missing; run;
+%mend;
+
+%Table1freqs (AGE_BIRTH);
+%Table1freqs (FINAL_RE);
+%Table1freqs (EVER_INCARCERATED);
+%Table1freqs (FOREIGN_BORN);
+%Table1freqs (HOMELESS_HISTORY);
+%Table1freqs (LANGUAGE_SPOKEN);
+%Table1freqs (MOTHER_EDU);
+%Table1freqs (LD_PAY);
+%Table1freqs (KOTELCHUCK);
+%Table1freqs (prenat_site);
+%Table1freqs (MATINF_HEPC);
+%Table1freqs (MATINF_HEPB);
+%Table1freqs (EVER_IDU_HCV);
+%Table1freqs (mental_health_diag);
+%Table1freqs (OTHER_SUBSTANCE_USE);
+%Table1freqs (iji_diag);
