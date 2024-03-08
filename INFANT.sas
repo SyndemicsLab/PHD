@@ -10,6 +10,9 @@ ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
 proc format;                                                                                               
    value supp010_ 1-10=' * ';                                                                           
 run ;
+proc template;
+%include "/sas/data/DPH/OPH/PHD/template.sas";
+run;
 /*==============================*/
 
 /*==============================*/
@@ -34,23 +37,23 @@ PROC FORMAT;
 /*========ICD CODES=============*/
 %LET ICD = ('30400','30401','30402','30403',
 	'30470','30471','30472','30473',
-        '30550','30551','30552','30553', /* ICD9 */
-        'F1110','F1111','F11120','F11121', 
+    '30550','30551','30552','30553', /* ICD9 */
+    'F1110','F1111','F11120','F11121', 
 	'F11122','F11129','F1113','F1114', 
-        'F11150','F11151','F11159','F11181', 
-        'F11182','F11188','F1119','F1120', 
-        'F1121','F11220','F11221','F11222', 
-        'F11229','F1123','F1124','F11250', 
-        'F11251','F11259','F11281','F11282', 
-        'F11288','F1129','F1193','F1199',  /* ICD10 */
+    'F11150','F11151','F11159','F11181', 
+    'F11182','F11188','F1119','F1120', 
+    'F1121','F11220','F11221','F11222', 
+    'F11229','F1123','F1124','F11250', 
+    'F11251','F11259','F11281','F11282', 
+    'F11288','F1129','F1193','F1199',  /* ICD10 */
 	'9701','96500','96501','96502',
  	'96509','E8500','E8501','E8502',
   	'T400X1A','T400X2A','T400X3A','T400X4A',
-        'T400X1D','T400X2D','T400X3D','T400X4D',
-        'T401X1A','T401X2A','T401X3A','T401X4A',
-        'T401X1D','T401X2D','T401X3D','T401X4D',
-        'T402X1A','T402X2A','T402X3A','T402X4A',
-        'T402X1D','T402X2D','T402X3D','T402X4D', 
+    'T400X1D','T400X2D','T400X3D','T400X4D',
+    'T401X1A','T401X2A','T401X3A','T401X4A',
+    'T401X1D','T401X2D','T401X3D','T401X4D',
+    'T402X1A','T402X2A','T402X3A','T402X4A',
+    'T402X1D','T402X2D','T402X3D','T402X4D', 
 	'T403X1A','T403X2A','T403X3A','T403X4A', 
 	'T403X1D','T403X2D','T403X3D','T403X4D', 
 	'T404X1A','T404X2A','T404X3A','T404X4A', 
@@ -58,24 +61,16 @@ PROC FORMAT;
 	'T40601A','T40601D','T40602A','T40602D', 
 	'T40603A','T40603D','T40604A','T40604D', 
 	'T40691A','T40692A','T40693A','T40694A', 
-	'T40691D','T40692D','T40693D','T40694D', /* Overdose Codes */ 
-        'G2067','G2068','G2069','G2070','G2071',
-	'G2072','G2074','G2075','G2076','G2077', 
-	'G2078','G2079','G2080','H0020','HZ81ZZZ',
- 	'HZ91ZZZ','HZ94ZZZ','J0570','J0571','J0572',
-  	'J0573','J0574','J0575','J2315','Q9991',
-   	'Q9992','S0109', /* MOUD */
-	'F1193','F1199'/* Additional RESPOND */);
+	'T40691D','T40692D','T40693D','T40694D' /* Overdose Codes */);
            
 %LET PROC = ('G2067','G2068','G2069','G2070', 
 	'G2071','G2072','G2073','G2074', 
 	'G2075', /* MAT Opioid */
 	'G2076','G2077','G2078','G2079', 
-	'G2080','G2081', /*Opioid Trt */
- 	'J0570','J0571','J0572','J0573', 
- 	'J0574','J0575','J0592','S0109', 
-        'G2215','G2216','G1028', /* Naloxone*/
-        'Q9991','Q9992','H0020','HZ81ZZZ','HZ91ZZZ');
+	'G2080', /*Opioid Trt */
+ 	'H0020','HZ81ZZZ','HZ84ZZZ','HZ91ZZZ','HZ94ZZZ',
+    'J0570','J0571','J0572','J0573', 
+ 	'J0574','J0575','J2315','Q9991','Q9992''S0109'/* Naloxone*/);
 
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
@@ -530,7 +525,7 @@ PROC SQL;
            enroll_age AS age_hocmoud,
            enroll_year AS year_hocmoud,
            enroll_month AS month_hocmoud
-    FROM HOCMOUD_SYN2;
+    FROM PHDBSAS.HOCMOUD;
     
     CREATE TABLE doc_age AS
     SELECT ID,
@@ -595,9 +590,9 @@ PROC SQL;
     SELECT DISTINCT * FROM age;
     
     CREATE TABLE moud_demo AS
-    SELECT moud.*, PHDSPINE.DEMO.FINAL_RE, PHDSPINE.DEMO.FINAL_SEX
+    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX
     FROM moud
-    LEFT JOIN PHDSPINE.DEMO ON moud.ID = PHDSPINE.DEMO.ID;
+    LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
 QUIT;
 
 PROC SORT DATA=moud_demo;
@@ -722,12 +717,12 @@ QUIT;
 
 DATA moud_demo;
     SET moud_demo;
-    WHERE FINAL_SEX = 2 and age_grp_five ne ' ' and age_grp_five ne '999';
+    WHERE age_grp_five ne ' ' and age_grp_five ne '999';
 RUN;
 
 DATA moud_expanded;
     SET moud_expanded;
-    WHERE FINAL_SEX = 2 and age_grp_five ne ' ' and age_grp_five ne '999';
+    WHERE age_grp_five ne ' ' and age_grp_five ne '999';
 RUN;
 
 PROC SQL;                  
@@ -1075,9 +1070,7 @@ run;
 /*                       DAA STARTS                           */
 /* ========================================================== */
 
-/* Extract all relevant data */
 DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
-								
 								WHERE = (PHARM_NDC IN &DAA_CODES));
 RUN;
 
@@ -1372,28 +1365,13 @@ run;
 			/* table n_var; */
 			/* run; */
 
-
-/* CLEAR WORKING DIRECTORY/TEMP FILES  */
-proc datasets library=WORK kill; run; quit;
-
-*Suppression code;
-ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
-proc format;                                                                                               
-   value supp010_ 1-10=' * ';                                                                           
-run ;
-
-proc template;
-%include "/sas/data/DPH/OPH/PHD/template.sas";
-run;
-
 /*============================ */
 /*     Global Variables        */
 /*============================ */
 		
 /* ======= HCV TESTING CPT CODES ========  */
 %LET AB_CPT = ('G0472', '86803',
-			   '86804', '80074',
-			   'G0472');
+			   '86804', '80074');
 			   
 %LET RNA_CPT = ('87520', '87521',
 			    '87522');
@@ -1460,7 +1438,6 @@ AS SELECT ID as MOM_ID,
 FROM PHDHEPC.HCV
 GROUP BY MOM_ID;
 run;
-
 
 /*  Collect All Moms */
 /*  Output: MOMS dataset, one row per BIRTH_LINK_ID - so multiple rows per MOM_ID
@@ -1961,9 +1938,8 @@ run;
 /*                       DAA STARTS                           */
 /* ========================================================== */
 
-/* Extract all relevant data
+/* Extract all relevant data */
 DATA DAA; SET PHDAPCD.MOUD_PHARM(KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
-								
 								WHERE = (PHARM_NDC IN &DAA_CODES));
 RUN;
 
@@ -2509,8 +2485,78 @@ proc sql;
     create table FINAL_INFANT_COHORT as
     select FINAL_INFANT_COHORT.*,
            case
-               when apcd.MED_PROC_CODE in &MENTAL_HEALTH then 1
-               when substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
+               when apcd.MED_ECODE in &MENTAL_HEALTH or
+                    apcd.MED_ADM_DIAGNOSIS in &MENTAL_HEALTH or
+                    apcd.MED_PROC_CODE in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC1 in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC2 in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC3 in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC4 in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC5 in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC6 in &MENTAL_HEALTH or
+                    apcd.MED_ICD_PROC7 in &MENTAL_HEALTH or
+                    apcd.MED_ICD1 in &MENTAL_HEALTH or
+                    apcd.MED_ICD2 in &MENTAL_HEALTH or
+                    apcd.MED_ICD3 in &MENTAL_HEALTH or
+                    apcd.MED_ICD4 in &MENTAL_HEALTH or
+                    apcd.MED_ICD5 in &MENTAL_HEALTH or
+                    apcd.MED_ICD6 in &MENTAL_HEALTH or
+                    apcd.MED_ICD7 in &MENTAL_HEALTH or
+                    apcd.MED_ICD8 in &MENTAL_HEALTH or
+                    apcd.MED_ICD9 in &MENTAL_HEALTH or
+                    apcd.MED_ICD10 in &MENTAL_HEALTH or
+                    apcd.MED_ICD11 in &MENTAL_HEALTH or
+                    apcd.MED_ICD12 in &MENTAL_HEALTH or
+                    apcd.MED_ICD13 in &MENTAL_HEALTH or
+                    apcd.MED_ICD14 in &MENTAL_HEALTH or
+                    apcd.MED_ICD15 in &MENTAL_HEALTH or
+                    apcd.MED_ICD16 in &MENTAL_HEALTH or
+                    apcd.MED_ICD17 in &MENTAL_HEALTH or
+                    apcd.MED_ICD18 in &MENTAL_HEALTH or
+                    apcd.MED_ICD19 in &MENTAL_HEALTH or
+                    apcd.MED_ICD20 in &MENTAL_HEALTH or
+                    apcd.MED_ICD21 in &MENTAL_HEALTH or
+                    apcd.MED_ICD22 in &MENTAL_HEALTH or
+                    apcd.MED_ICD23 in &MENTAL_HEALTH or
+                    apcd.MED_ICD24 in &MENTAL_HEALTH or
+                    apcd.MED_ICD25 in &MENTAL_HEALTH or
+                    apcd.MED_DIS_DIAGNOSIS in &MENTAL_HEALTH then 1
+               when substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD_PROC7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+  					or substr(apcd.MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+   					or substr(apcd.MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+  					or substr(apcd.MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
                else 0
            end as mental_health_diag
     from FINAL_INFANT_COHORT
@@ -2533,7 +2579,45 @@ quit;
 proc sql;
     create table FINAL_INFANT_COHORT as
     select FINAL_INFANT_COHORT.*, 
-           case when apcd.MED_PROC_CODE in &IJI then 1 else 0 end as iji_diag
+           case 
+               when apcd.MED_ECODE in &IJI or
+                    apcd.MED_ADM_DIAGNOSIS in &IJI or
+                    apcd.MED_PROC_CODE in &IJI or
+                    apcd.MED_ICD_PROC1 in &IJI or
+                    apcd.MED_ICD_PROC2 in &IJI or
+                    apcd.MED_ICD_PROC3 in &IJI or
+                    apcd.MED_ICD_PROC4 in &IJI or
+                    apcd.MED_ICD_PROC5 in &IJI or
+                    apcd.MED_ICD_PROC6 in &IJI or
+                    apcd.MED_ICD_PROC7 in &IJI or
+                    apcd.MED_ICD1 in &IJI or
+                    apcd.MED_ICD2 in &IJI or
+                    apcd.MED_ICD3 in &IJI or
+                    apcd.MED_ICD4 in &IJI or
+                    apcd.MED_ICD5 in &IJI or
+                    apcd.MED_ICD6 in &IJI or
+                    apcd.MED_ICD7 in &IJI or
+                    apcd.MED_ICD8 in &IJI or
+                    apcd.MED_ICD9 in &IJI or
+                    apcd.MED_ICD10 in &IJI or
+                    apcd.MED_ICD11 in &IJI or
+                    apcd.MED_ICD12 in &IJI or
+                    apcd.MED_ICD13 in &IJI or
+                    apcd.MED_ICD14 in &IJI or
+                    apcd.MED_ICD15 in &IJI or
+                    apcd.MED_ICD16 in &IJI or
+                    apcd.MED_ICD17 in &IJI or
+                    apcd.MED_ICD18 in &IJI or
+                    apcd.MED_ICD19 in &IJI or
+                    apcd.MED_ICD20 in &IJI or
+                    apcd.MED_ICD21 in &IJI or
+                    apcd.MED_ICD22 in &IJI or
+                    apcd.MED_ICD23 in &IJI or
+                    apcd.MED_ICD24 in &IJI or
+                    apcd.MED_ICD25 in &IJI or
+                    apcd.MED_DIS_DIAGNOSIS in &IJI then 1 
+               else 0 
+           end as iji_diag
     from FINAL_INFANT_COHORT
     left join PHDAPCD.MOUD_MEDICAL as apcd
     on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
@@ -2573,56 +2657,138 @@ proc sql;
     create table FINAL_INFANT_COHORT as
     select FINAL_INFANT_COHORT.*,
            case 
-               when apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE then 1
-               else
-                   case 
-                       when exists (
-                           select * 
-                           from PHDBSAS.BSAS 
-                           where ID = FINAL_INFANT_COHORT.MOM_ID
-                       ) then 1
-                       else 0
-                   end
+               when (apcd.MED_ECODE in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ADM_DIAGNOSIS in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC1 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC2 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC3 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC4 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC5 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC6 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD_PROC7 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD1 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD2 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD3 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD4 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD5 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD6 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD7 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD8 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD9 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD10 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD11 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD12 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD13 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD14 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD15 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD16 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD17 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD18 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD19 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD20 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD21 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD22 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD23 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD24 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_ICD25 in &OTHER_SUBSTANCE_USE or
+                     apcd.MED_DIS_DIAGNOSIS in &OTHER_SUBSTANCE_USE)
+                  or
+                  (BSAS.CLT_ENR_PRIMARY_DRUG in (1,2,3,10,11,12) or
+                   BSAS.CLT_ENR_SECONDARY_DRUG in (1,2,3,10,11,12) or
+                   BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12))
+                  then 1
+               else 0
            end as OTHER_SUBSTANCE_USE
     from FINAL_INFANT_COHORT
     left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = FINAL_INFANT_COHORT.MOM_ID;
-quit;
-
-proc sql;
-    create table FINAL_INFANT_COHORT as
-    select FINAL_INFANT_COHORT.*,
-           case
-               when apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE then 1
-               when BSAS.CLT_ENR_PRIMARY_DRUG in (1,2,3,10,11,12) or
-                    BSAS.CLT_ENR_SECONDARY_DRUG in (1,2,3,10,11,12) or
-                    BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12) then 1
-               else
-                   case
-                       when exists (
-                           select *
-                           from PHDBSAS.BSAS
-                           where ID = FINAL_INFANT_COHORT.MOM_ID
-                       ) then 1
-                       else 0
-                   end
-           end as OTHER_SUBSTANCE_USE
-    from FINAL_INFANT_COHORT
     left join PHDBSAS.BSAS as bsas on bsas.ID = FINAL_INFANT_COHORT.MOM_ID
-    left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = FINAL_INFANT_COHORT.MOM_ID;
 quit;
 
 %let well_child = ('Z00129', 'Z00121', /* ICD-10 codes */
                     'V202', 'V700', 'V703', 'V705', 'V706', 'V708', 'V709'); /* ICD-9 codes */
 
 proc sql;
-    create table FINAL_INFANT_COHORT as
-	select FINAL_INFANT_COHORT.*,
-       case when apcd.MED_PROC_CODE in &well_child and age_months between 18 and 36 then 1 else 0 end as well_child
-	from FINAL_INFANT_COHORT
-	left join (
-    select apcd.ID, apcd.MED_PROC_CODE,
-           floor((intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE))/12)*12 +
-           intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE) as age_months
+case 
+            when apcd.MED_ECODE in &well_child or
+                 apcd.MED_ADM_DIAGNOSIS in &well_child or
+                 apcd.MED_PROC_CODE in &well_child or
+                 apcd.MED_ICD_PROC1 in &well_child or
+                 apcd.MED_ICD_PROC2 in &well_child or
+                 apcd.MED_ICD_PROC3 in &well_child or
+                 apcd.MED_ICD_PROC4 in &well_child or
+                 apcd.MED_ICD_PROC5 in &well_child or
+                 apcd.MED_ICD_PROC6 in &well_child or
+                 apcd.MED_ICD_PROC7 in &well_child or
+                 apcd.MED_ICD1 in &well_child or
+                 apcd.MED_ICD2 in &well_child or
+                 apcd.MED_ICD3 in &well_child or
+                 apcd.MED_ICD4 in &well_child or
+                 apcd.MED_ICD5 in &well_child or
+                 apcd.MED_ICD6 in &well_child or
+                 apcd.MED_ICD7 in &well_child or
+                 apcd.MED_ICD8 in &well_child or
+                 apcd.MED_ICD9 in &well_child or
+                 apcd.MED_ICD10 in &well_child or
+                 apcd.MED_ICD11 in &well_child or
+                 apcd.MED_ICD12 in &well_child or
+                 apcd.MED_ICD13 in &well_child or
+                 apcd.MED_ICD14 in &well_child or
+                 apcd.MED_ICD15 in &well_child or
+                 apcd.MED_ICD16 in &well_child or
+                 apcd.MED_ICD17 in &well_child or
+                 apcd.MED_ICD18 in &well_child or
+                 apcd.MED_ICD19 in &well_child or
+                 apcd.MED_ICD20 in &well_child or
+                 apcd.MED_ICD21 in &well_child or
+                 apcd.MED_ICD22 in &well_child or
+                 apcd.MED_ICD23 in &well_child or
+                 apcd.MED_ICD24 in &well_child or
+                 apcd.MED_ICD25 in &well_child or
+                 apcd.MED_DIS_DIAGNOSIS in &well_child and age_months between 18 and 36 then 1 
+            else 0 
+        end as well_child
+    from FINAL_INFANT_COHORT
+    left join (
+        select apcd.ID, 
+               apcd.MED_ECODE,
+               apcd.MED_ADM_DIAGNOSIS,
+               apcd.MED_PROC_CODE,
+               apcd.MED_ICD_PROC1,
+               apcd.MED_ICD_PROC2,
+               apcd.MED_ICD_PROC3,
+               apcd.MED_ICD_PROC4,
+               apcd.MED_ICD_PROC5,
+               apcd.MED_ICD_PROC6,
+               apcd.MED_ICD_PROC7,
+               apcd.MED_ICD1,
+               apcd.MED_ICD2,
+               apcd.MED_ICD3,
+               apcd.MED_ICD4,
+               apcd.MED_ICD5,
+               apcd.MED_ICD6,
+               apcd.MED_ICD7,
+               apcd.MED_ICD8,
+               apcd.MED_ICD9,
+               apcd.MED_ICD10,
+               apcd.MED_ICD11,
+               apcd.MED_ICD12,
+               apcd.MED_ICD13,
+               apcd.MED_ICD14,
+               apcd.MED_ICD15,
+               apcd.MED_ICD16,
+               apcd.MED_ICD17,
+               apcd.MED_ICD18,
+               apcd.MED_ICD19,
+               apcd.MED_ICD20,
+               apcd.MED_ICD21,
+               apcd.MED_ICD22,
+               apcd.MED_ICD23,
+               apcd.MED_ICD24,
+               apcd.MED_ICD25,
+               apcd.MED_DIS_DIAGNOSIS,
+               floor((intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE))/12)*12 +
+               intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE) as age_months
     from PHDAPCD.MOUD_MEDICAL as apcd
     inner join FINAL_INFANT_COHORT
     on apcd.ID = FINAL_INFANT_COHORT.INFANT_ID
