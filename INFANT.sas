@@ -310,7 +310,7 @@ DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
     IF cnt_oud_oo > 0 THEN oud_oo = 1;
     ELSE oud_oo = 0;
 
-    /*IF oud_oo = 0 THEN DELETE;*/
+    IF oud_oo = 0 THEN DELETE;
 
     age_oo = OO_AGE;
     year_oo = OO_ADMIT_YEAR;
@@ -342,7 +342,7 @@ DATA casemix (KEEP = ID oud_cm year_cm age_cm month_cm);
 
     IF sum(oud_ed, oud_hd, oud_oo) > 0 THEN oud_cm = 1;
     ELSE oud_cm = 0;
-    /*IF oud_cm = 0 THEN DELETE;*/
+    IF oud_cm = 0 THEN DELETE;
 
 	age_cm = min(age_ed, age_hd, age_oo);
 	year_cm = min(year_oo, year_hd, year_cm);
@@ -417,7 +417,7 @@ DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp age_pmp);
     IF BUPRENORPHINE_PMP = 1 AND 
         BUP_CAT_PMP = 1 THEN oud_pmp = 1;
     ELSE oud_pmp = 0;
-    /*IF oud_pmp = 0 THEN DELETE;*/
+    IF oud_pmp = 0 THEN DELETE;
 
 	year_pmp = date_filled_year;
     month_pmp = date_filled_month;
@@ -474,7 +474,7 @@ DATA oud;
 
 	oud_age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp);
     oud_age = round(oud_age); /* Round oud_age to nearest whole number */
-    age_grp_five  = put(age, age_grps_five.);
+    age_grp_five  = put(oud_age, age_grps_five.);
 	IF age_grp_five  = 999 THEN DELETE;
 RUN;
 
@@ -1569,20 +1569,11 @@ data HCV_MOMS;
 run;
 
 /* HCV */
-proc sql;
-    create table HCV_MOMS as
-    select HCV_MOMS.*,
-           hcv.EVENT_DATE_HCV
-    from HCV_MOMS
-    left join PHDHEPC.HCV as hcv 
-    on hcv.ID = HCV_MOMS.MOM_ID;
-quit;
-
 data HCV_MOMS;
     set HCV_MOMS;
 
     /* Calculate the difference in days */
-    hcv_duration_count = EVENT_DATE_HCV - DOB_INFANT_TBL ;
+    hcv_duration_count = MOM_EVENT_DATE_HCV - DOB_INFANT_TBL ;
 
 run;
 
@@ -1613,44 +1604,55 @@ run;
 
 PROC SQL;
 	CREATE TABLE demographics AS
-	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX
+	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, APCD_anyclaim
 	FROM PHDSPINE.DEMO;
 	QUIT;
 
-/* INFANT_COHORT will be our primary cohort of interest */
+/* Merge cohorts */
 PROC SQL;
-CREATE TABLE INFANT_COHORT as
-SELECT DISTINCT MOM_ID,
-                INFANT_ID,
-				INFANT_YEAR_BIRTH,
-				MONTH_BIRTH,
-				DOB_INFANT_TBL,
-				MOM_DISEASE_STATUS_HCV,
-				MOM_EVENT_DATE_HCV,
-				FINAL_RE,
-				FINAL_SEX,
-				HIV_DIAGNOSIS,
-				MOUD_DURING_PREG,
-				MOUD_AT_DELIVERY
-FROM HCV_MOMS
-LEFT JOIN demographics ON HCV_MOMS.INFANT_ID = demographics.ID;
-quit;
+CREATE TABLE MERGED_COHORT AS
+SELECT DISTINCT 
+    M.MOM_ID,
+    M.INFANT_ID,
+    M.BIRTH_LINK_ID,
+    M.INFANT_YEAR_BIRTH,
+    M.MONTH_BIRTH,
+    M.DOB_INFANT_TBL,
+    M.MOM_DISEASE_STATUS_HCV,
+    M.MOM_EVENT_DATE_HCV,
+    D.FINAL_RE,
+    D.FINAL_SEX,
+    M.HIV_DIAGNOSIS,
+    M.MOUD_DURING_PREG,
+    M.MOUD_AT_DELIVERY,
+    D.APCD_anyclaim
+FROM HCV_MOMS AS M
+LEFT JOIN demographics AS D
+    ON M.INFANT_ID = D.ID;
+QUIT;
 
-/* Sort the dataset by INFANT_ID HIV_DIAGNOSIS MOUD_DURING_PREG */
-proc sort data=infant_cohort;
+/* Sort the dataset by INFANT_ID and MOUD_DURING_PREG */
+proc sort data=MERGED_COHORT;
   by INFANT_ID descending HIV_DIAGNOSIS descending MOUD_DURING_PREG;
 run;
 
 /* Create a new dataset to store the reduced output */
-data INFANT_COHORT;
+data MERGED_COHORT;
   /* Set the first row as the initial values */
-  set infant_cohort;
+  set MERGED_COHORT;
   by INFANT_ID;
 
   /* Retain the first row for each INFANT_ID */
   if first.INFANT_ID then output;
 
 run;
+
+/* Going to look at all exposed infants, but filter of APCD_anyclaim for testing and tratment cascade  */
+/* Filter into two datasets based on conditions */
+DATA INFANT_COHORT;
+    SET MERGED_COHORT;
+    IF APCD_anyclaim ne 1 THEN OUTPUT;
+RUN;
 
 /*====================================*/
 /* COHORT 2: Any Child <=15 in MAVEN */ 
@@ -2047,151 +2049,141 @@ because we want Infants who were at least 18mo old by study end, because the tes
 at least through summer 2023, have been largely to wait until 18mo to test for HCV Ab - once maternal
 Ab is lost. Therefore cohort for testing = born 2014-2019 */
 
+/*Exposed infants inlcude APCD_anyclaim = 0 */
+proc freq data=MERGED_COHORT;
+    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2022;
+    title "EXPOSED Infants born to moms with HCV born 2014-2022";
+    tables INFANT_YEAR_BIRTH / out=Table0 norow nopercent nocol; 
+run;
+
+proc print data=Table0; 
+run;
+
 /* Newly in July 2023, excluding those diagnosed at age >=3 or only probable status because they are 
 not technically perinatal cases */
 
-%macro Table1_Freq(title_text);
-    proc freq data=TESTING;
-        WHERE INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019; 
-        title "&title_text";
-        tables ANY_HCV_TESTING_INDICATOR AB_TEST_INDICATOR*RNA_TEST_INDICATOR APPROPRIATE_Testing APPROPRIATE_AB_Testing*APPROPRIATE_RNA_Testing CONFIRMED_HCV_INDICATOR DAA_START_INDICATOR CONFIRMED_HCV_INDICATOR*RNA_TEST_INDICATOR
-               / out=Table1 norow nopercent nocol;
-        format _NUMERIC_  15.;
-    run;
-    
-    proc print data=Table1; 
-    run;
-%mend Table1_Freq;
+title "Infants born to moms with HCV, Testing and Diagnosis, Overall, born 2014-2019";
+proc freq data=TESTING;
+    tables ANY_HCV_TESTING_INDICATOR
+           AB_TEST_INDICATOR*RNA_TEST_INDICATOR
+           APPROPRIATE_Testing
+           APPROPRIATE_AB_Testing*APPROPRIATE_RNA_Testing
+           CONFIRMED_HCV_INDICATOR
+           DAA_START_INDICATOR
+           CONFIRMED_HCV_INDICATOR*RNA_TEST_INDICATOR /missing;
+    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
+    ods output CrossTabFreqs=Table1;
+run;
 
-%Table1_Freq("Infants born to moms with HCV, Testing and Diagnosis, Overall, born 2014-2019");
+data Table1;
+    set Table1;
+    format frequency best32.;
+    keep INFANT_YEAR_BIRTH ANY_HCV_TESTING_INDICATOR AB_TEST_INDICATOR RNA_TEST_INDICATOR APPROPRIATE_Testing APPROPRIATE_AB_Testing APPROPRIATE_RNA_Testing CONFIRMED_HCV_INDICATOR DAA_START_INDICATOR frequency rowpercent;
+run;
 
-%macro Table2_Freq(title_text);
-    proc freq data=TESTING;
-        Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3;
-        title "&title_text";
-        tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST
-               / out=Table2 norow nopercent nocol; 
-    run;
-    
-    proc print data=Table2; 
-    run;
-%mend Table2_Freq;
+proc print data=Table1;
+run;
 
-%Table2_Freq("Infants with confirmed perinatal HCV only, unstratified, born 2014-2019 - ie age at dx <3");
+proc freq data=TESTING;
+    Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3;
+    title "Infants with confirmed perinatal HCV only, unstratified, born 2014-2019 - ie age at dx <3";
+    tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST
+           / out=Table2 norow nopercent nocol; 
+run;
 
-%macro Table3_Freq(title_text);
-    proc freq data=TESTING;
-        Where (INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <=2017 OR (INFANT_YEAR_BIRTH=2018 AND MONTH_BIRTH<=6))
-        AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
-        title "&title_text";
-        tables ANY_HCV_TESTING_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST
-               / out=Table3 norow nopercent nocol; 
-    run;
-    
-    proc print data=Table3; 
-    run;
-%mend Table3_Freq;
+proc print data=Table2; 
+run;
 
-%Table3_Freq("Infants with confirmed perinatal HCV only, unstratified, born 1/2014-6/2018, Confirmed HCV");
+proc freq data=TESTING;
+    Where (INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <=2017 OR (INFANT_YEAR_BIRTH=2018 AND MONTH_BIRTH<=6))
+    AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
+    title "Infants with confirmed perinatal HCV only, unstratified, born 1/2014-6/2018, Confirmed HCV";
+    tables ANY_HCV_TESTING_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST
+           / out=Table3 norow nopercent nocol; 
+run;
 
-%macro Table4_Freq(title_text);
-    proc freq data=TESTING;
-        Where INFANT_YEAR_BIRTH >= 2011 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
-        title "&title_text";
-        tables HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST
-               / out=Table4 norow nopercent nocol; 
-    run;
-    
-    proc print data=Table4; 
-    run;
-%mend Table4_Freq;
+proc print data=Table3; 
+run;
 
-%Table4_Freq("Infants with confirmed perinatal HCV only, unstratified, born 2011-2021");
+proc freq data=TESTING;
+    Where INFANT_YEAR_BIRTH >= 2011 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
+    title "Infants with confirmed perinatal HCV only, unstratified, born 2011-2021";
+    tables HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST
+           / out=Table4 norow nopercent nocol; 
+run;
 
-%macro Table5_Freq(title_text);
-    proc freq data=INFANT_DAA;
-    WHERE INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2021;
-    title "&title_text";
-    table final_re / out=Table5 norow nopercent nocol;
-    FORMAT final_re racefmt_all.;
-    run;
-    
-    proc print data=Table5; 
-    run;
-%mend Table5_Freq;
+proc print data=Table4; 
+run;
 
-%Table5_Freq("Total Number of EXPOSED Infants in Cohort, By Race, born 2014-2021");
+/*Exposed infants inlcude APCD_anyclaim = 0 */
+proc freq data=MERGED_COHORT;
+WHERE INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2021;
+title "Total Number of EXPOSED Infants in Cohort, By Race, born 2014-2021";
+table final_re / out=Table5 norow nopercent nocol;
+FORMAT final_re racefmt_all.;
+run;
 
-%macro Table6_Freq(title_text);
-    proc freq data=INFANT_DAA;
+proc print data=Table5; 
+run;
+
+title "Infants born to moms with HCV, TESTing/DIAGNOSIS Care Cascade, By Race, 2014-2019";
+proc freq data=INFANT_DAA;
+    tables ANY_HCV_TESTING_INDICATOR*final_re APPROPRIATE_Testing*final_re CONFIRMED_HCV_INDICATOR*final_re /missing;
     Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019;
-    title "&title_text";
-    tables ANY_HCV_TESTING_INDICATOR*final_re APPROPRIATE_Testing*final_re CONFIRMED_HCV_INDICATOR*final_re
-        / out=Table6 norow nopercent nocol;
-    FORMAT _NUMERIC_ 8.;
-    FORMAT final_re racefmt_all.;
-    run;
-    
-    proc print data=Table6; 
-    run;
-%mend Table6_Freq;
+    ods output CrossTabFreqs=Table6;
+run;
 
-%Table6_Freq("Infants born to moms with HCV, TESTing/DIAGNOSIS Care Cascade, By Race, 2014-2019");
+data Table6;
+    set Table6;
+    format frequency best32.;
+    keep INFANT_YEAR_BIRTH ANY_HCV_TESTING_INDICATOR final_re APPROPRIATE_Testing CONFIRMED_HCV_INDICATOR frequency rowpercent;
+run;
 
-%macro Table7_Freq(title_text);
-    proc freq data=INFANT_DAA;
+proc print data=Table6;
+run;
+
+title "Infants born to moms with HCV, Care Cascade, By Race/Hispance Ethnicity, born 2014-2019, Confirmed Perinatal HCV";
+proc freq data=INFANT_DAA;
+        tables CONFIRMED_HCV_INDICATOR*final_re HCV_PRIMARY_DIAG*final_re GENO_TEST_INDICATOR*final_re /missing;
     Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
-    title "&title_text";
-    tables CONFIRMED_HCV_INDICATOR*final_re HCV_PRIMARY_DIAG*final_re GENO_TEST_INDICATOR*final_re
-       / out=Table7 norow nopercent nocol;
-    FORMAT _NUMERIC_  15.;
-    FORMAT final_re racefmt_comb.;
-    run;
-    
-    proc print data=Table7; 
-    run;
-%mend Table7_Freq;
+    ods output CrossTabFreqs=Table7;
+run;
 
-%Table7_Freq("Infants born to moms with HCV, Care Cascade, By Race/Hispance Ethnicity, born 2014-2019, Confirmed Perinatal HCV");
+data Table7;
+    set Table7;
+    format frequency best32.;
+    keep INFANT_YEAR_BIRTH CONFIRMED_HCV_INDICATOR AGE_AT_DX final_re HCV_PRIMARY_DIAG GENO_TEST_INDICATOR frequency rowpercent;
+run;
 
-%macro Table8_Freq(title_text);
-    proc freq data=INFANT_DAA;
+proc print data=Table7;
+run;
+
+proc freq data=INFANT_DAA;
     Where INFANT_YEAR_BIRTH >= 2014; /*to exclude those born 2011-13 whose first test occurred pre-APCD start;*/
-    TITLE "&title_text";
+    TITLE "Number of Infants Born by YEAR & Age at first appropriate Ab, RNA testing, 2014-2021";
     TABLES INFANT_YEAR_BIRTH AGE_AT_FIRST_AB_TEST AGE_YRS_AT_FIRST_AB_TEST AGE_AT_FIRST_RNA_TEST AGE_YRS_AT_FIRST_RNA_TEST AGE_AT_FIRST_TEST AGE_YRS_AT_FIRST_TEST
         / out=Table8 nocol nopercent norow;
-    run;
-    
-    proc print data=Table8; 
-    run;
-%mend Table8_Freq;
+run;
 
-%Table8_Freq("Number of Exposed Infants Born by YEAR & Age at first appropriate Ab, RNA testing, 2014-2021");
+proc print data=Table8; 
+run;
 
-%macro Table9_Freq(title_text);
-    proc freq data=PHDBIRTH.BIRTH_INFANT;
-    TITLE "&title_text";
+proc freq data=PHDBIRTH.BIRTH_INFANT;
+    TITLE "Total Number of Infants Born by YEAR, 2014-2021";
     TABLE YEAR_BIRTH / out=Table9 nocol nopercent norow;
-    run;
-    
-    proc print data=Table9; 
-    run;
-%mend Table9_Freq;
+run;
 
-%Table9_Freq("Total Number of Infants Born by YEAR, 2014-2021");
+proc print data=Table9; 
+run;
 
-%macro Table10_Freq(title_text);
-    proc freq data=INFANT_DAA;
+proc freq data=INFANT_DAA;
     where APPROPRIATE_Testing = 1;
-    Title "&title_text";
+    Title "Number of appropriately tested infants by infant year of birth ie in each year how many infants born that year were ultimately appropriately tested bt 2014-2021";
     TABLES INFANT_YEAR_BIRTH / out=Table10 nocol nopercent norow;
-    run;
-    
-    proc print data=Table10; 
-    run;
-%mend Table10_Freq;
+run;
 
-%Table10_Freq("Number of appropriately tested infants by infant year of birth ie in each year how many infants born that year were ultimately appropriately tested bt 2014-2021");
+proc print data=Table10; 
+run;
 
 /*===============================================================================*/
 /*  Apply HCV cascade to the 372 kids <15 in MAVEN HEPC
@@ -2286,150 +2278,128 @@ RUN;
 /*        <=15 Year Old   TABLES    */
 /*=================================	*/
 
-%macro Table11_Freq(title_text);
-    proc freq data=DAA15;
-        title "&title_text";
-        tables DISEASE_STATUS_HCV DAA_START_INDICATOR FIRST_DAA_START_YEAR
-               / out=Table11 norow nopercent nocol;
-    run;
-    
-    proc print data=Table11; 
-    run;
-%mend Table11_Freq;
+proc freq data=DAA15;
+    title "HCV Care Cascade for children diagnosed with HCV at age <=15 years between 2011-2021, Overall";
+    tables DISEASE_STATUS_HCV DAA_START_INDICATOR FIRST_DAA_START_YEAR
+           / out=Table11 norow nopercent nocol;
+run;
 
-%Table11_Freq("HCV Care Cascade for children diagnosed with HCV at age <=15 years between 2011-2021, Overall");
+proc print data=Table11; 
+run;
 
-%macro Table12_Freq(title_text);
-    proc freq data=DAA15;
-        Where FIRST_DAA_START_YEAR < 2020;
-        title "&title_text";
-        tables DAA_START_INDICATOR
-               / out=Table12 norow nopercent nocol;
-    run;
-    
-    proc print data=Table12; 
-    run;
-%mend Table12_Freq;
+proc freq data=DAA15;
+    Where FIRST_DAA_START_YEAR < 2020;
+    title "<=15 HCV Care Cascade, DAA starts pre 2020";
+    tables DAA_START_INDICATOR
+           / out=Table12 norow nopercent nocol;
+run;
 
-%Table12_Freq("<=15 HCV Care Cascade, DAA starts pre 2020");
+proc print data=Table12; 
+run;
 
-%macro Table13_Freq(title_text);
-    proc freq data=DAA15;
-        WHERE DISEASE_STATUS_HCV = 1;
-        title "&title_text";
-        tables HCV_PRIMARY_DIAG RNA_TEST_INDICATOR GENO_TEST_INDICATOR
-               DAA_START_INDICATOR EVENT_YEAR_HCV AGE_HCV
-               / out=Table13 norow nopercent nocol;
-    run;
-    
-    proc print data=Table13; 
-    run;
-%mend Table13_Freq;
+proc freq data=DAA15;
+    WHERE DISEASE_STATUS_HCV = 1;
+    title "<=15 HCV Care Cascade, Among Confirmed";
+    tables HCV_PRIMARY_DIAG RNA_TEST_INDICATOR GENO_TEST_INDICATOR
+           DAA_START_INDICATOR EVENT_YEAR_HCV AGE_HCV
+           / out=Table13 norow nopercent nocol;
+run;
 
-%Table13_Freq("<=15 HCV Care Cascade, Among Confirmed");
+proc print data=Table13; 
+run;
 
-%macro Table14_Freq(title_text);
-    proc freq data=DAA15;
-        WHERE DISEASE_STATUS_HCV = 1 and 3 < AGE_HCV < 11;
-        title "&title_text";
-        tables DISEASE_STATUS_HCV
-               / out=Table14 norow nopercent nocol;
-    run;
-    
-    proc print data=Table14; 
-    run;
-%mend Table14_Freq;
+proc freq data=DAA15;
+    WHERE DISEASE_STATUS_HCV = 1 and 3 < AGE_HCV < 11;
+    title "HCV Diagnoses made among children 4-10yo between 2011-2021";
+    tables DISEASE_STATUS_HCV
+           / out=Table14 norow nopercent nocol;
+run;
 
-%Table14_Freq("HCV Diagnoses made among children 4-10yo between 2011-2021");
+proc print data=Table14; 
+run;
 
-/* Table 15 */
-%macro Table15_Freq(age_condition, title_text);
-    proc freq data=DAA15;
-        WHERE DISEASE_STATUS_HCV = 1 and &age_condition;
-        title "&title_text";
-        tables DISEASE_STATUS_HCV / out=Table15 norow nopercent nocol;
-    run;
-    
-    proc print data=Table15; 
-    run;
-%mend Table15_Freq;
+proc freq data=DAA15;
+    WHERE DISEASE_STATUS_HCV = 1 and 10 < AGE_HCV <= 15;
+    title "HCV Diagnoses made among children 11-15yo between 2011-2021";
+    tables DISEASE_STATUS_HCV / out=Table15 norow nopercent nocol;
+run;
 
-%Table15_Freq(10 < AGE_HCV <= 15, HCV Diagnoses made among children 11-15yo between 2011-2021);
+proc print data=Table15; 
+run;
 
+proc freq data=TRT_TESTING15;
+    WHERE DAA_START_INDICATOR = 1;
+    title "EOT/SVR12 & age at treatment, Among those treated";
+    tables EOT_RNA_TEST SVR12_RNA_TEST AGE_DAA_START_group
+           / out=Table16 norow nopercent nocol;
+    format AGE_DAA_START_group pharmagegroupf.;
+run;
 
-%macro Table16_Freq(title_text);
-    proc freq data=TRT_TESTING15;
-        WHERE DAA_START_INDICATOR = 1;
-        title "&title_text";
-        tables EOT_RNA_TEST SVR12_RNA_TEST AGE_DAA_START_group
-               / out=Table16 norow nopercent nocol;
-        format AGE_DAA_START_group pharmagegroupf.;
-    run;
-    
-    proc print data=Table16; 
-    run;
-%mend Table16_Freq;
+proc print data=Table16; 
+run;
 
-%Table16_Freq("EOT/SVR12 & age at treatment, Among those treated");
+proc freq data=TRT_TESTING15;
+    WHERE DISEASE_STATUS_HCV = 1 and DAA_START_INDICATOR = 1;
+    title "EOT/SVR12 & age at treatment, Among those treated & w confirmed HCV - dup in case age daa start group errors out again to get eot and svr";
+    tables EOT_RNA_TEST SVR12_RNA_TEST
+           / out=Table17 norow nopercent nocol;
+run;
 
-%macro Table17_Freq(title_text);
-    proc freq data=TRT_TESTING15;
-        WHERE DISEASE_STATUS_HCV = 1 and DAA_START_INDICATOR = 1;
-        title "&title_text";
-        tables EOT_RNA_TEST SVR12_RNA_TEST
-               / out=Table17 norow nopercent nocol;
-    run;
-    
-    proc print data=Table17; 
-    run;
-%mend Table17_Freq;
+proc print data=Table17; 
+run;
 
-%Table17_Freq("EOT/SVR12 & age at treatment, Among those treated & w confirmed HCV - dup in case age daa start group errors out again to get eot and svr");
+title "HCV Care Cascade, by race/ethnicity (<=15)";
+proc freq data=DAA15;
+    where DISEASE_STATUS_HCV = 1 and DAA_START_INDICATOR = 1;
+    tables DISEASE_STATUS_HCV*final_re /missing;
+    ods output CrossTabFreqs=Table18;
+run;
 
-%macro Table18_Freq(title_text);
-    proc freq data=DAA15;
-        title "&title_text";
-        tables DISEASE_STATUS_HCV*final_re
-               / out=Table18 norow nopercent nocol;
-        FORMAT final_re racefmt_all.;
-    run;
-    
-    proc print data=Table18; 
-    run;
-%mend Table18_Freq;
+data Table18;
+    set Table18;
+    format frequency best32.;
+    keep DISEASE_STATUS_HCV DAA_START_INDICATOR final_re frequency;
+run;
 
-%Table18_Freq("<=15 HCV Care Cascade, by race/ethnicity");
+proc print data=Table18;
+run;
 
-%macro Table19_Freq(title_text);
-    proc freq data=DAA15;
+title "<=15 HCV Care Cascade, by race/ethnicity, Among Confirmed";
+proc freq data=DAA15;
+    tables HCV_PRIMARY_DIAG*final_re
+           GENO_TEST_INDICATOR*final_re
+           DAA_START_INDICATOR*final_re /missing;
         Where DISEASE_STATUS_HCV = 1;
-        title "&title_text";
-        tables HCV_PRIMARY_DIAG*final_re
-               GENO_TEST_INDICATOR*final_re
-               DAA_START_INDICATOR*final_re
-               / out=Table19 norow nopercent nocol;
-        FORMAT final_re racefmt_comb.;
-    run;
-    
-    proc print data=Table19; 
-    run;
-%mend Table19_Freq;
+    ods output CrossTabFreqs=Table19;
+run;
 
-%Table19_Freq("<=15 HCV Care Cascade, by race/ethnicity, Among Confirmed");
+data Table19;
+    set Table19;
+    format frequency best32.;
+    keep DISEASE_STATUS_HCV HCV_PRIMARY_DIAG final_re GENO_TEST_INDICATOR DAA_START_INDICATOR frequency rowpercent;
+run;
+
+proc print data=Table19;
+run;
 
 /* ========================================================== */
 /*                       Pull Covariates                      */
 /* ========================================================== */
 
+proc sql noprint;
+select cats('WORK.',memname) into :to_delete separated by ' '
+from dictionary.tables
+where libname = 'WORK' and memname ne 'INFANT_DAA';
+quit;
+
+proc delete data=&to_delete.;
+run;
+
 /* Join to add covariates */
 
 proc sql;
     create table FINAL_INFANT_COHORT as
-    select INFANT_DAA.*, 
-           demographics.FINAL_RE,
-           demographics.APCD_anyclaim,
-           demographics.NON_MA,
-           demographics.SELF_FUNDED,
+    select INFANT_DAA.*,
            birthsinfants.DISCH_WITH_MOM,
            birthsinfants.FACILITY_ID_BIRTH,
            birthsinfants.GESTATIONAL_AGE,
@@ -2437,19 +2407,42 @@ proc sql;
            birthsinfants.NAS_BC,
            birthsinfants.NAS_BC_NEW,
            birthsinfants.RES_ZIP_BIRTH,
-           birthsinfants.Res_Code_Birth,
+           birthsinfants.Res_Code_Birt as res_code,
            case 
                when birthsinfants.NAS_BC = 1 or birthsinfants.NAS_BC_NEW = 1 then 1
                else .
            end as NAS_BC_TOTAL
     from INFANT_DAA
-    left join PHDSPINE.DEMO as demographics
-    on INFANT_DAA.ID = demographics.ID
     left join PHDBIRTH.BIRTH_INFANT as birthsinfants
-    on INFANT_DAA.ID = birthsinfants.ID
-    where demographics.APCD_anyclaim ne 1 
-      and demographics.SELF_FUNDED ne 1 
-      and demographics.NON_MA ne 1;
+    on INFANT_DAA.ID = birthsinfants.ID;
+
+    /* Create county from res_code */
+    data FINAL_INFANT_COHORT;
+        set FINAL_INFANT_COHORT;
+        if res_code in (20,36,41,55,75,86,96,126,172,224,242,261,300,318,351) then county='BARNSTABLE';
+        else if res_code in (4,6,22,58,63,70,90,98,113,121,132,148,150,152,193,195,
+                             200,203,209,225,233,236,249,260,263,267,283,302,313,326,341,345) then county='BERKSHIRE';
+        else if res_code in (3, 16,27,72,76,88,94,95,102,167,201,211,218,245,247,265,273,292,293,334) then county='BRISTOL';
+        else if res_code in (62,89,104,109,221,296,327) then county='DUKES';
+        else if res_code in (7,9,30,38,71,92,105,107,116,119,128,144,149,
+                             163,164,166,168,180,181,184,196,205,206,210,229,252,254,258,259,262,291,298,320,324) then county='ESSEX';
+        else if res_code in (13,29,47,53,66,68,74,91,106,114,129,130,154,156,190,192,204,217,223,253,
+                             268,272,289,312,319,337) then county='FRANKLIN';
+        else if res_code in (5,33,43,59,61,85,112,120,135,137,159,161,191,194,227,256,279,281,297,306,325,329,339) then county='HAMPDEN';
+        else if res_code in (8,24,60,69,87,108,111,117,127,143,183,214,230,237,275,276,309,331,340,349) then county='HAMPSHIRE';
+        else if res_code in (2,10,12,14,19,23,26,31,37,48,49,51,56,67,79,81,93,100,115,
+                             136,139,141,155,157,158,160,165,170,174,176,178,198,207,213,232,246,269,270,274,284,286,288,295,299,301,
+                             305,308,314,315,330,333,342,344,347) then county='MIDDLESEX';
+        else if res_code=197 then county='NANTUCKET';
+        else if res_code in (18,25,40,46,50,65,73,78,99,101,133,175,177,187,189,199,208,220,238,243,
+                             244,266,285,307,317,335,336,350) then county='NORFOLK';
+        else if res_code in (1,42,44,52,82,83,118,122,123,131,142,145,146,169,171,173,182,219,231,239,
+                             240,250,251,264,310,322,338) then county='PLYMOUTH';
+        else if res_code in (35,57,248,346) then county='SUFFOLK';
+        else if res_code in (11,15,17,21,28,32,34,39,45,54,64,77,80,84,97,103,110,124,125,134,
+                             138,140,147,151,153,162,179,185,186,188,202,212,215,216,222,226,228,234,235,241,255,257,
+                             271,277,278,280,282,287,290,294,303,304,311,316,321,323,328,332,343,348) then county='WORCESTER';
+    run;
 quit;
 
 proc sql;
@@ -2466,15 +2459,12 @@ proc sql;
            birthsmoms.LANGUAGE_SPOKEN,
            birthsmoms.MATINF_HEPC,
            birthsmoms.MATINF_HEPB,
-           birthsmoms.MOTHER_EDU,
-           hcv.EVER_IDU_HCV
+           birthsmoms.MOTHER_EDU
     from FINAL_INFANT_COHORT
     left join PHDSPINE.DEMO as demographics
     on FINAL_INFANT_COHORT.MOM_ID = demographics.ID 
     left join PHDBIRTH.BIRTH_MOM as birthsmoms
-    on FINAL_INFANT_COHORT.MOM_ID = birthsmoms.ID
-    left join PHDHEPC.HCV as hcv
-    on FINAL_INFANT_COHORT.MOM_ID = hcv.ID;
+    on FINAL_INFANT_COHORT.BIRTH_LINK_ID = birthsmoms.BIRTH_LINK_ID;
 quit;
 
 %LET MENTAL_HEALTH = ('F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F28', 'F29',
@@ -2482,88 +2472,96 @@ quit;
                       'F42', 'F43', 'F44', 'F45', 'F48');
 
 proc sql;
-    create table FINAL_INFANT_COHORT as
-    select FINAL_INFANT_COHORT.*,
-           case
-               when apcd.MED_ECODE in &MENTAL_HEALTH or
-                    apcd.MED_ADM_DIAGNOSIS in &MENTAL_HEALTH or
-                    apcd.MED_PROC_CODE in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC1 in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC2 in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC3 in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC4 in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC5 in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC6 in &MENTAL_HEALTH or
-                    apcd.MED_ICD_PROC7 in &MENTAL_HEALTH or
-                    apcd.MED_ICD1 in &MENTAL_HEALTH or
-                    apcd.MED_ICD2 in &MENTAL_HEALTH or
-                    apcd.MED_ICD3 in &MENTAL_HEALTH or
-                    apcd.MED_ICD4 in &MENTAL_HEALTH or
-                    apcd.MED_ICD5 in &MENTAL_HEALTH or
-                    apcd.MED_ICD6 in &MENTAL_HEALTH or
-                    apcd.MED_ICD7 in &MENTAL_HEALTH or
-                    apcd.MED_ICD8 in &MENTAL_HEALTH or
-                    apcd.MED_ICD9 in &MENTAL_HEALTH or
-                    apcd.MED_ICD10 in &MENTAL_HEALTH or
-                    apcd.MED_ICD11 in &MENTAL_HEALTH or
-                    apcd.MED_ICD12 in &MENTAL_HEALTH or
-                    apcd.MED_ICD13 in &MENTAL_HEALTH or
-                    apcd.MED_ICD14 in &MENTAL_HEALTH or
-                    apcd.MED_ICD15 in &MENTAL_HEALTH or
-                    apcd.MED_ICD16 in &MENTAL_HEALTH or
-                    apcd.MED_ICD17 in &MENTAL_HEALTH or
-                    apcd.MED_ICD18 in &MENTAL_HEALTH or
-                    apcd.MED_ICD19 in &MENTAL_HEALTH or
-                    apcd.MED_ICD20 in &MENTAL_HEALTH or
-                    apcd.MED_ICD21 in &MENTAL_HEALTH or
-                    apcd.MED_ICD22 in &MENTAL_HEALTH or
-                    apcd.MED_ICD23 in &MENTAL_HEALTH or
-                    apcd.MED_ICD24 in &MENTAL_HEALTH or
-                    apcd.MED_ICD25 in &MENTAL_HEALTH or
-                    apcd.MED_DIS_DIAGNOSIS in &MENTAL_HEALTH then 1
-               when substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD_PROC7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-  					or substr(apcd.MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-   					or substr(apcd.MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-  					or substr(apcd.MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
-               else 0
-           end as mental_health_diag
-    from FINAL_INFANT_COHORT
-    left join PHDAPCD.MEDICAL as apcd
-    on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
+create table MENTAL_HEALTH_COHORT(where=(MENTAL_HEALTH_DIAG=1)) as
+select distinct FINAL_INFANT_COHORT.MOM_ID,
+  case
+       when apcd.MED_ECODE in &MENTAL_HEALTH or
+                       apcd.MED_ADM_DIAGNOSIS in &MENTAL_HEALTH or
+                       apcd.MED_PROC_CODE in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC1 in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC2 in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC3 in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC4 in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC5 in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC6 in &MENTAL_HEALTH or
+                       apcd.MED_ICD_PROC7 in &MENTAL_HEALTH or
+                       apcd.MED_ICD1 in &MENTAL_HEALTH or
+                       apcd.MED_ICD2 in &MENTAL_HEALTH or
+                       apcd.MED_ICD3 in &MENTAL_HEALTH or
+                       apcd.MED_ICD4 in &MENTAL_HEALTH or
+                       apcd.MED_ICD5 in &MENTAL_HEALTH or
+                       apcd.MED_ICD6 in &MENTAL_HEALTH or
+                       apcd.MED_ICD7 in &MENTAL_HEALTH or
+                       apcd.MED_ICD8 in &MENTAL_HEALTH or
+                       apcd.MED_ICD9 in &MENTAL_HEALTH or
+                       apcd.MED_ICD10 in &MENTAL_HEALTH or
+                       apcd.MED_ICD11 in &MENTAL_HEALTH or
+                       apcd.MED_ICD12 in &MENTAL_HEALTH or
+                       apcd.MED_ICD13 in &MENTAL_HEALTH or
+                       apcd.MED_ICD14 in &MENTAL_HEALTH or
+                       apcd.MED_ICD15 in &MENTAL_HEALTH or
+                       apcd.MED_ICD16 in &MENTAL_HEALTH or
+                       apcd.MED_ICD17 in &MENTAL_HEALTH or
+                       apcd.MED_ICD18 in &MENTAL_HEALTH or
+                       apcd.MED_ICD19 in &MENTAL_HEALTH or
+                       apcd.MED_ICD20 in &MENTAL_HEALTH or
+                       apcd.MED_ICD21 in &MENTAL_HEALTH or
+                       apcd.MED_ICD22 in &MENTAL_HEALTH or
+                       apcd.MED_ICD23 in &MENTAL_HEALTH or
+                       apcd.MED_ICD24 in &MENTAL_HEALTH or
+                       apcd.MED_ICD25 in &MENTAL_HEALTH or
+                       apcd.MED_DIS_DIAGNOSIS in &MENTAL_HEALTH or
+                       substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD_PROC7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                       or substr(apcd.MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
+           else 0
+       end as MENTAL_HEALTH_DIAG
+from FINAL_INFANT_COHORT
+left join PHDAPCD.MEDICAL as apcd
+on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
 quit;
 
+proc sql;
+create table FINAL_INFANT_COHORT_COV as select *,
+case
+when MOM_ID in (select MOM_ID from MENTAL_HEALTH_COHORT) then 1
+else 0
+end as MENTAL_HEALTH_DIAG
+from FINAL_INFANT_COHORT;
+quit;
 /* Searching in full dataset because mental health codes are starts_with strings */
 
 %let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
@@ -2577,10 +2575,10 @@ quit;
            '4518', '4519');
 
 proc sql;
-    create table FINAL_INFANT_COHORT as
-    select FINAL_INFANT_COHORT.*, 
-           case 
-               when apcd.MED_ECODE in &IJI or
+create table IJI_COHORT(where=(IJI_DIAG=1)) as
+select distinct FINAL_INFANT_COHORT.MOM_ID,
+  case
+       when apcd.MED_ECODE in &IJI or
                     apcd.MED_ADM_DIAGNOSIS in &IJI or
                     apcd.MED_PROC_CODE in &IJI or
                     apcd.MED_ICD_PROC1 in &IJI or
@@ -2615,12 +2613,21 @@ proc sql;
                     apcd.MED_ICD23 in &IJI or
                     apcd.MED_ICD24 in &IJI or
                     apcd.MED_ICD25 in &IJI or
-                    apcd.MED_DIS_DIAGNOSIS in &IJI then 1 
-               else 0 
-           end as iji_diag
-    from FINAL_INFANT_COHORT
-    left join PHDAPCD.MOUD_MEDICAL as apcd
-    on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
+                    apcd.MED_DIS_DIAGNOSIS in &IJI then 1
+           else 0
+       end as IJI_DIAG
+from FINAL_INFANT_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd
+on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
+quit;
+
+proc sql;
+create table FINAL_INFANT_COHORT_COV as select *,
+case
+when MOM_ID in (select MOM_ID from IJI_COHORT) then 1
+else 0
+end as IJI_DIAG
+from FINAL_INFANT_COHORT_COV;
 quit;
 
 %LET OTHER_SUBSTANCE_USE = ('2910', '2911', '2912', '2913', '2914', '2915', '2918', '29181', '29182', '29189', '2919',
@@ -2654,150 +2661,127 @@ quit;
                       'T43691A', 'T43694A' /* Stimulants */);
                       
 proc sql;
-    create table FINAL_INFANT_COHORT as
-    select FINAL_INFANT_COHORT.*,
-           case 
-               when (apcd.MED_ECODE in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ADM_DIAGNOSIS in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC1 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC2 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC3 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC4 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC5 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC6 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD_PROC7 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD1 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD2 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD3 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD4 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD5 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD6 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD7 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD8 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD9 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD10 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD11 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD12 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD13 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD14 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD15 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD16 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD17 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD18 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD19 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD20 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD21 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD22 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD23 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD24 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_ICD25 in &OTHER_SUBSTANCE_USE or
-                     apcd.MED_DIS_DIAGNOSIS in &OTHER_SUBSTANCE_USE)
-                  or
+create table OTHER_SUBSTANCE_USE_COHORT(where=(OTHER_SUBSTANCE_USE=1)) as
+select distinct FINAL_INFANT_COHORT.MOM_ID,
+  case
+       when apcd.MED_ECODE in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ADM_DIAGNOSIS in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC1 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC2 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC3 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC4 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC5 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC6 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC7 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD1 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD2 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD3 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD4 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD5 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD6 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD7 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD8 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD9 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD10 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD11 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD12 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD13 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD14 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD15 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD16 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD17 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD18 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD19 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD20 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD21 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD22 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD23 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD24 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD25 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_DIS_DIAGNOSIS in &OTHER_SUBSTANCE_USE 
+                   or
                   (BSAS.CLT_ENR_PRIMARY_DRUG in (1,2,3,10,11,12) or
                    BSAS.CLT_ENR_SECONDARY_DRUG in (1,2,3,10,11,12) or
-                   BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12))
-                  then 1
-               else 0
-           end as OTHER_SUBSTANCE_USE
-    from FINAL_INFANT_COHORT
-    left join PHDAPCD.MOUD_MEDICAL as apcd on apcd.ID = FINAL_INFANT_COHORT.MOM_ID;
-    left join PHDBSAS.BSAS as bsas on bsas.ID = FINAL_INFANT_COHORT.MOM_ID
+                   BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12)) then 1
+           else 0
+       end as OTHER_SUBSTANCE_USE
+from FINAL_INFANT_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd on FINAL_INFANT_COHORT.MOM_ID = apcd.ID
+left join PHDBSAS.BSAS as bsas on FINAL_INFANT_COHORT.MOM_ID = bsas.ID;
+quit;
+
+proc sql;
+create table FINAL_INFANT_COHORT_COV as select *,
+case
+when MOM_ID in (select MOM_ID from OTHER_SUBSTANCE_USE_COHORT) then 1
+else 0
+end as OTHER_SUBSTANCE_USE
+from FINAL_INFANT_COHORT_COV;
 quit;
 
 %let well_child = ('Z00129', 'Z00121', /* ICD-10 codes */
                     'V202', 'V700', 'V703', 'V705', 'V706', 'V708', 'V709'); /* ICD-9 codes */
 
 proc sql;
-case 
-            when apcd.MED_ECODE in &well_child or
-                 apcd.MED_ADM_DIAGNOSIS in &well_child or
-                 apcd.MED_PROC_CODE in &well_child or
-                 apcd.MED_ICD_PROC1 in &well_child or
-                 apcd.MED_ICD_PROC2 in &well_child or
-                 apcd.MED_ICD_PROC3 in &well_child or
-                 apcd.MED_ICD_PROC4 in &well_child or
-                 apcd.MED_ICD_PROC5 in &well_child or
-                 apcd.MED_ICD_PROC6 in &well_child or
-                 apcd.MED_ICD_PROC7 in &well_child or
-                 apcd.MED_ICD1 in &well_child or
-                 apcd.MED_ICD2 in &well_child or
-                 apcd.MED_ICD3 in &well_child or
-                 apcd.MED_ICD4 in &well_child or
-                 apcd.MED_ICD5 in &well_child or
-                 apcd.MED_ICD6 in &well_child or
-                 apcd.MED_ICD7 in &well_child or
-                 apcd.MED_ICD8 in &well_child or
-                 apcd.MED_ICD9 in &well_child or
-                 apcd.MED_ICD10 in &well_child or
-                 apcd.MED_ICD11 in &well_child or
-                 apcd.MED_ICD12 in &well_child or
-                 apcd.MED_ICD13 in &well_child or
-                 apcd.MED_ICD14 in &well_child or
-                 apcd.MED_ICD15 in &well_child or
-                 apcd.MED_ICD16 in &well_child or
-                 apcd.MED_ICD17 in &well_child or
-                 apcd.MED_ICD18 in &well_child or
-                 apcd.MED_ICD19 in &well_child or
-                 apcd.MED_ICD20 in &well_child or
-                 apcd.MED_ICD21 in &well_child or
-                 apcd.MED_ICD22 in &well_child or
-                 apcd.MED_ICD23 in &well_child or
-                 apcd.MED_ICD24 in &well_child or
-                 apcd.MED_ICD25 in &well_child or
-                 apcd.MED_DIS_DIAGNOSIS in &well_child and age_months between 18 and 36 then 1 
-            else 0 
-        end as well_child
-    from FINAL_INFANT_COHORT
-    left join (
-        select apcd.ID, 
-               apcd.MED_ECODE,
-               apcd.MED_ADM_DIAGNOSIS,
-               apcd.MED_PROC_CODE,
-               apcd.MED_ICD_PROC1,
-               apcd.MED_ICD_PROC2,
-               apcd.MED_ICD_PROC3,
-               apcd.MED_ICD_PROC4,
-               apcd.MED_ICD_PROC5,
-               apcd.MED_ICD_PROC6,
-               apcd.MED_ICD_PROC7,
-               apcd.MED_ICD1,
-               apcd.MED_ICD2,
-               apcd.MED_ICD3,
-               apcd.MED_ICD4,
-               apcd.MED_ICD5,
-               apcd.MED_ICD6,
-               apcd.MED_ICD7,
-               apcd.MED_ICD8,
-               apcd.MED_ICD9,
-               apcd.MED_ICD10,
-               apcd.MED_ICD11,
-               apcd.MED_ICD12,
-               apcd.MED_ICD13,
-               apcd.MED_ICD14,
-               apcd.MED_ICD15,
-               apcd.MED_ICD16,
-               apcd.MED_ICD17,
-               apcd.MED_ICD18,
-               apcd.MED_ICD19,
-               apcd.MED_ICD20,
-               apcd.MED_ICD21,
-               apcd.MED_ICD22,
-               apcd.MED_ICD23,
-               apcd.MED_ICD24,
-               apcd.MED_ICD25,
-               apcd.MED_DIS_DIAGNOSIS,
-               floor((intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE))/12)*12 +
-               intck('month', FINAL_INFANT_COHORT.INFANT_YEAR_BIRTH, apcd.MED_FROM_DATE) as age_months
-    from PHDAPCD.MOUD_MEDICAL as apcd
-    inner join FINAL_INFANT_COHORT
-    on apcd.ID = FINAL_INFANT_COHORT.INFANT_ID
-	) as apcd
-		on FINAL_INFANT_COHORT.ID = apcd.INFANT_ID;
+create table WELL_CHILD_COHORT(where=(WELL_CHILD=1)) as
+select distinct FINAL_INFANT_COHORT.INFANT_ID,
+  case
+       when apcd.MED_ECODE in &WELL_CHILD or
+                        apcd.MED_ADM_DIAGNOSIS in &WELL_CHILD or
+                        apcd.MED_PROC_CODE in &WELL_CHILD or
+                        apcd.MED_ICD_PROC1 in &WELL_CHILD or
+                        apcd.MED_ICD_PROC2 in &WELL_CHILD or
+                        apcd.MED_ICD_PROC3 in &WELL_CHILD or
+                        apcd.MED_ICD_PROC4 in &WELL_CHILD or
+                        apcd.MED_ICD_PROC5 in &WELL_CHILD or
+                        apcd.MED_ICD_PROC6 in &WELL_CHILD or
+                        apcd.MED_ICD_PROC7 in &WELL_CHILD or
+                        apcd.MED_ICD1 in &WELL_CHILD or
+                        apcd.MED_ICD2 in &WELL_CHILD or
+                        apcd.MED_ICD3 in &WELL_CHILD or
+                        apcd.MED_ICD4 in &WELL_CHILD or
+                        apcd.MED_ICD5 in &WELL_CHILD or
+                        apcd.MED_ICD6 in &WELL_CHILD or
+                        apcd.MED_ICD7 in &WELL_CHILD or
+                        apcd.MED_ICD8 in &WELL_CHILD or
+                        apcd.MED_ICD9 in &WELL_CHILD or
+                        apcd.MED_ICD10 in &WELL_CHILD or
+                        apcd.MED_ICD11 in &WELL_CHILD or
+                        apcd.MED_ICD12 in &WELL_CHILD or
+                        apcd.MED_ICD13 in &WELL_CHILD or
+                        apcd.MED_ICD14 in &WELL_CHILD or
+                        apcd.MED_ICD15 in &WELL_CHILD or
+                        apcd.MED_ICD16 in &WELL_CHILD or
+                        apcd.MED_ICD17 in &WELL_CHILD or
+                        apcd.MED_ICD18 in &WELL_CHILD or
+                        apcd.MED_ICD19 in &WELL_CHILD or
+                        apcd.MED_ICD20 in &WELL_CHILD or
+                        apcd.MED_ICD21 in &WELL_CHILD or
+                        apcd.MED_ICD22 in &WELL_CHILD or
+                        apcd.MED_ICD23 in &WELL_CHILD or
+                        apcd.MED_ICD24 in &WELL_CHILD or
+                        apcd.MED_ICD25 in &WELL_CHILD or
+                        apcd.MED_DIS_DIAGNOSIS in &WELL_CHILD
+           and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) >= 18*30 and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) <= 36*30 then 1
+           else 0
+       end as WELL_CHILD
+from FINAL_INFANT_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd
+on FINAL_INFANT_COHORT.INFANT_ID = apcd.ID;
 quit;
 
-data FINAL_INFANT_COHORT;
-    merge FINAL_INFANT_COHORT (in=a)
+proc sql;
+create table FINAL_INFANT_COHORT_COV as select *,
+case
+when INFANT_ID in (select INFANT_ID from WELL_CHILD_COHORT) then 1
+else 0
+end as WELL_CHILD
+from FINAL_INFANT_COHORT_COV;
+quit;
+
+data FINAL_INFANT_COHORT_COV;
+    merge FINAL_INFANT_COHORT_COV (in=a)
           OUD_HCV_DAA (in=b);
     by MOM_ID;
 
@@ -2812,7 +2796,7 @@ run;
 /* ========================================================== */
 
 %macro Table1Freqs (var);
-proc freq data=FINAL_INFANT_COHORT; tables &var / missing; run;
+proc freq data=FINAL_INFANT_COHORT_COV; tables &var / missing; run;
 %mend;
 
 %Table1freqs (FINAL_SEX);
@@ -2847,12 +2831,12 @@ proc freq data=FINAL_INFANT_COHORT; tables &var / missing; run;
 
 %macro Table1StrataFreqs(var);
     /* Sort the dataset by APPROPRIATE_Testing */
-    proc sort data=FINAL_INFANT_COHORT;
+    proc sort data=FINAL_INFANT_COHORT_COV;
         by APPROPRIATE_Testing;
     run;
 
     /* Run PROC FREQ with BY statement */
-    proc freq data=FINAL_INFANT_COHORT;
+    proc freq data=FINAL_INFANT_COHORT_COV;
         by APPROPRIATE_Testing;
         tables &var / missing;
     run;
@@ -2889,7 +2873,7 @@ proc freq data=FINAL_INFANT_COHORT; tables &var / missing; run;
 %Table1Stratafreqs (iji_diag);
 
 %macro Table2Crude (var);
-proc logistic data=FINAL_INFANT_COHORT desc; 
+proc logistic data=FINAL_INFANT_COHORT_COV desc; 
 	class &var (param=ref);
 	model APPROPRIATE_Testing=&var;
 	run;
