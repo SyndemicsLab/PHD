@@ -412,7 +412,7 @@ RUN;
 
 /* PMP */
 DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp age_pmp);
-    SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year AGE_PMP date_filled_month
+    SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year AGE_PMP date_filled_month BUP_CAT_PMP
                     WHERE= (date_filled_year IN &year));
     IF BUPRENORPHINE_PMP = 1 AND 
         BUP_CAT_PMP = 1 THEN oud_pmp = 1;
@@ -755,6 +755,13 @@ RUN;
 PROC SORT data=moud_demo; 
     BY episode_id;
 RUN;
+
+PROC SQL;
+    CREATE TABLE moud_demo AS 
+    SELECT * 
+    FROM moud_demo
+    WHERE ID IN (SELECT DISTINCT ID FROM oud_yearly);
+QUIT;
 
 DATA moud_demo; 
     SET moud_demo;
