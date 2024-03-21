@@ -2,7 +2,7 @@
 /* Project: OUD Cascade 	    */
 /* Author: Ryan O'Dea  		    */ 
 /* Created: 4/27/2023 		    */
-/* Updated: 12/20/2023 by SJM	*/
+/* Updated: 03/21/2024 by SJM	*/
 /*==============================*/
 
 /*===== SUPRESSION CODE =========*/
@@ -702,6 +702,22 @@ PROC SQL;
     FROM moud_expanded 
     LEFT JOIN age ON age.ID = moud_expanded.ID;
 QUIT;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM moud_demo;
+QUIT;
+
+%put Number of unique IDs in moud_demo table: &num_unique_ids;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM moud_expanded;
+QUIT;
+
+%put Number of unique IDs in moud_expanded table: &num_unique_ids;
 
 PROC SQL;                  
     CREATE TABLE moud_starts AS
@@ -1592,7 +1608,7 @@ run;
 
 PROC SQL;
 	CREATE TABLE demographics AS
-	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, APCD_anyclaim
+	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, APCD_anyclaim, SELF_FUNDED
 	FROM PHDSPINE.DEMO;
 	QUIT;
 
@@ -1616,7 +1632,8 @@ SELECT DISTINCT
     D.APCD_anyclaim
 FROM HCV_MOMS AS M
 LEFT JOIN demographics AS D
-    ON M.INFANT_ID = D.ID;
+    ON M.INFANT_ID = D.ID
+WHERE D.SELF_FUNDED = 0;
 QUIT;
 
 /* Sort the dataset by INFANT_ID and MOUD_DURING_PREG */
