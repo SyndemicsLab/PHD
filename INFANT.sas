@@ -637,7 +637,7 @@ RUN;
 PROC SORT data=moud_demo (KEEP= start_date start_month start_year
 					  			end_date end_month end_year 
 					  			ID FINAL_RE FINAL_SEX TYPE_MOUD);
-    BY ID;
+    BY ID START_DATE END_DATE;
 RUN;
 
 PROC SQL;
@@ -650,10 +650,12 @@ DATA moud_demo;
     BY ID;
 	
 	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+
+    LAG_ED = LAG(END_DATE);
 	
 	IF FIRST.ID THEN diff = .; 
-	ELSE diff = start_date - lag(end_date);
-    IF end_date > lag(end_date) THEN temp_flag = 1;
+	ELSE diff = start_date - LAG_ED;
+    IF end_date < LAG_ED THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF first.ID THEN flag_mim = 0;
