@@ -93,14 +93,14 @@ quit;
 /*======DEMOGRAPHIC DATA=========*/
 PROC SQL;
 	CREATE TABLE demographics AS
-	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, SELF_FUNDED
+	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB, SELF_FUNDED
 	FROM PHDSPINE.DEMO
 	WHERE FINAL_SEX = 2 & SELF_FUNDED = 0;
 QUIT;
 
 /*=========APCD DATA=============*/
-DATA apcd (KEEP= ID oud_apcd year_apcd age_apcd month_apcd);
-    SET PHDAPCD.MOUD_MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE
+DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
+	SET PHDAPCD.MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS
 								MED_ICD_PROC1-MED_ICD_PROC7
 								MED_ICD1-MED_ICD25
 								MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
@@ -121,13 +121,12 @@ DATA apcd (KEEP= ID oud_apcd year_apcd age_apcd month_apcd);
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
 	IF oud_apcd = 0 THEN DELETE;
 
-	age_apcd = MED_AGE;
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
 RUN;
 
-DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID age_pharm);
-    SET PHDAPCD.MOUD_PHARM(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH PHARM_AGE
+DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
+    SET PHDAPCD.MOUD_PHARM(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH
                                PHARM_FILL_DATE_YEAR PHARM_ICD ID);
     month_pharm = PHARM_FILL_DATE_MONTH;
     year_pharm = PHARM_FILL_DATE_YEAR;
@@ -135,13 +134,11 @@ DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID age_pharm);
     IF  PHARM_ICD IN &ICD OR 
         PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
-
-    IF oud_pharm > 0 THEN age_pharm = PHARM_AGE;
 RUN;
 
 /*======CASEMIX DATA==========*/
 /* ED */
-DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm age_ed month_cm);
+DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm month_cm);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
 				  WHERE= (ED_ADMIT_YEAR IN &year));
 	IF ED_DIAG1 in &ICD OR 
@@ -149,9 +146,8 @@ DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm age_ed month_cm);
 	ELSE oud_cm_ed = 0;
 	
 	IF oud_cm_ed > 0 THEN do;
-	age_ed = ED_AGE;
 	year_cm = ED_ADMIT_YEAR;
-    	month_cm = ED_ADMIT_MONTH;
+    month_cm = ED_ADMIT_MONTH;
     end;
 RUN;
 
@@ -207,7 +203,7 @@ DATA casemix (KEEP= ID oud_ed year_cm age_ed month_cm);
 RUN;
 
 /* HD DATA */
-DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd age_hd month_hd);
+DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd month_hd);
 	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
 					WHERE= (HD_ADMIT_YEAR IN &year));
 	IF HD_DIAG1 in &ICD OR
@@ -216,7 +212,6 @@ DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd age_hd month_hd);
 	ELSE oud_hd_raw = 0;
 
 IF oud_hd_raw > 0 THEN do;
-    age_hd = HD_AGE;
     year_hd = HD_ADMIT_YEAR;
     month_hd = HD_ADMIT_MONTH;
 end;
@@ -265,7 +260,7 @@ PROC SQL;
 	LEFT JOIN hd_proc ON hd.HD_ID = hd_proc.HD_ID;
 QUIT;
 
-DATA hd (KEEP= ID oud_hd year_hd age_hd month_hd);
+DATA hd (KEEP= ID oud_hd year_hd month_hd);
 	SET hd;
 	IF SUM(oud_hd_diag, oud_hd_raw, oud_hd_proc) > 0 THEN oud_hd = 1;
 	ELSE oud_hd = 0;
@@ -276,7 +271,7 @@ RUN;
 /* OO */
 DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
     SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
-                        OO_ADMIT_YEAR OO_ADMIT_MONTH OO_AGE
+                        OO_ADMIT_YEAR OO_ADMIT_MONTH
                         OO_CPT1-OO_CPT10
                         OO_PRINCIPALEXTERNAL_CAUSECODE
                     WHERE= (OO_ADMIT_YEAR IN &year));
@@ -299,8 +294,7 @@ DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
 
     IF oud_oo = 0 THEN DELETE;
 
-    age_oo = OO_AGE;
-    year_oo = OO_ADMIT_YEAR;
+	year_oo = OO_ADMIT_YEAR;
     month_oo = OO_ADMIT_MONTH;
 RUN;
 
@@ -320,7 +314,7 @@ QUIT;
 
 PROC STDIZE DATA = casemix OUT = casemix reponly missing = 9999; RUN;
 
-DATA casemix (KEEP = ID oud_cm year_cm age_cm month_cm);
+DATA casemix (KEEP = ID oud_cm year_cm month_cm);
     SET casemix;
 
     IF oud_ed = 9999 THEN oud_ed = 0;
@@ -331,13 +325,12 @@ DATA casemix (KEEP = ID oud_cm year_cm age_cm month_cm);
     ELSE oud_cm = 0;
     IF oud_cm = 0 THEN DELETE;
 
-	age_cm = min(age_ed, age_hd, age_oo);
 	year_cm = min(year_oo, year_hd, year_cm);
     month_cm = min(month_oo, month_hd, month_cm);
 RUN;
 
 /* BSAS */
-DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas age_bsas);
+DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas);
     SET PHDBSAS.BSAS (KEEP= ID CLT_ENR_OVERDOSES_LIFE
                              CLT_ENR_PRIMARY_DRUG
                              CLT_ENR_SECONDARY_DRUG
@@ -345,7 +338,6 @@ DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas age_bsas);
                              PDM_PRV_SERV_CAT
                              ENR_YEAR_BSAS 
                              ENR_MONTH_BSAS
-                             AGE_BSAS
                       WHERE= (ENR_YEAR_BSAS IN &year));
     IF (CLT_ENR_OVERDOSES_LIFE > 0 AND CLT_ENR_OVERDOSES_LIFE ^= 999)
         OR CLT_ENR_PRIMARY_DRUG in &bsas_drugs
@@ -360,7 +352,7 @@ DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas age_bsas);
 RUN;
 
 /* MATRIS */
-DATA matris (KEEP= ID oud_matris year_matris month_matris age_matris);
+DATA matris (KEEP= ID oud_matris year_matris month_matris);
 SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
                           OPIOID_ORISUBCAT_MATRIS
                           inc_year_matris
@@ -373,20 +365,12 @@ SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
     ELSE oud_matris = 0;
     IF oud_matris = 0 THEN DELETE;
 
-	IF AGE_UNITS_MATRIS = 1 THEN age_matris = AGE_MATRIS/525600;
-	ELSE IF AGE_UNITS_MATRIS = 2 THEN age_matris = AGE_MATRIS/8760;
-	ELSE IF AGE_UNITS_MATRIS = 3 THEN age_matris = AGE_MATRIS/365.25;
-	ELSE IF AGE_UNITS_MATRIS = 4 THEN age_matris = AGE_MATRIS/52;
-	ELSE IF AGE_UNITS_MATRIS = 5 THEN age_matris = AGE_MATRIS/12;
-	ELSE IF AGE_UNITS_MATRIS = 6 THEN age_matris = AGE_MATRIS;
-	ELSE age_matris = 999;
-
 	year_matris = inc_year_matris;
     month_matris = inc_month_matris;
 RUN;
 
 /* DEATH */
-DATA death (KEEP= ID oud_death year_death month_death age_death);
+DATA death (KEEP= ID oud_death year_death month_death);
     SET PHDDEATH.DEATH (KEEP= ID OPIOID_DEATH YEAR_DEATH AGE_DEATH
                         WHERE= (YEAR_DEATH IN &year));
     IF OPIOID_DEATH = 1 THEN oud_death = 1;
@@ -398,8 +382,8 @@ DATA death (KEEP= ID oud_death year_death month_death age_death);
 RUN;
 
 /* PMP */
-DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp age_pmp);
-    SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year AGE_PMP date_filled_month BUP_CAT_PMP
+DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp);
+    SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year date_filled_month BUP_CAT_PMP
                     WHERE= (date_filled_year IN &year));
     IF BUPRENORPHINE_PMP = 1 AND 
         BUP_CAT_PMP = 1 THEN oud_pmp = 1;
@@ -464,9 +448,8 @@ DATA oud;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-	oud_age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp);
-    oud_age = round(oud_age); /* Round oud_age to nearest whole number */;
-    age_grp_five  = put(oud_age, age_grps_five.);
+    age = year - YOB;
+    age_grp_five = put(age, age_grps_five.);
 	IF age_grp_five  = 999 THEN DELETE;
 RUN;
 
@@ -490,80 +473,7 @@ QUIT;
 /*==============================*/
 /*         MOUD Counts          */
 /*==============================*/
-
 /* Age Demography Creation */
-
-PROC SQL;
-	CREATE TABLE demographics AS
-SELECT * FROM demographics;
-    
-PROC SQL;
-    CREATE TABLE medical_age AS 
-    SELECT ID, 
-           MED_AGE AS age_apcd, 
-           MED_FROM_DATE_MONTH AS month_apcd,
-           MED_FROM_DATE_YEAR AS year_apcd
-    FROM PHDAPCD.MOUD_MEDICAL;
-
-    CREATE TABLE pharm_age AS
-    SELECT ID, 
-           PHARM_AGE AS age_pharm, 
-           PHARM_FILL_DATE_MONTH AS month_pharm, 
-           PHARM_FILL_DATE_YEAR AS year_pharm
-    FROM PHDAPCD.MOUD_PHARM;
-
-    CREATE TABLE bsas_age AS
-    SELECT ID, 
-           AGE_BSAS AS age_bsas,
-           ENR_YEAR_BSAS AS year_bsas,
-           ENR_MONTH_BSAS AS month_bsas
-    FROM PHDBSAS.BSAS;
-
-    CREATE TABLE hocmoud_age AS 
-    SELECT ID,
-           enroll_age AS age_hocmoud,
-           enroll_year AS year_hocmoud,
-           enroll_month AS month_hocmoud
-    FROM PHDBSAS.HOCMOUD;
-    
-    CREATE TABLE doc_age AS
-    SELECT ID,
-           ADMIT_RECENT_AGE_DOC AS age_doc,
-           ADMIT_RECENT_MONTH_DOC AS month_doc,
-           ADMIT_RECENT_YEAR_DOC AS year_doc
-    FROM PHDDOC.DOC;
-
-    CREATE TABLE pmp_age AS 
-    SELECT ID,
-           AGE_PMP AS age_pmp,
-           DATE_FILLED_MONTH AS month_pmp,
-           DATE_FILLED_YEAR AS year_pmp
-    FROM PHDPMP.PMP; 
-
-    CREATE TABLE age AS
-    SELECT * FROM demographics
-    LEFT JOIN medical_age ON medical_age.ID = demographics.ID 
-    LEFT JOIN pharm_age ON pharm_age.ID = demographics.ID
-    LEFT JOIN bsas_age ON bsas_age.ID = demographics.ID
-    LEFT JOIN hocmoud_age ON hocmoud_age.ID = demographics.ID
-    LEFT JOIN doc_age ON doc_age.ID = demographics.ID
-    LEFT JOIN pmp_age ON pmp_age.ID = demographics.ID;      
-QUIT;
-
-DATA age (KEEP= ID age_grp_five);
-    SET age;
-    ARRAY age_flags {*} age_apcd age_pharm
-    					age_bsas age_hocmoud
-    					age_doc age_pmp;
-                        
-    DO i = 1 TO dim(age_flags);
-        IF missing(age_flags[i]) THEN age_flags[i] = 9999;
-    END;
-    
-    age_raw = min(age_apcd, age_pharm, age_bsas, age_hocmoud, age_doc, age_pmp);
-    age_grp_five = put(age_raw, age_grps_five.);
-RUN;
-
 DATA moud;
     SET PHDSPINE.MOUD;
 RUN;
@@ -572,12 +482,9 @@ PROC SORT data=moud;
     by ID DATE_START_MOUD;
 RUN;
 
-PROC SQL;
-    CREATE TABLE age AS 
-    SELECT DISTINCT * FROM age;
-    
+PROC SQL;    
     CREATE TABLE moud_demo AS
-    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX
+    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX, DEMO.YOB
     FROM moud
     LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
 QUIT;
@@ -636,8 +543,8 @@ RUN;
 
 PROC SORT data=moud_demo (KEEP= start_date start_month start_year
 					  			end_date end_month end_year 
-					  			ID FINAL_RE FINAL_SEX TYPE_MOUD);
-    BY ID START_DATE END_DATE;
+					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
+    BY ID;
 RUN;
 
 PROC SQL;
@@ -663,6 +570,9 @@ DATA moud_demo;
     ELSE flag_mim = 0;
 
     IF flag_mim = 1 THEN DELETE;
+
+    age = year - YOB;
+    age_grp_five = put(age, age_grps_five.);
 RUN;
 
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
@@ -680,48 +590,17 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       month = month(new_date);
       OUTPUT;
     END;
+    
+    postexp_age = year - YOB;
+    age_grp_five = put(postexp_age, age_grps_five.);
 RUN;
-
-PROC SQL;
-	CREATE TABLE moud_demo AS
-	SELECT DISTINCT * FROM moud_demo
-	LEFT JOIN age ON age.ID = moud_demo.ID;
-QUIT;
 
 DATA moud_expanded;
 	SET moud_expanded;
 	WHERE year IN &year;
 RUN;
 
-PROC SQL;
-    CREATE TABLE moud_demo AS 
-    SELECT * 
-    FROM moud_demo
-    LEFT JOIN age ON age.ID = moud_demo.ID;
-    
-    CREATE TABLE moud_expanded AS 
-    SELECT * 
-    FROM moud_expanded 
-    LEFT JOIN age ON age.ID = moud_expanded.ID;
-QUIT;
-
-PROC SQL;
-    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM moud_demo;
-QUIT;
-
-%put Number of unique IDs in moud_demo table: &num_unique_ids;
-
-PROC SQL;
-    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM moud_expanded;
-QUIT;
-
-%put Number of unique IDs in moud_expanded table: &num_unique_ids;
-
-PROC SQL;                  
+PROC SQL;                    
     CREATE TABLE moud_starts AS
     SELECT start_month AS month,
            start_year AS year,
