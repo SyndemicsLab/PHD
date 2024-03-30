@@ -614,7 +614,6 @@ RUN;
 /*==============================*/
 /*         MOUD Counts          */
 /*==============================*/
-/* Age Demography Creation */
 DATA moud;
     SET PHDSPINE.MOUD;
 RUN;
@@ -729,7 +728,7 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       month = month(new_date);
       OUTPUT;
     END;
-    
+
     postexp_age = year - YOB;
     age_grp_five = put(postexp_age, age_grps_five.);
 RUN;
