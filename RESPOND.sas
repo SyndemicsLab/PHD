@@ -18,7 +18,7 @@ run;
 /*==============================*/
 /*  	GLOBAL VARIABLES   	 */
 /*==============================*/
-%LET year = (2015:2021);
+%LET year = (2014:2021);
 %LET MOUD_leniency = 7;
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
@@ -846,6 +846,14 @@ DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
 	BIRTH_INDICATOR = 1;
 run;
 
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM all_births;
+QUIT;
+
+%put Number of unique IDs in all_births table: &num_unique_ids;
+
 proc SQL;
 CREATE TABLE births AS
 SELECT  ID,
@@ -860,7 +868,6 @@ PROC SQL;
     SELECT * FROM oud_distinct
     LEFT JOIN births ON oud_distinct.ID = births.ID;
 QUIT;
-
 
 /* RECODE MISSING VALUES AS 0  */
 
@@ -1211,11 +1218,7 @@ tables ANY_HCV_TESTING_INDICATOR
 	   HCV_SEROPOSITIVE_INDICATOR
 	   CONFIRMED_HCV_INDICATOR
 	   HCV_PRIMARY_DIAG
-	   CONFIRMED_HCV_INDICATOR*HCV_PRIMARY_DIAG
-       CONFIRMED_HCV_INDICATOR*GENO_TEST_INDICATOR
 	   DAA_START_INDICATOR
-	   DAA_START_INDICATOR*CONFIRMED_HCV_INDICATOR
-	   HCV_SEROPOSITIVE_INDICATOR*HCV_PRIMARY_DIAG
 	   BIRTH_INDICATOR
 	   EVENT_YEAR_HCV
 	   FIRST_DAA_START_YEAR /missing;
@@ -1235,7 +1238,11 @@ run;
 proc freq data=Testing;
 title   "Testing Among Confirmed HCV";
 where   CONFIRMED_HCV_INDICATOR = 1;
-tables  EOT_RNA_TEST
+tables  HCV_PRIMARY_DIAG
+        GENO_TEST_INDICATOR
+        DAA_START_INDICATOR
+        BIRTH_INDICATOR
+        EOT_RNA_TEST
 		SVR12_RNA_TEST
 		FIRST_DAA_START_YEAR / norow nopercent nocol;
 run;
