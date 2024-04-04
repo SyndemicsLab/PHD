@@ -94,6 +94,11 @@ QUIT;
 /*======DEMOGRAPHIC DATA=========*/
 DATA demographics;
     SET PHDSPINE.DEMO (KEEP= ID FINAL_RE FINAL_SEX YOB);
+    IF FINAL_RE = 9 THEN DELETE;
+    IF FINAL_RE = 99 THEN DELETE;
+
+    IF FINAL_SEX = 9 THEN DELETE;
+    IF FINAL_SEX = 99 THEN DELETE;
 RUN;
 
 %let start_year=%scan(%substr(&year,2,%length(&year)-2),1,':');
@@ -283,7 +288,7 @@ DATA hd (KEEP= ID oud_hd year_hd month_hd);
 RUN;
 
 /* OO */
-DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
+DATA oo (KEEP= ID oud_oo year_oo month_oo);
     SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
                         OO_ADMIT_YEAR OO_ADMIT_MONTH
                         OO_CPT1-OO_CPT10
@@ -361,7 +366,7 @@ DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas);
     IF oud_bsas = 0 THEN DELETE;
 
 	year_bsas = ENR_YEAR_BSAS;
-    month_bsas = ENR_MONTH_BSAS;;
+    month_bsas = ENR_MONTH_BSAS;
 RUN;
 
 /* MATRIS */
@@ -726,10 +731,10 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
       year = year(new_date);
       month = month(new_date);
+      postexp_age = year - YOB;
       OUTPUT;
     END;
 
-    postexp_age = year - YOB;
     age_grp_five = put(postexp_age, age_grps_five.);
 RUN;
 
