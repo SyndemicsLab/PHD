@@ -1,8 +1,1224 @@
+/*==============================*/
+/* Project: OUD Cascade 	    */
+/* Author: Ryan O'Dea  		    */ 
+/* Created: 4/27/2023 		    */
+/* Updated: 04/02/2024 by SJM	*/
+/*==============================*/
+
+/*===== SUPRESSION CODE =========*/
+ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
+proc format;                                                                                               
+   value supp010_ 1-10=' * ';                                                                           
+run ;
+proc template;
+%include "/sas/data/DPH/OPH/PHD/template.sas";
+run;
+/*==============================*/
+
+/*==============================*/
+/*  	GLOBAL VARIABLES   	 */
+/*==============================*/
+%LET year = (2014:2021);
+%LET MOUD_leniency = 7;
+%let today = %sysfunc(today(), date9.);
+%let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
+
+/*===========AGE================*/
+PROC FORMAT;
+	VALUE age_grps_five
+		low-14 = '999'
+		15-18 = '1'
+		19-25 = '2'
+		26-30 = '3'
+		31-35 = '4'
+		36-45 = '5'
+		46-high = '999';
+
+/*========ICD CODES=============*/
+%LET ICD = ('30400','30401','30402','30403',
+	'30470','30471','30472','30473',
+    '30550','30551','30552','30553', /* ICD9 */
+    'F1110','F1111','F11120','F11121', 
+	'F11122','F11129','F1113','F1114', 
+    'F11150','F11151','F11159','F11181', 
+    'F11182','F11188','F1119','F1120', 
+    'F1121','F11220','F11221','F11222', 
+    'F11229','F1123','F1124','F11250', 
+    'F11251','F11259','F11281','F11282', 
+    'F11288','F1129','F1193','F1199',  /* ICD10 */
+	'9701','96500','96501','96502',
+ 	'96509','E8500','E8501','E8502',
+  	'T400X1A','T400X2A','T400X3A','T400X4A',
+    'T400X1D','T400X2D','T400X3D','T400X4D',
+    'T401X1A','T401X2A','T401X3A','T401X4A',
+    'T401X1D','T401X2D','T401X3D','T401X4D',
+    'T402X1A','T402X2A','T402X3A','T402X4A',
+    'T402X1D','T402X2D','T402X3D','T402X4D', 
+	'T403X1A','T403X2A','T403X3A','T403X4A', 
+	'T403X1D','T403X2D','T403X3D','T403X4D', 
+	'T404X1A','T404X2A','T404X3A','T404X4A', 
+	'T404X1D','T404X2D','T404X3D','T404X4D',
+	'T40601A','T40601D','T40602A','T40602D', 
+	'T40603A','T40603D','T40604A','T40604D', 
+	'T40691A','T40692A','T40693A','T40694A', 
+	'T40691D','T40692D','T40693D','T40694D' /* Overdose Codes */);
+           
+%LET PROC = ('G2067','G2068','G2069','G2070', 
+	'G2071','G2072','G2073','G2074', 
+	'G2075', /* MAT Opioid */
+	'G2076','G2077','G2078','G2079', 
+	'G2080', /*Opioid Trt */
+ 	'H0020','HZ81ZZZ','HZ84ZZZ','HZ91ZZZ','HZ94ZZZ',
+    'J0570','J0571','J0572','J0573', 
+ 	'J0574','J0575','J0592', 'J2315','Q9991','Q9992''S0109'/* Naloxone*/);
+
+%LET bsas_drugs = (5,6,7,21,22,23,24,26);
+
+proc sql;
+create table bupndcf as
+select distinct ndc
+from PHDPMP.PMP
+where BUP_CAT_PMP = 1;
+quit;
+
+proc sql noprint;
+select quote(trim(ndc),"'") into :BUP_NDC separated by ','
+from bupndcf;
+quit;
+            
+/*===============================*/            
+/* DATA PULL			 */
+/*===============================*/ 
+
+/*======DEMOGRAPHIC DATA=========*/
+PROC SQL;
+	CREATE TABLE demographics AS
+	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB, SELF_FUNDED
+	FROM PHDSPINE.DEMO
+	WHERE FINAL_SEX = 2 & SELF_FUNDED = 0;
+QUIT;
+
+/*=========APCD DATA=============*/
+DATA apcd (KEEP= ID oud_apcd);
+	SET PHDAPCD.MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS
+								MED_ICD_PROC1-MED_ICD_PROC7
+								MED_ICD1-MED_ICD25
+								MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH
+								MED_DIS_DIAGNOSIS
+                                MED_PROC_CODE
+                        WHERE= (MED_FROM_DATE_YEAR IN &year));
+    cnt_oud_apcd = 0;
+    oud_apcd = 0;
+    ARRAY vars1 {*} ID MED_ECODE MED_ADM_DIAGNOSIS
+					MED_ICD_PROC1-MED_ICD_PROC7
+					MED_ICD1-MED_ICD25
+					MED_DIS_DIAGNOSIS
+                    MED_PROC_CODE;
+		DO i = 1 TO dim(vars1);
+		IF vars1[i] in &ICD THEN cnt_oud_apcd = cnt_oud_apcd+1;
+		END;
+		DROP= i;
+	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
+	IF oud_apcd = 0 THEN DELETE;
+RUN;
+
+DATA pharm (KEEP= oud_pharm ID);
+    SET PHDAPCD.MOUD_PHARM(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH
+                               PHARM_FILL_DATE_YEAR PHARM_ICD ID);
+
+    IF  PHARM_ICD IN &ICD OR 
+        PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
+    ELSE oud_pharm = 0;
+RUN;
+
+/*======CASEMIX DATA==========*/
+/* ED */
+DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID);
+	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
+				  WHERE= (ED_ADMIT_YEAR IN &year));
+	IF ED_DIAG1 in &ICD OR 
+        ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
+	ELSE oud_cm_ed = 0;
+RUN;
+
+/* ED_DIAG */
+DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
+	SET PHDCM.ED_DIAG (KEEP= ED_ID ED_DIAG);
+	IF ED_DIAG in &ICD THEN oud_cm_ed_diag = 1;
+	ELSE oud_cm_ed_diag = 0;
+RUN;
+
+/* ED_PROC */
+DATA casemix_ed_proc (KEEP= oud_cm_ed_proc ED_ID);
+	SET PHDCM.ED_PROC (KEEP= ED_ID ED_PROC);
+	IF ED_PROC in &PROC THEN oud_cm_ed_proc = 1;
+	ELSE oud_cm_ed_proc = 0;
+RUN;
+
+/* CASEMIX ED MERGE */
+PROC SQL;
+    CREATE TABLE pharm AS
+    SELECT DISTINCT *
+    FROM pharm;
+    
+    CREATE TABLE casemix_ed_proc AS
+	SELECT DISTINCT *
+	FROM casemix_ed_proc;
+
+	CREATE TABLE apcd AS
+	SELECT DISTINCT *
+	FROM apcd;
+
+	CREATE TABLE casemix_ed AS
+	SELECT DISTINCT *
+	FROM casemix_ed;
+
+	CREATE TABLE casemix_ed_diag AS
+	SELECT DISTINCT *
+	FROM casemix_ed_diag;
+
+	CREATE TABLE casemix AS 
+	SELECT *
+	FROM casemix_ed
+	LEFT JOIN casemix_ed_diag ON casemix_ed.ED_ID = casemix_ed_diag.ED_ID
+	LEFT JOIN casemix_ed_proc ON casemix_ed_diag.ED_ID = casemix_ed_proc.ED_ID;
+QUIT;
+
+DATA casemix (KEEP= ID oud_ed);
+	SET casemix;
+	IF SUM(oud_cm_ed_proc, oud_cm_ed_diag, oud_cm_ed) > 0 THEN oud_ed = 1;
+	ELSE oud_ed = 0;
+	
+	IF oud_ed = 0 THEN DELETE;
+RUN;
+
+/* HD DATA */
+DATA hd (KEEP= HD_ID ID oud_hd_raw);
+	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
+					WHERE= (HD_ADMIT_YEAR IN &year));
+	IF HD_DIAG1 in &ICD OR
+     HD_PROC1 in &PROC OR
+     HD_ECODE IN &ICD THEN oud_hd_raw = 1;
+	ELSE oud_hd_raw = 0;
+RUN;
+
+/* HD DIAG DATA */
+DATA hd_diag (KEEP= HD_ID oud_hd_diag);
+	SET PHDCM.HD_DIAG (KEEP= HD_ID HD_DIAG);
+	IF HD_DIAG in &ICD THEN oud_hd_diag = 1;
+	ELSE oud_hd_diag = 0;
+RUN;
+
+/* HD PROC DATA */
+DATA hd_proc(KEEP= HD_ID oud_hd_proc);
+	SET PHDCM.HD_PROC(KEEP = HD_ID HD_PROC);
+	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
+	ELSE oud_hd_proc = 0;
+RUN;
+
+/* HD MERGE */
+PROC SQL;
+    CREATE TABLE pharm AS
+    SELECT DISTINCT * 
+    FROM pharm;
+
+	CREATE TABLE hd_diag AS
+	SELECT DISTINCT *
+	FROM hd_diag;
+
+	CREATE TABLE casemix AS
+	SELECT DISTINCT *
+	FROM casemix;
+
+	CREATE TABLE hd AS
+	SELECT DISTINCT *
+	FROM hd;
+
+    CREATE TABLE hd_proc AS
+	SELECT DISTINCT * 
+    FROM hd_proc;
+
+	CREATE TABLE hd AS 
+	SELECT *
+	FROM hd
+	LEFT JOIN hd_diag ON hd.HD_ID = hd_diag.HD_ID
+	LEFT JOIN hd_proc ON hd.HD_ID = hd_proc.HD_ID;
+QUIT;
+
+DATA hd (KEEP= ID oud_hd);
+	SET hd;
+	IF SUM(oud_hd_diag, oud_hd_raw, oud_hd_proc) > 0 THEN oud_hd = 1;
+	ELSE oud_hd = 0;
+	
+	IF oud_hd = 0 THEN DELETE;
+RUN;
+
+/* OO */
+DATA oo (KEEP= ID oud_oo);
+    SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
+                        OO_ADMIT_YEAR OO_ADMIT_MONTH
+                        OO_CPT1-OO_CPT10
+                        OO_PRINCIPALEXTERNAL_CAUSECODE
+                    WHERE= (OO_ADMIT_YEAR IN &year));
+	cnt_oud_oo = 0;
+    
+    ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4 OO_CPT1-OO_CPT10 OO_PRINCIPALEXTERNAL_CAUSECODE;
+    
+    DO k = 1 TO dim(vars2);
+        IF SUBSTR(VNAME(vars2[k]), 1) = 'OO_PROC' THEN 
+            IF vars2[k] IN &PROC THEN 
+                cnt_oud_oo = cnt_oud_oo + 1;
+            ELSE IF vars2[k] IN &ICD THEN 
+                cnt_oud_oo = cnt_oud_oo + 1;
+    END;
+
+    DROP k;
+
+    IF cnt_oud_oo > 0 THEN oud_oo = 1;
+    ELSE oud_oo = 0;
+
+    IF oud_oo = 0 THEN DELETE;
+RUN;
+
+/* MERGE ALL CM */
+PROC SQL;
+    CREATE TABLE casemix AS
+    SELECT *
+    FROM casemix
+    FULL JOIN hd ON casemix.ID = hd.ID
+    FULL JOIN oo ON hd.ID = oo.ID;
+QUIT;
+
+PROC STDIZE DATA = casemix OUT = casemix reponly missing = 9999; RUN;
+
+DATA casemix (KEEP = ID oud_cm);
+    SET casemix;
+
+    IF oud_ed = 9999 THEN oud_ed = 0;
+    IF oud_hd = 9999 THEN oud_hd = 0;
+    IF oud_oo = 9999 THEN oud_oo = 0;
+
+    IF sum(oud_ed, oud_hd, oud_oo) > 0 THEN oud_cm = 1;
+    ELSE oud_cm = 0;
+    IF oud_cm = 0 THEN DELETE;
+RUN;
+
+/* BSAS */
+DATA bsas (KEEP= ID oud_bsas);
+    SET PHDBSAS.BSAS (KEEP= ID CLT_ENR_OVERDOSES_LIFE
+                             CLT_ENR_PRIMARY_DRUG
+                             CLT_ENR_SECONDARY_DRUG
+                             CLT_ENR_TERTIARY_DRUG
+                             PDM_PRV_SERV_CAT
+                             ENR_YEAR_BSAS 
+                             ENR_MONTH_BSAS
+                      WHERE= (ENR_YEAR_BSAS IN &year));
+    IF (CLT_ENR_OVERDOSES_LIFE > 0 AND CLT_ENR_OVERDOSES_LIFE ^= 999)
+        OR CLT_ENR_PRIMARY_DRUG in &bsas_drugs
+        OR CLT_ENR_SECONDARY_DRUG in &bsas_drugs
+        OR CLT_ENR_TERTIARY_DRUG in &bsas_drugs
+        OR PDM_PRV_SERV_CAT = 7 THEN oud_bsas = 1;
+    ELSE oud_bsas = 0;
+    IF oud_bsas = 0 THEN DELETE;
+RUN;
+
+/* MATRIS */
+DATA matris (KEEP= ID oud_matris);
+SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
+                          OPIOID_ORISUBCAT_MATRIS
+                          inc_year_matris
+                          inc_month_matris
+						  AGE_MATRIS
+						  AGE_UNITS_MATRIS
+                    WHERE= (inc_year_matris IN &year));
+    IF OPIOID_ORI_MATRIS = 1 
+        OR OPIOID_ORISUBCAT_MATRIS in (1:5) THEN oud_matris = 1;
+    ELSE oud_matris = 0;
+    IF oud_matris = 0 THEN DELETE;;
+RUN;
+
+/* DEATH */
+DATA death (KEEP= ID oud_death);
+    SET PHDDEATH.DEATH (KEEP= ID OPIOID_DEATH YEAR_DEATH AGE_DEATH
+                        WHERE= (YEAR_DEATH IN &year));
+    IF OPIOID_DEATH = 1 THEN oud_death = 1;
+    ELSE oud_death = 0;
+    IF oud_death = 0 THEN DELETE;
+RUN;
+
+/* PMP */
+DATA pmp (KEEP= ID oud_pmp);
+    SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year date_filled_month BUP_CAT_PMP
+                    WHERE= (date_filled_year IN &year));
+    IF BUPRENORPHINE_PMP = 1 AND 
+        BUP_CAT_PMP = 1 THEN oud_pmp = 1;
+    ELSE oud_pmp = 0;
+    IF oud_pmp = 0 THEN DELETE;
+RUN;
+
+/*===========================*/
+/*      MAIN MERGE           */
+/*===========================*/
+
+PROC SQL;
+    CREATE TABLE oo AS
+    SELECT DISTINCT *
+    FROM oo;
+
+    CREATE TABLE bsas AS
+    SELECT DISTINCT *
+    FROM bsas;
+
+    CREATE TABLE matris AS
+    SELECT DISTINCT *
+    FROM matris;
+
+    CREATE TABLE death AS
+    SELECT DISTINCT *
+    FROM death;
+
+    CREATE TABLE pmp AS
+    SELECT DISTINCT *
+    FROM pmp;
+
+PROC SQL;
+    CREATE TABLE oud AS
+    SELECT * FROM demographics
+    LEFT JOIN apcd ON apcd.ID = demographics.ID
+    LEFT JOIN casemix ON casemix.ID = demographics.ID
+    LEFT JOIN death ON death.ID = demographics.ID
+    LEFT JOIN bsas ON bsas.ID = demographics.ID
+    LEFT JOIN matris ON matris.ID = demographics.ID
+    LEFT JOIN pmp ON pmp.ID = demographics.ID
+    LEFT JOIN pharm ON pharm.ID = demographics.ID;
+
+    CREATE TABLE oud AS
+    SELECT DISTINCT * 
+    FROM oud;
+QUIT;
+
+PROC STDIZE DATA = oud OUT = oud reponly missing = 9999; RUN;
+
+DATA _NULL_;
+    current_date = today(); /* Get the current date */
+    current_year = year(current_date); /* Extract the year from the current date */
+    CALL SYMPUT('current_year', current_year); /* Assign the current year to a macro variable */
+RUN;
+
+DATA oud;
+    SET oud;
+
+    ARRAY oud_flags {*} oud_apcd oud_cm
+                        oud_death oud_matris
+                        oud_pmp oud_bsas
+                        oud_pharm;
+                        
+    DO i = 1 TO dim(oud_flags);
+        IF oud_flags[i] = 9999 THEN oud_flags[i] = 0;
+    END;
+
+    oud_cnt = sum(oud_apcd, oud_cm, oud_death, oud_matris, oud_pmp, oud_bsas, oud_pharm);
+    IF oud_cnt > 0 THEN oud_master = 1;
+    ELSE oud_master = 0;
+    IF oud_master = 0 THEN DELETE;
+
+    age = &current_year - YOB;
+    age_grp_five = put(age, age_grps_five.);
+	IF age_grp_five  = 999 THEN DELETE;
+RUN;
+
+/*=========================================*/
+/*    FINAL COHORT DATASET: oud_distinct   */
+/*=========================================*/
+
+PROC SQL;
+    CREATE TABLE oud_distinct AS
+    SELECT DISTINCT ID, age, age_grp_five as agegrp, FINAL_RE FROM oud;
+QUIT;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM oud_distinct;
+QUIT;
+
+%put Number of unique IDs in oud_distinct table: &num_unique_ids;
+
+/*==============================*/
+/*         MOUD Counts          */
+/*==============================*/
+/* Age Demography Creation */
+DATA moud;
+    SET PHDSPINE.MOUD;
+RUN;
+
+PROC SORT data=moud;
+    by ID DATE_START_MOUD;
+RUN;
+
+PROC SQL;    
+    CREATE TABLE moud_demo AS
+    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX, DEMO.YOB
+    FROM moud
+    LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
+QUIT;
+
+PROC SORT DATA=moud_demo;
+    by ID DATE_START_MOUD TYPE_MOUD;
+RUN;
+
+DATA moud_demo;
+    SET moud_demo;
+    by ID;
+    retain episode_num;
+
+    lag_date = lag(DATE_END_MOUD);
+    IF FIRST.ID THEN lag_date = .;
+    IF FIRST.ID THEN episode_num = 1;
+    
+    diff = DATE_START_MOUD - lag_date;
+    
+    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
+    IF flag = 1 THEN episode_num = episode_num + 1;
+
+    episode_id = catx("_", ID, episode_num);
+RUN;
+
+PROC SORT data=moud_demo; 
+    BY episode_id;
+RUN;
+
+PROC SQL;
+    CREATE TABLE moud_demo AS 
+    SELECT * 
+    FROM moud_demo
+    WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
+QUIT;
+
+DATA moud_demo; 
+    SET moud_demo;
+
+    by episode_id;
+    retain DATE_START_MOUD;
+
+    IF FIRST.episode_id THEN DO;
+        start_month = DATE_START_MONTH_MOUD;
+        start_year = DATE_START_YEAR_MOUD;
+        start_date = DATE_START_MOUD;
+    END;
+    IF LAST.episode_id THEN DO;
+        end_month = DATE_END_MONTH_MOUD;
+        end_year = DATE_END_YEAR_MOUD;
+        end_date = DATE_END_MOUD;
+    END;
+        
+   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+RUN;
+
+PROC SORT data=moud_demo (KEEP= start_date start_month start_year
+					  			end_date end_month end_year 
+					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
+    BY ID;
+RUN;
+
+PROC SQL;
+ CREATE TABLE moud_demo 
+ AS SELECT DISTINCT * FROM moud_demo;
+QUIT;
+
+DATA moud_demo;
+    SET moud_demo;
+    BY ID;
+	
+	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+
+    LAG_ED = LAG(END_DATE);
+	
+	IF FIRST.ID THEN diff = .; 
+	ELSE diff = start_date - LAG_ED;
+    IF end_date < LAG_ED THEN temp_flag = 1;
+    ELSE temp_flag = 0;
+
+    IF first.ID THEN flag_mim = 0;
+    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
+    ELSE flag_mim = 0;
+
+    IF flag_mim = 1 THEN DELETE;
+
+    age = start_year - YOB;
+    age_grp_five = put(age, age_grps_five.);
+RUN;
+
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
+    SET moud_demo;
+    treatment = TYPE_MOUD;
+
+    FORMAT year 4. month 2.;
+    
+    num_months = intck('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), 
+                       input(put(end_year, 4.) || put(end_month, z2.), yymmn6.));
+
+    DO i = 0 to num_months;
+      new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
+      year = year(new_date);
+      month = month(new_date);
+      postexp_age = year - YOB;
+      age_grp_five = put(postexp_age, age_grps_five.);      
+      OUTPUT;
+    END;
+
+RUN;
+
+DATA moud_expanded;
+	SET moud_expanded;
+	WHERE year IN &year;
+RUN;
+
+PROC SQL;                    
+    CREATE TABLE moud_starts AS
+    SELECT start_month AS month,
+           start_year AS year,
+           TYPE_MOUD AS treatment,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY start_month, start_year, TYPE_MOUD;
+
+    CREATE TABLE stratif_moud_starts_age AS
+    SELECT start_month AS month,
+           start_year AS year,
+           TYPE_MOUD AS treatment,
+           FINAL_SEX, age_grp_five,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_five;
+
+    CREATE TABLE stratif_moud_starts_RE AS
+    SELECT start_month AS month,
+           start_year AS year,
+           TYPE_MOUD AS treatment,
+           FINAL_SEX, FINAL_RE,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
+    
+    CREATE TABLE moud_counts AS
+    SELECT year, month, treatment,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_expanded
+    GROUP BY month, year, treatment;
+
+    CREATE TABLE stratif_moud_counts_age AS
+    SELECT year, month, treatment, FINAL_SEX, age_grp_five,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_expanded
+    GROUP BY month, year, treatment, age_grp_five;
+    
+    CREATE TABLE stratif_moud_counts_RE AS
+    SELECT year, month, treatment, FINAL_SEX, FINAL_RE,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_expanded
+    GROUP BY month, year, treatment, FINAL_RE;
+QUIT;
+
+PROC EXPORT
+	DATA= moud_counts
+	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= stratif_moud_counts_age
+	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_AgeStratif_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= stratif_moud_counts_RE
+	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_REStratif_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= moud_starts
+	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= stratif_moud_starts_age
+	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_AgeStratif_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= stratif_moud_starts_RE
+	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_REStratif_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+/*==============================*/
+/* Project: Maternal Cascade    */
+/* Author:  Ben Buzzee  	    */ 
+/* Created: 12/16/2022 		    */
+/* Updated: 12/20/23 by SJM     */
+/*==============================*/
+
+/* ======= HCV TESTING CPT CODES ========  */
+%LET AB_CPT = ('G0472','86803','86804','80074');
+%LET RNA_CPT = ('87520','87521','87522');
+%LET GENO_CPT = ('87902','3266F');
+
+/* === HCV DIAGNOSIS CODES ====== */
+%LET HCV_ICD = ('7051',  '7054','707',
+		'7041',  '7044','7071',
+		'B1710','B182','B1920',
+		'B1711','B1921');
+								
+%LET DAA_CODES = ('00003021301','00003021501',
+		'61958220101','61958180101','61958180301',
+		'61958180401','61958180501','61958150101',
+		'61958150401','61958150501','72626260101',
+		'00074262501','00074262528','00074262556',
+		'00074262580','00074262584','00074260028',
+		'72626270101','00074308228','00074006301',
+		'00074006328','00074309301','00074309328',
+		'61958240101','61958220101','61958220301',
+		'61958220401','61958220501','00006307402',
+		'51167010001','51167010003','59676022507',
+		'59676022528','00085031402');
+  
+%LET bsas_drugs = (5,6,7,21,22,23,24,26);
+
+  /*============================*/
+ /*   Add Pregancy Covariates  */
+/*============================*/
+
+DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
+	SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH
+							WHERE= (YEAR_BIRTH IN &year));
+	BIRTH_INDICATOR = 1;
+run;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM all_births;
+QUIT;
+
+%put Number of unique IDs in all_births table: &num_unique_ids;
+
+proc SQL;
+CREATE TABLE births AS
+SELECT  ID,
+		SUM(BIRTH_INDICATOR) AS TOTAL_BIRTHS,
+		min(YEAR_BIRTH) as FIRST_BIRTH_YEAR, 
+		max(BIRTH_INDICATOR) as BIRTH_INDICATOR FROM all_births
+GROUP BY ID;
+run;
+
+PROC SQL;
+    CREATE TABLE oud_preg AS
+    SELECT * FROM oud_distinct
+    LEFT JOIN births ON oud_distinct.ID = births.ID;
+QUIT;
+
+/* RECODE MISSING VALUES AS 0  */
+
+DATA oud_preg;
+SET oud_preg;
+	IF BIRTH_INDICATOR = . THEN BIRTH_INDICATOR = 0;
+run;
+
+/* ========================================================== */
+/*                       HCV TESTING                          */
+/* ========================================================== */
+
+/* =========== */
+/* AB TESTING */
+/* ========== */
+
+DATA ab;
+SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEAR
+					 
+					 WHERE = (MED_PROC_CODE IN  &AB_CPT));
+run;
+
+/* Deduplicate */
+proc sql;
+create table AB1 as
+select distinct ID, MED_FROM_DATE, *
+from AB;
+quit;
+
+/* Sort the data by ID in ascending order */
+PROC SORT data=ab1;
+  by ID MED_FROM_DATE;
+RUN;
+
+/* Transpose for long table */
+PROC TRANSPOSE data=ab1 out=ab_wide (KEEP = ID AB_TEST_DATE:) PREFIX=AB_TEST_DATE_;
+BY ID;
+VAR MED_FROM_DATE;
+RUN;
+
+/* ======================================= */
+/* PREP DATASET FOR AB_TESTING BY YEAR  */
+/* ==================================== */
+
+PROC SQL;
+create table AB_YEARS as
+SELECT DISTINCT ID, MED_FROM_DATE_YEAR as AB_TEST_YEAR
+FROM AB1;
+quit;
+
+/* Restrict AB testing to just those in our cohort */
+PROC SQL;
+create table AB_YEARS_COHORT as
+SELECT *
+FROM OUD_DISTINCT
+LEFT JOIN AB_YEARS on OUD_DISTINCT.ID = AB_YEARS.ID;
+quit;
+
+/* =========== */
+/* RNA TESTING */
+/* =========== */
+
+DATA rna;
+SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
+					 
+					 WHERE = (MED_PROC_CODE IN  &RNA_CPT));
+run;
+
+/* Sort the data by ID in ascending order */
+PROC SORT data=rna;
+  by ID MED_FROM_DATE;
+RUN;
+
+PROC TRANSPOSE data=rna out=rna_wide (KEEP = ID RNA_TEST_DATE:) PREFIX=RNA_TEST_DATE_;
+BY ID;
+VAR MED_FROM_DATE;
+RUN;
+
+/* ================ */
+/* GENOTYPE TESTING */
+/* ================ */
+
+DATA geno;
+SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
+					 
+					 WHERE = (MED_PROC_CODE IN  &GENO_CPT));
+run;
+
+/* Sort the data by ID in ascending order */
+PROC SORT data=geno;
+  by ID MED_FROM_DATE;
+RUN;
+
+PROC TRANSPOSE data=geno out=geno_wide (KEEP = ID GENO_TEST_DATE:) PREFIX=GENO_TEST_DATE_;
+BY ID;
+VAR MED_FROM_DATE;
+RUN;
+
+/* ================ */
+/* HCV CODES CHECK  */
+/* ================ */
+
+PROC FREQ data = AB;
+title "AB CPT CODES";
+table MED_PROC_CODE;
+run;
+
+PROC FREQ data = RNA;
+title "RNA CPT CODES";
+table MED_PROC_CODE;
+run;
+
+PROC FREQ data = geno;
+title "GENOTYPE CPT CODES";
+table MED_PROC_CODE;
+run;
+title;
+
+/*  Join all labs to OUD PREG, which is our oud cohort with pregnancy covariates added */
+PROC SQL;
+    CREATE TABLE OUD_HCV AS
+    SELECT * FROM oud_preg 
+    LEFT JOIN ab_wide ON ab_wide.ID = oud_preg.ID
+    LEFT JOIN rna_wide ON rna_wide.ID = oud_preg.ID
+    LEFT JOIN geno_wide ON geno_wide.ID = oud_preg.ID;
+QUIT;
+
+DATA OUD_HCV;
+	SET OUD_HCV;
+	AB_TEST_INDICATOR = 0;
+	RNA_TEST_INDICATOR = 0;
+    GENO_TEST_INDICATOR = 0;
+	IF AB_TEST_DATE_1 = . THEN AB_TEST_INDICATOR = 0; ELSE AB_TEST_INDICATOR = 1;
+	IF RNA_TEST_DATE_1 = . THEN RNA_TEST_INDICATOR = 0; ELSE RNA_TEST_INDICATOR = 1;
+	IF GENO_TEST_DATE_1 = . THEN GENO_TEST_INDICATOR = 0; ELSE GENO_TEST_INDICATOR = 1;
+	run;
+	
+DATA OUD_HCV;
+	SET OUD_HCV;
+		ANY_HCV_TESTING_INDICATOR = 0;
+		IF AB_TEST_INDICATOR = 1 OR RNA_TEST_INDICATOR = 1 THEN ANY_HCV_TESTING_INDICATOR = 1;
+	run;
+
+/* ========================================================== */
+/*                   HCV STATUS FROM MAVEN                    */
+/* ========================================================== */
+
+/* This reduced the dataset to one row person  */
+PROC SQL;
+	CREATE TABLE HCV_STATUS AS
+	SELECT ID,
+	min(AGE_HCV) as AGE_HCV,
+	min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
+	min(EVENT_DATE_HCV) as EVENT_DATE_HCV,
+	MIN(EVER_IDU_HCV) as EVER_IDU_HCV,
+	1 as HCV_SEROPOSITIVE_INDICATOR,
+	CASE WHEN min(DISEASE_STATUS_HCV) = 1 THEN 1 ELSE 0 END as CONFIRMED_HCV_INDICATOR FROM PHDHEPC.HCV
+	GROUP BY ID;
+QUIT;
+
+
+/*  JOIN TO LARGER TABLE */
+PROC SQL;
+    CREATE TABLE OUD_HCV_STATUS AS
+    SELECT * FROM OUD_HCV 
+    LEFT JOIN HCV_STATUS ON HCV_STATUS.ID = OUD_HCV.ID;
+QUIT;
+
+/* ========================================================== */
+/*                      LINKAGE TO CARE                       */
+/* ========================================================== */
+
+/* FILTER WHOLE DATASET */
+DATA HCV_LINKED_SAS;
+SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
+					 
+					 WHERE = (MED_ICD1 IN &HCV_ICD));
+RUN;
+
+/* FINAL LINKAGE TO CARE DATASET */
+PROC SQL;
+CREATE TABLE HCV_LINKED AS 
+SELECT ID,
+ 1 as HCV_PRIMARY_DIAG,
+ min(MED_FROM_DATE) as FIRST_HCV_PRIMARY_DIAG_DATE
+from HCV_LINKED_SAS
+GROUP BY ID;
+QUIT;
+
+/*  JOIN LINKAGE TO MAIN DATASET */
+PROC SQL;
+    CREATE TABLE OUD_HCV_LINKED AS
+    SELECT * FROM OUD_HCV_STATUS 
+    LEFT JOIN HCV_LINKED ON HCV_LINKED.ID = OUD_HCV_STATUS.ID;
+QUIT;
+  
+/* Add 0's to those without linkage indicator */
+DATA OUD_HCV_LINKED; SET OUD_HCV_LINKED;
+IF HCV_PRIMARY_DIAG = . THEN HCV_PRIMARY_DIAG = 0;
+IF HCV_SEROPOSITIVE_INDICATOR = . THEN HCV_SEROPOSITIVE_INDICATOR = 0;
+run;
+
+/* ========================================================== */
+/*                       DAA STARTS                           */
+/* ========================================================== */
+
+DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
+								WHERE = (PHARM_NDC IN &DAA_CODES));
+RUN;
+
+/* Reduce to one row per person */
+PROC SQL;
+CREATE TABLE DAA_STARTS as
+SELECT ID,
+	   min(PHARM_AGE) as PHARM_AGE,
+	   min(PHARM_FILL_DATE_YEAR) as FIRST_DAA_START_YEAR,
+	   min(PHARM_FILL_DATE) as FIRST_DAA_DATE,
+	   1 as DAA_START_INDICATOR from DAA
+GROUP BY ID;
+QUIT;
+
+/* Join to main dataset */
+PROC SQL;
+    CREATE TABLE OUD_HCV_DAA AS
+    SELECT * FROM OUD_HCV_LINKED 
+    LEFT JOIN DAA_STARTS ON DAA_STARTS.ID = OUD_HCV_LINKED.ID;
+QUIT;
+
+DATA OUD_HCV_DAA; SET OUD_HCV_DAA;
+IF DAA_START_INDICATOR = . THEN DAA_START_INDICATOR = 0;
+run;
+
+DATA OUD_HCV_DAA;
+  SET OUD_HCV_DAA;
+  IF agegrp ne ' ' THEN
+    num_agegrp = INPUT(agegrp, best12.);
+  DROP agegrp; /* Drop the original character variable */
+RUN;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM OUD_HCV_DAA;
+QUIT;
+
+%put Number of unique IDs in OUD_HCV_DAA table: &num_unique_ids;
+
+PROC CONTENTS data=OUD_HCV_DAA;
+title "Contents of Final Dataset";
+run;
+
+DATA TESTING; 
+SET OUD_HCV_DAA;
+	EOT_RNA_TEST = 0;
+	SVR12_RNA_TEST = 0;
+	IF RNA_TEST_DATE_1 = .  THEN DELETE;
+	IF FIRST_DAA_DATE = .  THEN DELETE;
+
+	/* Determine the number of variables dynamically */
+    array test_date_array (*) RNA_TEST_DATE_:;
+    num_tests = dim(test_date_array);
+
+    /* Loop through the determined number of variables */
+    do i = 1 to num_tests;
+        if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
+            time_since = test_date_array{i} - FIRST_DAA_DATE;
+
+            if time_since > 84 then EOT_RNA_TEST = 1;
+            if time_since >= 140 then SVR12_RNA_TEST = 1;
+        end;
+    end;
+
+    DROP i time_since;
+RUN;
+
+/*====================*/
+/*  FREQUENCY TABLES */
+/*==================*/
+
+/* Recode Formats */
+
+PROC FORMAT;
+   VALUE agefmt_all
+		1 = "15-18"
+		2 = "19-25"
+		3 = "26-30"
+		4 = "31-35"
+		5 = "36-45";
+RUN;
+
+PROC FORMAT;
+   VALUE agefmt_comb
+		1 = "15-25"
+		2 = "15-25"
+		3 = "26-30"
+		4 = "31-35"
+		5 = "36-45";
+RUN;
+
+PROC FORMAT;
+   VALUE birthfmt
+		0 = "No Births"
+		1 = "Had Birth";
+RUN;
+
+PROC FORMAT;
+   VALUE injectfmt
+		0 = "Never Injected"
+		1 = "Has Injected"
+		9 = "Unknown Injection Status";
+RUN;
+
+PROC FORMAT;
+   VALUE hcvfmt
+		0 = "No HCV"
+		1 = "HCV Confirmed or Probable";
+run;
+
+/* Race/Ethnicity coding https://www.mass.gov/doc/phd-20-analytic-data-dictionaries-part1-v6-122022/download */
+PROC FORMAT;
+   VALUE racefmt_all
+		1 = "White"
+		2 = "Black"
+		3 = "Asian/PI"
+		4 = "Hispanic"
+		5 = "AmerInd/OtherNonHisp."
+		9 = "Unknown"
+		99 = "Not MA Res.";
+RUN;
+
+PROC FORMAT;
+   VALUE racefmt_comb
+		1 = "White"
+		2 = "Black"
+		3 = "Asian/PI/AmerInd/Other/Unkn"
+		4 = "Hispanic"
+		5 = "Asian/PI/AmerInd/Other/Unkn"
+		9 = "Asian/PI/AmerInd/Other/Unkn"
+		99 = "Not MA Res.";
+RUN;
+
+/*  NONSTRATIFIED CARE CASCADE TABLES */
+/* Sorting the dataset by CONFIRMED_HCV_INDICATOR */
+proc sort data=OUD_HCV_DAA;
+    by CONFIRMED_HCV_INDICATOR;
+run;
+
+title "HCV Care Cascade, OUD Cohort, Overall";
+proc freq data=OUD_HCV_DAA;
+    tables ANY_HCV_TESTING_INDICATOR
+           AB_TEST_INDICATOR
+           RNA_TEST_INDICATOR
+           HCV_SEROPOSITIVE_INDICATOR
+           CONFIRMED_HCV_INDICATOR
+           HCV_PRIMARY_DIAG
+           DAA_START_INDICATOR
+           BIRTH_INDICATOR
+           EVENT_YEAR_HCV
+           FIRST_DAA_START_YEAR / missing norow nocol nopercent;
+run;
+
+proc freq data=OUD_HCV_DAA;
+    by CONFIRMED_HCV_INDICATOR;
+    tables HCV_PRIMARY_DIAG
+           GENO_TEST_INDICATOR
+           DAA_START_INDICATOR
+           BIRTH_INDICATOR / missing norow nocol nopercent;
+run;
+
+proc freq data=OUD_HCV_DAA;
+    by HCV_PRIMARY_DIAG;
+    tables HCV_SEROPOSITIVE_INDICATOR / missing norow nocol nopercent;
+run;
+
+title "AB Tests Per Year, In Cohort";
+PROC FREQ data = AB_YEARS_COHORT;
+table  AB_TEST_YEAR / missing norow nocol nopercent;
+run;
+
+title "AB Tests Per Year, All MA Res.";
+PROC FREQ data = AB_YEARS;
+table  AB_TEST_YEAR / missing norow nocol nopercent;
+run;
+
+title   "Testing Among Confirmed HCV";
+proc freq data=Testing;
+where   CONFIRMED_HCV_INDICATOR = 1;
+tables  BIRTH_INDICATOR
+        EOT_RNA_TEST
+		SVR12_RNA_TEST
+		FIRST_DAA_START_YEAR / missing norow nopercent nocol;
+run;
+
+%macro CascadeTestFreq(strata, mytitle, ageformat, raceformat);
+    TITLE &mytitle;
+    PROC FREQ DATA = OUD_HCV_DAA;
+        BY &strata;
+        TABLES ANY_HCV_TESTING_INDICATOR
+               AB_TEST_INDICATOR
+               RNA_TEST_INDICATOR
+               HCV_SEROPOSITIVE_INDICATOR
+               CONFIRMED_HCV_INDICATOR / missing norow nocol nopercent;
+        FORMAT num_agegrp &ageformat 
+               final_re &raceformat
+               BIRTH_INDICATOR birthfmt.;
+%mend CascadeTestFreq;
+
+%macro CascadeCareFreq(strata, mytitle, ageformat, raceformat);
+    TITLE "&mytitle";
+    PROC FREQ DATA=OUD_HCV_DAA;
+    BY &strata;
+    TABLES GENO_TEST_INDICATOR
+           HCV_PRIMARY_DIAG
+           DAA_START_INDICATOR / missing norow nocol nopercent;
+    WHERE CONFIRMED_HCV_INDICATOR=1;
+    FORMAT num_agegrp &ageformat 
+           final_re &raceformat
+           BIRTH_INDICATOR birthfmt.;
+%mend CascadeCareFreq;
+
+%macro EndofTrtFreq(strata, mytitle, ageformat, raceformat);
+    TITLE &mytitle;
+    PROC FREQ DATA = TESTING;
+        BY &strata;
+        TABLES DAA_START_INDICATOR
+               HCV_PRIMARY_DIAG
+               EOT_RNA_TEST
+               SVR12_RNA_TEST / missing norow nocol nopercent;
+        WHERE CONFIRMED_HCV_INDICATOR = 1;
+        FORMAT num_agegrp &ageformat 
+               final_re &raceformat
+               BIRTH_INDICATOR birthfmt.;
+%mend EndofTrtFreq;
+
+%macro YearFreq(var, strata, confirm_status, mytitle, ageformat, raceformat);
+    TITLE &mytitle;
+    PROC FREQ DATA = OUD_HCV_DAA;
+        BY &strata;
+        TABLE &var / missing norow nocol nopercent;
+        WHERE CONFIRMED_HCV_INDICATOR = &confirm_status;
+        FORMAT num_agegrp &ageformat
+               final_re &raceformat
+               BIRTH_INDICATOR birthfmt.;
+%mend YearFreq;
+
+/*  Age stratification */
+%CascadeTestFreq(num_agegrp, "HCV Testing: Stratified by Age", agefmt_all., racefmt_all.);   
+%CascadeCareFreq(num_agegrp, "HCV Care: Stratified by Age", agefmt_all., racefmt_all.);
+%EndofTrtFreq(num_agegrp, "HCV EOT/SVR Testing Among Confirmed HCV by Age", agefmt_all., racefmt_comb.)
+%YearFreq(EVENT_YEAR_HCV, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
+%YearFreq(EVENT_YEAR_HCV, num_agegrp, 0, "Counts per year among probable, by Age", agefmt_comb., racefmt_all.)
+%YearFreq(FIRST_DAA_START_YEAR, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
+
+proc sort data=OUD_HCV_DAA;
+    by final_re;
+run;
+
+/*  Race Stratification */
+%CascadeTestFreq(final_re, "HCV Testing: Stratified by Race", agefmt_all., racefmt_all.);   
+%CascadeCareFreq(final_re, "HCV Care: Stratified by Race", agefmt_all., racefmt_all.);
+%EndofTrtFreq(final_re, "HCV EOT/SVR Testing Among Confirmed HCV by Race - all", agefmt_all., racefmt_all.)
+%EndofTrtFreq(final_re, "HCV EOT/SVR Testing Among Confirmed HCV by Race -combined", agefmt_all., racefmt_comb.)
+%YearFreq(EVENT_YEAR_HCV, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
+%YearFreq(EVENT_YEAR_HCV, final_re, 0, "Counts per year among probable, by Race", agefmt_comb., racefmt_all.)
+%YearFreq(FIRST_DAA_START_YEAR, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
+
+proc sort data=OUD_HCV_DAA;
+    by birth_indicator;
+run;
+
+/*  Birth Stratification */
+%CascadeTestFreq(birth_indicator, "HCV Testing: Stratified by Birth", agefmt_all., racefmt_all.);   
+%CascadeCareFreq(birth_indicator, "HCV Care: Stratified by Birth", agefmt_all., racefmt_comb.);
+%EndofTrtFreq(birth_indicator, "HCV EOT/SVR Testing Among Confirmed HCV by Birth", agefmt_all., racefmt_comb.)
+%YearFreq(EVENT_YEAR_HCV, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
+%YearFreq(EVENT_YEAR_HCV, birth_indicator, 0, "Counts per year among probable, by Birth", agefmt_comb., racefmt_all.)
+%YearFreq(FIRST_DAA_START_YEAR, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
+
+/* Rename to merge with infant cascade for OUD_Capture */
+data OUD_HCV_DAA;
+    set OUD_HCV_DAA(rename=(ID=MOM_ID));
+run;
+
 /* Project: Infant Cascade      				*/
-/* Author:  Ben Buzzee / Rachel Epstein 		*/ 
+/* Author:  BB / RE / SM 		                */ 
 /* Created: 12/16/2022 							*/
-/* Updated: 10/5/2023 by SM            			*/
+/* Updated: 04/04/2024 by SM           			*/
 /*==============================================*/
+
+/*===== SUPRESSION CODE =========*/
+ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
+proc format;                                                                                               
+   value supp010_ 1-10=' * ';                                                                           
+run ;
+proc template;
+%include "/sas/data/DPH/OPH/PHD/template.sas";
+run;
+/*==============================*/
 
 /*	Project Goal:
 	Characterize the HCV care cascade of infants born to mothers seropositive for HCV 
@@ -15,31 +1231,11 @@
     Part 1: Collect Cohort of Infants
     Part 2: Perform HCV Care Cascade
 
-	Cleaning notes: Multiple INFANT_IDS matched to more than one BIRTH_LINK_ID and
-					multiple BIRTH_LINK_IDs matched to more than one mom. I removed observations
-					associated with these. One infant should match to exactly one mom and one birth_link_id.
+	Cleaning notes: Multiple INFANT_IDS matched to more than one BIRTH_LINK_ID
+					Multiple BIRTH_LINK_IDs matched to more than one mom
 
 	Detailed documentation of all datasets and variables:
-	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation
-
-	Useful code for checking ID counts at each step:
-	Run PROC CONTENTS to determine number of rows and all variable names.
-	Then create a table that is just a count of the total number of unique variable values (often IDs),
-	and use proc freq to display it. Often we'll want the number of rows to match the number of IDs.
-
-			/* PROC CONTENTS data=DATASET_NAME;
-			   run; */
-
-			/* PROC SQL; */
-			/* create table counts */
-			/* as select count(distinct VARIABLE_NAME) as n_var */
-			/* from DATASET_NAME */
-			/* GROUP BY VARIABLE_NAME2; */
-			/* quit; */
-
-			/* proc freq data = counts; */
-			/* table n_var; */
-			/* run; */
+	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation */
 
 /*============================ */
 /*     Global Variables        */
@@ -88,10 +1284,7 @@ FROM PHDHEPC.HCV
 GROUP BY MOM_ID;
 run;
 
-/*  Collect All Moms */
-/*  Output: MOMS dataset, one row per BIRTH_LINK_ID - so multiple rows per MOM_ID
-	Variables: MOM_ID - BIRTH_LINK_ID - DOB_MOM_TBL - BIRTH_INDICATOR */
-	
+/*  Collect All Moms: Output has one row per BIRTH_LINK_ID (Multiple rows per MOM_ID) */
 PROC SQL;
 CREATE TABLE MOMS
 AS SELECT ID as MOM_ID,
@@ -103,16 +1296,11 @@ FROM PHDBIRTH.BIRTH_MOM
 GROUP BY BIRTH_LINK_ID;
 quit;
 
-/* COUNT(DISTINCT MOM_ID) grouped by BIRTH_LINK_ID counts how many moms one birth had.
-   If the birth_link has multiple mom_ids, we remove it */
-
+/* Remove observations where the same BIRTH_LINK_ID had multiple MOM_IDs to ensure that each birth is associated with only one mother */
 DATA MOMS; SET MOMS (WHERE = (num_moms = 1));
 run;
 
-/*  Collect All Infants */
-/*  Output Dataset: INFANTS, one row per BIRTH_LINK_ID (birth) - could be multiple INFANT_IDs per BIRTH_LINK_ID
-    Variables: INFANT_ID, BIRTH_LINK_ID, DOB_INFANT_TBL, INFANT_YEAR_BIRTH */
-
+/*  Collect All Infants: Output has one row per BIRTH_LINK_ID (Multiple INFANT_IDs per BIRTH_LINK_ID, potentially) */
 PROC SQL;
 CREATE TABLE INFANTS
 AS SELECT ID as INFANT_ID,
@@ -125,21 +1313,15 @@ FROM PHDBIRTH.BIRTH_INFANT
 GROUP BY INFANT_ID;
 quit;
 
-/*  Remove cases where one infant matches to multiple birth IDs */
-/*  since you can't be born multiple times */
-
+/*  Remove observations where the same INFANT_ID had multiple BIRTH_LINK_IDs to ensure that each infant is associated with only one birth */
 DATA INFANTS; SET INFANTS (WHERE = (num_births = 1));
 run;
 
 /* Join cohort table without demographics */
-
-/* Information to help understand the join: */
 /* HCV:    MOM_ID - EVENT_DATE_HCV - DISEASE_STATUS - one row per MOM_ID
    MOMS:   MOM_ID - BIRTH_LINK_ID - DOB_MOM_TBL  - one row per BIRTH_LINK ID
-   INFANT: INFANT_ID - BIRTH_LINK_ID - DOB_INFANT_TBL  - one row per INFANT_ID */
-
-/*  Note: BIRTH_LINK_ID is not in the HCV table, but we can still infants after
-    the first data using MOMS.BIRTH_LINK_ID as the key */
+   INFANT: INFANT_ID - BIRTH_LINK_ID - DOB_INFANT_TBL  - one row per INFANT_ID
+   BIRTH_LINK_ID is not in the HCV table, but we can still use MOMS.BIRTH_LINK_ID as the key to INFANTS */
 
 PROC SQL; 
  CREATE TABLE HCV_MOMS 
@@ -148,25 +1330,18 @@ PROC SQL;
  LEFT JOIN INFANTS on MOMS.BIRTH_LINK_ID = INFANTS.BIRTH_LINK_ID; 
  quit; 
 
-/* HCV_MOMS should be one row per infant
-   NOTE: At this stage HCV moms is the entire HCV table (Men and women) with mother/infant data left joined to it.
-   The vast majority of infant/mom related variables will have NA values, since most
-   people in the HCV dataset did not have a child. */
-
-/* Keep all data, but count how many BIRTH_LINK_ID's each individial infant has*/
+/* HCV_MOMS is the entire HCV table (Men and Women with and without children) with mother/infant data left joined to it */
 PROC SQL;
 CREATE TABLE HCV_MOMS
 AS SELECT DISTINCT *, COUNT(DISTINCT BIRTH_LINK_ID) as num_infant_birth_ids FROM HCV_MOMS
 GROUP BY INFANT_ID;
 quit;
 
-/* Restrict our HCV_MOMS dataset to infants with exactly one birth ID
-   This deletes all non-mothers. */
-
+/* Restrict our HCV_MOMS dataset to infants with exactly one birth ID, deleting all non-mothers. */
 DATA HCV_MOMS; SET HCV_MOMS (WHERE = (num_infant_birth_ids = 1)); 
 run;
 
-/* Filter our data table to seropositive women who had a birth */
+/* Filter for women who were seropositive prior to birth */
 DATA HCV_MOMS; SET HCV_MOMS;
 	IF  BIRTH_INDICATOR = . THEN DELETE;
 	IF  DOB_MOM_TBL < MOM_EVENT_DATE_HCV THEN DELETE;
@@ -200,12 +1375,12 @@ data HCV_MOMS;
         /* Calculate the difference in days for DATE_END_MOUD */
         days_difference_end = DATE_END_MOUD - DOB_INFANT_TBL ;
 
-        /* Check if any of the conditions are met for MOUD_DURING_PREG */
-        MOUD_DURING_PREG = (days_difference_start >= -270 AND days_difference_start <= 0) OR
-                                 (days_difference_end >= -270 AND days_difference_end <= 0) OR
-                                 (days_difference_start <= -270 AND DATE_END_MOUD > DOB_INFANT_TBL);
+        /* Check if any of the conditions are met for MOUD_DURING_PREG (40 weeks*7 days per week) */
+        MOUD_DURING_PREG = (days_difference_start >= -280 AND days_difference_start <= 0) OR
+                                 (days_difference_end >= -280 AND days_difference_end <= 0) OR
+                                 (days_difference_start <= -280 AND DATE_END_MOUD > DOB_INFANT_TBL);
 
-        /* Check if any of the conditions met for MOUD_AT_DELIVERY */
+        /* Check if any of the conditions met for MOUD_AT_DELIVERY (2 months prior to delivery) */
         MOUD_AT_DELIVERY = 	(days_difference_start >= -60 AND days_difference_start <= 0) OR
                             (days_difference_end >= -60 AND days_difference_end <= 0) OR
                             (days_difference_start <= -60 AND DATE_END_MOUD > DOB_INFANT_TBL);
@@ -219,11 +1394,22 @@ proc sort data=HCV_MOMS;
     by BIRTH_LINK_ID;
 run;
 
+/* This will check all MOUD episodes associated with each BIRTH_LINK_ID. If any episode flags for MOUD within the group,
+flag all observations in the group for any_MOUD. Then pull last.ID to deduplciate from multiple episodes back to unqiue BIRTH_LINK_ID 
+NOTE: We hypothesize that multiples (twins, triplets) share a BIRTH_LINK_ID because this data step decreases the number of observations
+in HCV_MOMS suggesting that the same BIRTH_LINK_ID has multiple INFANT_IDs for a small proportion (~1.6%) of deliveries.
+We only want to count one infant per BIRTH because we would be overrepresenting covaraites in the regressions */
+
 data HCV_MOMS;
     set HCV_MOMS;
     by BIRTH_LINK_ID;
     
     retain any_MOUD_DURING_PREG any_MOUD_AT_DELIVERY 0; /* Initialize flags to 0 */
+    
+    if first.BIRTH_LINK_ID then do;
+        any_MOUD_DURING_PREG = 0; /* Reset flag for each group */
+        any_MOUD_AT_DELIVERY = 0; /* Reset flag for each group */
+    end;
     
     if MOUD_DURING_PREG = 1 then any_MOUD_DURING_PREG = 1;
     if MOUD_AT_DELIVERY = 1 then any_MOUD_AT_DELIVERY = 1;
@@ -242,7 +1428,7 @@ data HCV_MOMS;
            any_MOUD_AT_DELIVERY = MOUD_AT_DELIVERY;
 run;
 
-/* HCV */
+/* HCV Duration */
 data HCV_MOMS;
     set HCV_MOMS;
 
@@ -264,7 +1450,7 @@ quit;
 data HCV_MOMS;
     set HCV_MOMS;
 
-    /* Check if start was before birth */
+    /* Check if diagnosis date was before birth */
     if DIAGNOSIS_DATE_HIV < DOB_INFANT_TBL and DIAGNOSIS_DATE_HIV ne . then
         HIV_DIAGNOSIS = 1;
     else
@@ -276,11 +1462,16 @@ proc sort data=HCV_MOMS;
     by BIRTH_LINK_ID;
 run;
 
+/* There are mutliple HIV diagnosis dates. This will check all diagnoses asociated with each BIRTH_LINK_ID. 
+If any episode flags for HIV within the group, flag all observations in the group for any_HIV. 
+Then pull last.ID to deduplciate from multiple diagnoses back to unqiue BIRTH_LINK_ID */
 data HCV_MOMS;
     set HCV_MOMS;
     by BIRTH_LINK_ID;
     
     retain any_HIV_DIAGNOSIS 0; /* Initialize flags to 0 */
+    
+    if first.BIRTH_LINK_ID then any_HIV_DIAGNOSIS = 0; /* Reset flag for each group */
     
     if HIV_DIAGNOSIS = 1 then any_HIV_DIAGNOSIS = 1;
     
@@ -307,7 +1498,6 @@ PROC SQL;
 	FROM PHDSPINE.DEMO;
 	QUIT;
 
-/* Merge cohorts */
 PROC SQL;
 CREATE TABLE MERGED_COHORT AS
 SELECT DISTINCT 
@@ -324,25 +1514,22 @@ SELECT DISTINCT
     M.HIV_DIAGNOSIS,
     M.MOUD_DURING_PREG,
     M.MOUD_AT_DELIVERY,
-    D.APCD_anyclaim
+    D.APCD_anyclaim,
+    D.SELF_FUNDED
 FROM HCV_MOMS AS M
 LEFT JOIN demographics AS D
-    ON M.INFANT_ID = D.ID
-WHERE D.SELF_FUNDED = 0;
+    ON M.INFANT_ID = D.ID;
 QUIT;
 
-/* Going to look at all exposed infants, but filter of APCD_anyclaim for testing and tratment cascade  */
-/* Filter into two datasets based on conditions */
+/* Going to look at all exposed infants, but filter of APCD_anyclaim for testing and treatment cascades */
 DATA INFANT_COHORT;
     SET MERGED_COHORT;
-    IF APCD_anyclaim = 1 THEN OUTPUT;
+    IF APCD_anyclaim = 1 AND SELF_FUNDED = 0 THEN OUTPUT;
 RUN;
 
 /*====================================*/
 /* COHORT 2: Any Child <=15 in MAVEN */ 
 /*====================================*/
-
-/* Cohort of secondary interest */
 
 PROC SQL;
 CREATE TABLE COHORT15 as
@@ -374,7 +1561,7 @@ select distinct ID, MED_FROM_DATE, *
 from AB;
 quit;
 
-/* Sort the data by ID in ascending order */
+/* Sort the data by ID MED_FROM_DATE in ascending order */
 PROC SORT data=ab1;
   by ID MED_FROM_DATE;
 RUN;
@@ -420,7 +1607,7 @@ select distinct ID, MED_FROM_DATE, *
 from rna;
 quit;
 
-/* Sort the data by ID in ascending order */
+/* Sort the data by ID MED_FROM_DATE in ascending order */
 PROC SORT data=rna;
   by ID MED_FROM_DATE;
 RUN;
@@ -458,7 +1645,7 @@ SET PHDAPCD.MOUD_MEDICAL(KEEP = ID MED_FROM_DATE MED_PROC_CODE
 					 WHERE = (MED_PROC_CODE IN  &GENO_CPT));
 run;
 
-/* Sort the data by ID in ascending order */
+/* Sort the data by ID MED_FROM_DATE in ascending order */
 PROC SORT data=geno;
   by ID MED_FROM_DATE;
 RUN;
@@ -554,15 +1741,27 @@ RUN;
 /* ========================================================== */
 
 PROC SQL;
-	CREATE TABLE HCV_STATUS AS
-	SELECT distinct ID,
-	min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
-	min(EVENT_DATE_HCV) as EVENT_DATE_HCV,
-	MIN(EVER_IDU_HCV) as EVER_IDU_HCV,
-    MIN(AGE_HCV) as AGE_AT_DX, /*RACHEL just added 7/21/23*/
-	1 as HCV_SEROPOSITIVE_INDICATOR,
-	CASE WHEN min(DISEASE_STATUS_HCV) = 1 THEN 1 ELSE 0 END as CONFIRMED_HCV_INDICATOR FROM PHDHEPC.HCV
-	GROUP BY ID;
+    CREATE TABLE HCV_STATUS AS
+    SELECT DISTINCT 
+        ID,
+        MIN(EVENT_YEAR_HCV) AS EVENT_YEAR_HCV,
+        MIN(EVENT_DATE_HCV) AS EVENT_DATE_HCV,
+        CASE 
+            WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
+            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
+            WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 9) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
+            ELSE . /* Set to missing if none of the above conditions are met */
+        END AS EVER_IDU_HCV,
+        MIN(AGE_HCV) AS AGE_AT_DX,
+        1 AS HCV_SEROPOSITIVE_INDICATOR,
+        CASE 
+            WHEN MIN(DISEASE_STATUS_HCV) = 1 THEN 1 
+            ELSE 0 
+        END AS CONFIRMED_HCV_INDICATOR 
+    FROM 
+        PHDHEPC.HCV
+    GROUP BY 
+        ID;
 QUIT;
 
 /*  JOIN TO LARGER TABLE */
@@ -577,7 +1776,6 @@ QUIT;
 /*                      LINKAGE TO CARE                       */
 /* ========================================================== */
 
-/* FILTER WHOLE DATASET */
 DATA HCV_LINKED_SAS;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
 					 
@@ -585,7 +1783,6 @@ SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
 RUN;
 
 /* FINAL LINKAGE TO CARE DATASET */
-/* Should be one row per person. */
 
 PROC SQL;
 CREATE TABLE HCV_LINKED AS 
@@ -604,7 +1801,6 @@ PROC SQL;
     LEFT JOIN HCV_LINKED ON HCV_LINKED.ID = INFANT_HCV_STATUS.INFANT_ID;
 QUIT;
   
-/* Add 0's to those without linkage indicator */
 DATA INFANT_LINKED; SET INFANT_LINKED;
 IF HCV_PRIMARY_DIAG = . THEN HCV_PRIMARY_DIAG = 0;
 IF HCV_SEROPOSITIVE_INDICATOR = . THEN HCV_SEROPOSITIVE_INDICATOR = 0;
@@ -639,7 +1835,7 @@ PROC SQL;
 QUIT;
 
 DATA INFANT_DAA; SET INFANT_DAA;
-IF DAA_START_INDICATOR = "." THEN DAA_START_INDICATOR = 0;
+IF DAA_START_INDICATOR = . THEN DAA_START_INDICATOR = 0;
 run;
 
 PROC SQL;
@@ -721,83 +1917,105 @@ at least through summer 2023, have been largely to wait until 18mo to test for H
 Ab is lost. Therefore cohort for testing = born 2014-2019 */
 
 /*Exposed infants inlcude APCD_anyclaim = 0 */
+title "EXPOSED Infants born to moms with HCV born 2014-2022";
 proc freq data=MERGED_COHORT;
-    title "EXPOSED Infants born to moms with HCV born 2014-2022";
-    tables INFANT_YEAR_BIRTH / out=Table0 missing norow nopercent nocol; 
+    tables INFANT_YEAR_BIRTH / missing norow nopercent nocol; 
     where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2022;
 run;
 
 title "Infants born to moms with HCV, Testing and Diagnosis, Overall, born 2014-2019";
 proc freq data=TESTING;
     tables ANY_HCV_TESTING_INDICATOR
-           AB_TEST_INDICATOR*RNA_TEST_INDICATOR
            APPROPRIATE_Testing
-           APPROPRIATE_AB_Testing*APPROPRIATE_RNA_Testing
            CONFIRMED_HCV_INDICATOR
-           DAA_START_INDICATOR
-           CONFIRMED_HCV_INDICATOR*RNA_TEST_INDICATOR / missing norow nopercent nocol;
+           DAA_START_INDICATOR / missing norow nopercent nocol;
     where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
-    ods output CrossTabFreqs=Table1;
-    format frequency best32.;
+run;
+
+proc sort data=TESTING;
+	by RNA_TEST_INDICATOR;
 run;
 
 proc freq data=TESTING;
-    title "Infants with confirmed perinatal HCV only, unstratified, born 2014-2019 - ie age at dx <3";
-    tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / out=Table2 missing norow nopercent nocol;
+    by RNA_TEST_INDICATOR;
+    tables AB_TEST_INDICATOR
+    		CONFIRMED_HCV_INDICATOR / missing norow nopercent nocol;
+    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
+run;
+
+proc sort data=TESTING;
+	by APPROPRIATE_AB_Testing;
+run;
+
+proc freq data=TESTING;
+    by APPROPRIATE_AB_Testing;
+    tables APPROPRIATE_RNA_Testing / missing norow nopercent nocol;
+    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
+run;
+
+title "Infants with confirmed perinatal HCV only, unstratified, born 2014-2019 - ie age at dx <3";
+proc freq data=TESTING;
+    tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
     Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3;
 run;
 
+title "Infants with confirmed perinatal HCV only, unstratified, born 1/2014-6/2018, Confirmed HCV";
 proc freq data=TESTING;
-    title "Infants with confirmed perinatal HCV only, unstratified, born 1/2014-6/2018, Confirmed HCV";
-    tables ANY_HCV_TESTING_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / out=Table3 missing norow nopercent nocol;
+    tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
     Where (INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <=2017 OR (INFANT_YEAR_BIRTH=2018 AND MONTH_BIRTH<=6))
     AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
 run;
 
+title "Infants with confirmed perinatal HCV only, unstratified, born 2011-2021";
 proc freq data=TESTING;
-    title "Infants with confirmed perinatal HCV only, unstratified, born 2011-2021";
-    tables HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / out=Table4 missing norow nopercent nocol;
+    tables HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
     Where INFANT_YEAR_BIRTH >= 2011 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
 run;
 
 /*Exposed infants inlcude APCD_anyclaim = 0 */
 title "Total Number of EXPOSED Infants in Cohort, By Race, born 2014-2021";
 proc freq data=MERGED_COHORT;
-	table final_re / out=Table5 missing norow nopercent nocol;
+	table final_re / missing norow nopercent nocol;
 	WHERE INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2021;
 	FORMAT final_re racefmt_all.;
 run;
 
-title "Infants born to moms with HCV, TESTing/DIAGNOSIS Care Cascade, By Race, 2014-2019";
+title "Infants born to moms with HCV, TESTING/DIAGNOSIS Care Cascade, By Race, 2014-2019";
+proc sort data=INFANT_DAA;
+    by final_re;
+run;
+
 proc freq data=INFANT_DAA;
-    tables ANY_HCV_TESTING_INDICATOR*final_re APPROPRIATE_Testing*final_re CONFIRMED_HCV_INDICATOR*final_re / missing norow nopercent nocol;
+    by final_re;
+    tables ANY_HCV_TESTING_INDICATOR
+           APPROPRIATE_Testing
+           CONFIRMED_HCV_INDICATOR / missing norow nopercent nocol;
     Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019;
-    ods output CrossTabFreqs=Table6;
-    format frequency best32.;
 run;
 
-title "Infants born to moms with HCV, Care Cascade, By Race/Hispance Ethnicity, born 2014-2019, Confirmed Perinatal HCV";
+title "Infants born to moms with HCV, Care Cascade, By Race/Hispanic Ethnicity, born 2014-2019, Confirmed Perinatal HCV";
 proc freq data=INFANT_DAA;
-    tables CONFIRMED_HCV_INDICATOR*final_re HCV_PRIMARY_DIAG*final_re GENO_TEST_INDICATOR*final_re / missing norow nopercent nocol;
+    by final_re;
+    tables CONFIRMED_HCV_INDICATOR
+           HCV_PRIMARY_DIAG
+           GENO_TEST_INDICATOR / missing norow nopercent nocol;
     Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
-    ods output CrossTabFreqs=Table7;
-    format frequency best32.;
 run;
 
+title "Number of Infants Born by YEAR & Age at first appropriate Ab, RNA testing, 2014-2021";
 proc freq data=INFANT_DAA;
-    TITLE "Number of Infants Born by YEAR & Age at first appropriate Ab, RNA testing, 2014-2021";
-    TABLES INFANT_YEAR_BIRTH AGE_AT_FIRST_AB_TEST AGE_YRS_AT_FIRST_AB_TEST AGE_AT_FIRST_RNA_TEST AGE_YRS_AT_FIRST_RNA_TEST AGE_AT_FIRST_TEST AGE_YRS_AT_FIRST_TEST / out=Table8 missing norow nopercent nocol;
+    TABLES INFANT_YEAR_BIRTH AGE_AT_FIRST_AB_TEST AGE_YRS_AT_FIRST_AB_TEST AGE_AT_FIRST_RNA_TEST AGE_YRS_AT_FIRST_RNA_TEST AGE_AT_FIRST_TEST AGE_YRS_AT_FIRST_TEST / missing norow nopercent nocol;
     Where INFANT_YEAR_BIRTH >= 2014; /*to exclude those born 2011-13 whose first test occurred pre-APCD start;*/
 run;
 
+title "Total Number of Infants Born by YEAR, 2014-2021";
 proc freq data=PHDBIRTH.BIRTH_INFANT;
-    TITLE "Total Number of Infants Born by YEAR, 2014-2021";
-    TABLE YEAR_BIRTH / out=Table9 missing norow nopercent nocol;
+    TABLE YEAR_BIRTH / missing norow nopercent nocol;
 run;
 
+title "Number of appropriately tested infants by infant year of birth ie in each year how many infants born that year were ultimately appropriately tested bt 2014-2021";
 proc freq data=INFANT_DAA;
-    Title "Number of appropriately tested infants by infant year of birth ie in each year how many infants born that year were ultimately appropriately tested bt 2014-2021";
-    TABLES INFANT_YEAR_BIRTH / out=Table10 missing norow nopercent nocol;
+    TABLES INFANT_YEAR_BIRTH / missing norow nopercent nocol;
     where APPROPRIATE_Testing = 1;
 run;
 
@@ -833,7 +2051,6 @@ DATA TESTING15;
 run;
 
 /* Linkage to Care  */
-
 PROC SQL;
     CREATE TABLE HCV_STATUS15 AS
     SELECT * FROM TESTING15 
@@ -869,8 +2086,8 @@ DATA TRT_TESTING15;
     SET DAA15;
     EOT_RNA_TEST = 0;
     SVR12_RNA_TEST = 0;
-    *IF RNA_TEST_DATE_1 = "." THEN DELETE;
-    *IF FIRST_DAA_DATE = "." THEN DELETE;
+    *IF RNA_TEST_DATE_1 = . THEN DELETE;
+    *IF FIRST_DAA_DATE = . THEN DELETE;
 
     /* Determine the number of variables dynamically */
     array test_date_array (*) RNA_TEST_DATE_:;
@@ -891,69 +2108,70 @@ DATA TRT_TESTING15;
 RUN;
 
 /*=================================	*/
-/*        <=15 Year Old   TABLES    */
+/*       <=15 Year Old TABLES       */
 /*=================================	*/
 
+title "HCV Care Cascade for children diagnosed with HCV at age <=15 years between 2011-2021, Overall";
 proc freq data=DAA15;
-    title "HCV Care Cascade for children diagnosed with HCV at age <=15 years between 2011-2021, Overall";
-    tables DISEASE_STATUS_HCV DAA_START_INDICATOR FIRST_DAA_START_YEAR / out=Table11 missing norow nopercent nocol;
+    tables DISEASE_STATUS_HCV DAA_START_INDICATOR FIRST_DAA_START_YEAR / missing norow nopercent nocol;
 run;
 
+title "<=15 HCV Care Cascade, DAA starts pre 2020";
 proc freq data=DAA15;
-    title "<=15 HCV Care Cascade, DAA starts pre 2020";
-    tables DAA_START_INDICATOR / out=Table12 missing norow nopercent nocol;
+    tables DAA_START_INDICATOR / missing norow nopercent nocol;
     Where FIRST_DAA_START_YEAR < 2020;
 run;
 
-
+title "<=15 HCV Care Cascade, Among Confirmed";
 proc freq data=DAA15;
-    title "<=15 HCV Care Cascade, Among Confirmed";
     tables HCV_PRIMARY_DIAG RNA_TEST_INDICATOR GENO_TEST_INDICATOR
-           DAA_START_INDICATOR EVENT_YEAR_HCV AGE_HCV / out=Table13 missing norow nopercent nocol;
+           DAA_START_INDICATOR EVENT_YEAR_HCV AGE_HCV / missing norow nopercent nocol;
  	WHERE DISEASE_STATUS_HCV = 1;
 run;
 
+title "HCV Diagnoses made among children 4-10yo between 2011-2021";
 proc freq data=DAA15;
-    title "HCV Diagnoses made among children 4-10yo between 2011-2021";
-    tables DISEASE_STATUS_HCV / out=Table14 missing norow nopercent nocol;
+    tables DISEASE_STATUS_HCV / missing norow nopercent nocol;
     WHERE DISEASE_STATUS_HCV = 1 and 3 < AGE_HCV < 11;
 run;
 
+title "HCV Diagnoses made among children 11-15yo between 2011-2021";
 proc freq data=DAA15;
-    title "HCV Diagnoses made among children 11-15yo between 2011-2021";
-    tables DISEASE_STATUS_HCV / out=Table15 missing norow nopercent nocol;
+    tables DISEASE_STATUS_HCV / missing norow nopercent nocol;
     WHERE DISEASE_STATUS_HCV = 1 and 10 < AGE_HCV <= 15;
 run;
 
+title "EOT/SVR12 & age at treatment, Among those treated";
 proc freq data=TRT_TESTING15;
-    title "EOT/SVR12 & age at treatment, Among those treated";
-    tables EOT_RNA_TEST SVR12_RNA_TEST AGE_DAA_START_group / out=Table16 missing norow nopercent nocol;
+    tables EOT_RNA_TEST SVR12_RNA_TEST AGE_DAA_START_group / missing norow nopercent nocol;
     WHERE DAA_START_INDICATOR = 1;
     format AGE_DAA_START_group pharmagegroupf.;
 run;
 
+title "EOT/SVR12 & age at treatment, Among those treated & w confirmed HCV - dup in case age daa start group errors out again to get eot and svr";
 proc freq data=TRT_TESTING15;
-    title "EOT/SVR12 & age at treatment, Among those treated & w confirmed HCV - dup in case age daa start group errors out again to get eot and svr";
-    tables EOT_RNA_TEST SVR12_RNA_TEST / out=Table17 missing norow nopercent nocol;
+    tables EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
     WHERE DISEASE_STATUS_HCV = 1 and DAA_START_INDICATOR = 1;
+run;
+
+proc sort data=DAA15;
+    by final_re;
 run;
 
 title "HCV Care Cascade, by race/ethnicity (<=15)";
 proc freq data=DAA15;
-    tables DISEASE_STATUS_HCV*final_re / missing norow nopercent nocol;
+    by final_re;
+    tables DISEASE_STATUS_HCV / missing norow nopercent nocol;
     where DISEASE_STATUS_HCV = 1 and DAA_START_INDICATOR = 1;
-    ods output CrossTabFreqs=Table18;
-    format frequency best32.;
 run;
 
 title "<=15 HCV Care Cascade, by race/ethnicity, Among Confirmed";
 proc freq data=DAA15;
-    tables HCV_PRIMARY_DIAG*final_re
-           GENO_TEST_INDICATOR*final_re
-           DAA_START_INDICATOR*final_re / missing norow nopercent nocol;
+    by final_re;
+    tables HCV_PRIMARY_DIAG
+           GENO_TEST_INDICATOR
+           DAA_START_INDICATOR / missing norow nopercent nocol;
     Where DISEASE_STATUS_HCV = 1;
-    ods output CrossTabFreqs=Table19;
-    format frequency best32.;
 run;
 title;
 
@@ -964,13 +2182,11 @@ title;
 proc sql noprint;
 select cats('WORK.',memname) into :to_delete separated by ' '
 from dictionary.tables
-where libname = 'WORK' and memname not in ('INFANT_DAA'/*, 'OUD_HCV_DAA'*/);
+where libname = 'WORK' and memname not in ('INFANT_DAA', 'OUD_HCV_DAA');
 quit;
 
 proc delete data=&to_delete.;
 run;
-
-/* Join to add covariates */
 
 proc sql;
     create table FINAL_INFANT_COHORT as
@@ -983,18 +2199,22 @@ proc sql;
            birthsinfants.NAS_BC_NEW,
            birthsinfants.RES_ZIP_BIRTH,
            birthsinfants.Res_Code_Birth as res_code,
-           case 
-               when birthsinfants.NAS_BC = 1 or birthsinfants.NAS_BC_NEW = 1 then 1
-               else .
+       case 
+           when birthsinfants.NAS_BC = 1 or birthsinfants.NAS_BC_NEW = 1 then 1
+           when birthsinfants.NAS_BC = 9 or birthsinfants.NAS_BC_NEW = 9 then 9
+           when birthsinfants.NAS_BC = 0 or birthsinfants.NAS_BC_NEW = 0 then 0
+           when birthsinfants.NAS_BC = . or birthsinfants.NAS_BC_NEW = . then .
+           else .
            end as NAS_BC_TOTAL
     from INFANT_DAA
     left join PHDBIRTH.BIRTH_INFANT as birthsinfants
-    on INFANT_DAA.ID = birthsinfants.ID;
+    on INFANT_DAA.INFANT_ID = birthsinfants.ID;
 
     /* Create county from res_code */
     data FINAL_INFANT_COHORT;
         set FINAL_INFANT_COHORT;
-        if res_code in (20,36,41,55,75,86,96,126,172,224,242,261,300,318,351) then county='BARNSTABLE';
+        if res_code = 999 then county = "Missing/Unknown/Invalid";
+        else if res_code in (20,36,41,55,75,86,96,126,172,224,242,261,300,318,351) then county='BARNSTABLE';
         else if res_code in (4,6,22,58,63,70,90,98,113,121,132,148,150,152,193,195,
                              200,203,209,225,233,236,249,260,263,267,283,302,313,326,341,345) then county='BERKSHIRE';
         else if res_code in (3, 16,27,72,76,88,94,95,102,167,201,211,218,245,247,265,273,292,293,334) then county='BRISTOL';
@@ -1049,6 +2269,16 @@ PROC SQL;
 QUIT;
 
 %put Number of unique BIRTH_LINK_IDs in FINAL_INFANT_COHORT table: &num_unique_ids;
+
+proc sort data=FINAL_INFANT_COHORT;
+   by birth_link_id;
+run;
+
+data FINAL_INFANT_COHORT;
+    set FINAL_INFANT_COHORT;
+    by birth_link_id;
+    if first.birth_link_id;
+run;
 
 %LET MENTAL_HEALTH = ('F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F28', 'F29',
                       'F30', 'F31', 'F32', 'F33', 'F34', 'F39', 'F40', 'F41',
@@ -1147,14 +2377,6 @@ from FINAL_INFANT_COHORT;
 quit;
 /* Searching in full dataset because mental health codes are starts_with strings */
 
-PROC SQL;
-    SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM FINAL_INFANT_COHORT_COV;
-QUIT;
-
-%put Number of unique BIRTH_LINK_IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
-
 %let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
            '421', '4211', '4219', '4249*', 'A382', 'B376', 'I011', 'I059',
            'I079', 'I080', 'I083', 'I089', 'I330', 'I339', 'I358', 'I378',
@@ -1220,14 +2442,6 @@ else 0
 end as IJI_DIAG
 from FINAL_INFANT_COHORT_COV;
 quit;
-
-PROC SQL;
-    SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM FINAL_INFANT_COHORT_COV;
-QUIT;
-
-%put Number of unique BIRTH_LINK_IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
 
 %LET OTHER_SUBSTANCE_USE = ('2910', '2911', '2912', '2913', '2914', '2915', '2918', '29181', '29182', '29189', '2919',
                       '30300', '30301', '30302', '30390', '30391', '30392', '30500', '30501',
@@ -1319,14 +2533,6 @@ end as OTHER_SUBSTANCE_USE
 from FINAL_INFANT_COHORT_COV;
 quit;
 
-PROC SQL;
-    SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM FINAL_INFANT_COHORT_COV;
-QUIT;
-
-%put Number of unique BIRTH_LINK_IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
-
 %let well_child = ('Z00129', 'Z00121', /* ICD-10 codes */
                     'V202', 'V700', 'V703', 'V705', 'V706', 'V708', 'V709'); /* ICD-9 codes */
 
@@ -1387,31 +2593,23 @@ end as WELL_CHILD
 from FINAL_INFANT_COHORT_COV;
 quit;
 
+proc sql;
+    create table FINAL_INFANT_COHORT_COV as
+    select 
+        A.*, 
+        (case when B.MOM_ID is not null and B.OUD_AGE < A.AGE_BIRTH then 1 else 0 end) as OUD_CAPTURE
+    from FINAL_INFANT_COHORT_COV as A
+    left join (select distinct MOM_ID, OUD_AGE from OUD_HCV_DAA) as B
+    on A.MOM_ID = B.MOM_ID;
+quit;
+
 PROC SQL;
-    SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
+    SELECT COUNT(DISTINCT INFANT_ID) AS Number_of_Unique_IDs
     INTO :num_unique_ids
     FROM FINAL_INFANT_COHORT_COV;
 QUIT;
 
-%put Number of unique BIRTH_LINK_IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
-
-/* proc sql; */
-/*     create table FINAL_INFANT_COHORT_COV as */
-/*     select  */
-/*         A.*,  */
-/*         (case when B.MOM_ID is not null and B.OUD_AGE < A.AGE_BIRTH then 1 else 0 end) as OUD_CAPTURE */
-/*     from FINAL_INFANT_COHORT_COV as A */
-/*     left join (select distinct MOM_ID, OUD_AGE from OUD_HCV_DAA) as B */
-/*     on A.MOM_ID = B.MOM_ID; */
-/* quit; */
-/*  */
-/* PROC SQL; */
-/*     SELECT COUNT(DISTINCT INFANT_ID) AS Number_of_Unique_IDs */
-/*     INTO :num_unique_ids */
-/*     FROM FINAL_INFANT_COHORT_COV; */
-/* QUIT; */
-/*  */
-/* %put Number of unique Infant IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids; */
+%put Number of unique Infant IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
 
 /* ========================================================== */
 /*                       Table 1 and Regressions              */
@@ -1467,7 +2665,7 @@ value langf
     13 = 'Russian'
     14 = 'American Sign Language'
     15 = 'Other'
-    88 = 'Refused'
+    88 = 'Refused/Unknown'
     99 = 'Unknown'
     other = 'N/A (MF Record)';
 
@@ -1477,10 +2675,7 @@ value moth_edu_fmt
     2 = 'HS degree or GED'
     3 = 'Associate or Bachelor degree'
     4 = 'Post graduate'
-    5 = 'Other'
-    8 = 'Refused'
-    9 = 'Unknown/Unobtainable'
-    10 = 'Special Education';
+    5-10 = 'Other/Unknown';
 
 /* Define format for LD_PAY */
 value ld_pay_fmt
@@ -1498,12 +2693,49 @@ value kotel_fmt
 
 /* Define format for PRENAT_SITE */
 value prenat_site_fmt
-    1 = 'Private Physician’s Office'
+    1 = 'Private Physicians Office'
     2 = 'Community Health Center'
     3 = 'HMO'
     4 = 'Hospital Clinic'
     5 = 'Other'
     9 = 'Unknown';
+
+/* Modify age_birth into a categorical variable */
+data FINAL_INFANT_COHORT_COV;
+    set FINAL_INFANT_COHORT_COV;
+    if AGE_BIRTH = 9999 then AGE_BIRTH_GROUP = 'Unknown';
+    else if AGE_BIRTH <= 18 then AGE_BIRTH_GROUP = '<=18';
+    else if AGE_BIRTH <= 25 then AGE_BIRTH_GROUP = '19-25';
+    else if AGE_BIRTH <= 35 then AGE_BIRTH_GROUP = '26-35';
+    else AGE_BIRTH_GROUP = '>35';
+
+/* Sort the dataset by APPROPRIATE_Testing */
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by APPROPRIATE_Testing;
+run;
+
+/* Calculate mean age stratified by appropriate testing */
+proc means data=FINAL_INFANT_COHORT_COV;
+    by APPROPRIATE_Testing;
+    var AGE_BIRTH;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+/* Combine last 4 education categories into 'Other/Unknown' */
+data FINAL_INFANT_COHORT_COV;
+    set FINAL_INFANT_COHORT_COV;
+    if MOTHER_EDU in (5,8,9,10) then MOTHER_EDU_GROUP = 'Other/Unknown';
+    else MOTHER_EDU_GROUP = put(MOTHER_EDU, moth_edu_fmt.);
+run;
+
+/* Make gestational_age categorical */
+data FINAL_INFANT_COHORT_COV;
+    set FINAL_INFANT_COHORT_COV;
+    if GESTATIONAL_AGE = 99 then GESTATIONAL_AGE_CAT = 'Unknown';
+    else if GESTATIONAL_AGE >= 37 then GESTATIONAL_AGE_CAT = 'Term';
+    else if GESTATIONAL_AGE < 37 then GESTATIONAL_AGE_CAT = 'Preterm';
+    else GESTATIONAL_AGE_CAT = 'Missing';
+run;
 
 %macro Table1Freqs(var, format);
     title "Table 1, Unstratified";
@@ -1514,7 +2746,7 @@ value prenat_site_fmt
 %mend;
 
 %Table1freqs (FINAL_SEX, sexf.);
-%Table1freqs (GESTATIONAL_AGE);
+%Table1freqs (GESTATIONAL_AGE_CAT);
 %Table1freqs (FINAL_RE, raceef.);
 %Table1freqs (MOMS_FINAL_RE, raceef.);
 %Table1freqs (FACILITY_ID_BIRTH);
@@ -1526,13 +2758,13 @@ value prenat_site_fmt
 %Table1freqs (HIV_DIAGNOSIS, flagf.);
 %Table1freqs (MOUD_DURING_PREG, flagf.);
 %Table1freqs (MOUD_AT_DELIVERY, flagf.);
-/* %Table1freqs (OUD_CAPTURE, flagf.); */
-%Table1freqs (AGE_BIRTH);
+%Table1freqs (OUD_CAPTURE, flagf.);
+%Table1freqs (AGE_BIRTH_GROUP);
 %Table1freqs (EVER_INCARCERATED, flagf.);
 %Table1freqs (FOREIGN_BORN, fbornf.);
 %Table1freqs (HOMELESS_HISTORY, flagf.);
 %Table1freqs (LANGUAGE_SPOKEN, langf.);
-%Table1freqs (MOTHER_EDU, moth_edu_fmt.);
+%Table1freqs (MOTHER_EDU_GROUP);
 %Table1freqs (LD_PAY, ld_pay_fmt.);
 %Table1freqs (KOTELCHUCK, kotel_fmt.);
 %Table1freqs (prenat_site, prenat_site_fmt.);
@@ -1560,7 +2792,7 @@ value prenat_site_fmt
 %mend;
 
 %Table1Stratafreqs (FINAL_SEX, sexf.);
-%Table1Stratafreqs (GESTATIONAL_AGE);
+%Table1Stratafreqs (GESTATIONAL_AGE_CAT);
 %Table1Stratafreqs (FINAL_RE, raceef.);
 %Table1Stratafreqs (MOMS_FINAL_RE, raceef.);
 %Table1Stratafreqs (FACILITY_ID_BIRTH);
@@ -1572,13 +2804,13 @@ value prenat_site_fmt
 %Table1Stratafreqs (HIV_DIAGNOSIS, flagf.);
 %Table1Stratafreqs (MOUD_DURING_PREG, flagf.);
 %Table1Stratafreqs (MOUD_AT_DELIVERY, flagf.);
-/* %Table1Stratafreqs (OUD_CAPTURE, flagf.); */
-%Table1Stratafreqs (AGE_BIRTH);
+%Table1Stratafreqs (OUD_CAPTURE, flagf.);
+%Table1Stratafreqs (AGE_BIRTH_GROUP);
 %Table1Stratafreqs (EVER_INCARCERATED, flagf.);
 %Table1Stratafreqs (FOREIGN_BORN, fbornf.);
 %Table1Stratafreqs (HOMELESS_HISTORY, flagf.);
 %Table1Stratafreqs (LANGUAGE_SPOKEN, langf.);
-%Table1Stratafreqs (MOTHER_EDU, moth_edu_fmt.);
+%Table1Stratafreqs (MOTHER_EDU_GROUP);
 %Table1Stratafreqs (LD_PAY, ld_pay_fmt.);
 %Table1Stratafreqs (KOTELCHUCK, kotel_fmt.);
 %Table1Stratafreqs (prenat_site, prenat_site_fmt.);
@@ -1589,40 +2821,40 @@ value prenat_site_fmt
 %Table1Stratafreqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1Stratafreqs (iji_diag, flagf.);
 
-%macro Table2Crude (var);
+%macro Table2Crude(var, ref=);
 title "Table 2, Crude";
 proc logistic data=FINAL_INFANT_COHORT_COV desc; 
-	class &var (param=ref);
-	model APPROPRIATE_Testing=&var;
-	run;
+    class &var (param=ref);
+    model APPROPRIATE_Testing=&var;
+run;
 %mend;
 
-%Table2Crude (FINAL_SEX);
-%Table2Crude (GESTATIONAL_AGE);
-%Table2Crude (FINAL_RE);
-%Table2Crude (MOMS_FINAL_RE);
-%Table2Crude (FACILITY_ID_BIRTH);
-%Table2Crude (county);
-%Table2Crude (well_child);
-%Table2Crude (NAS_BC_TOTAL);
-%Table2Crude (DISCH_WITH_MOM);
-%Table2Crude (INF_VAC_HBIG);
-%Table2Crude (HIV_DIAGNOSIS);
-%Table2Crude (MOUD_DURING_PREG);
-%Table2Crude (MOUD_AT_DELIVERY);
-/* %Table2Crude (OUD_CAPTURE); */
-%Table2Crude (AGE_BIRTH);
-%Table2Crude (EVER_INCARCERATED);
-%Table2Crude (FOREIGN_BORN);
-%Table2Crude (HOMELESS_HISTORY);
-%Table2Crude (LANGUAGE_SPOKEN);
-%Table2Crude (MOTHER_EDU);
-%Table2Crude (LD_PAY);
-%Table2Crude (KOTELCHUCK);
-%Table2Crude (prenat_site);
-%Table2Crude (MATINF_HEPC);
-%Table2Crude (MATINF_HEPB);
-%Table2Crude (EVER_IDU_HCV);
-%Table2Crude (mental_health_diag);
-%Table2Crude (OTHER_SUBSTANCE_USE);
-%Table2Crude (iji_diag);
+%Table2Crude(FINAL_SEX, ref='Male');
+%Table2Crude(GESTATIONAL_AGE_CAT, ref='Term');
+%Table2Crude(FINAL_RE, ref='White Non-Hispanic');
+%Table2Crude(MOMS_FINAL_RE, ref='White Non-Hispanic');
+%Table2Crude(FACILITY_ID_BIRTH, ref='2307');
+%Table2Crude(county, ref='SUFFOLK');
+%Table2Crude(well_child, ref='No');
+%Table2Crude(NAS_BC_TOTAL, ref='No');
+%Table2Crude(DISCH_WITH_MOM, ref='No');
+%Table2Crude(INF_VAC_HBIG, ref='No');
+%Table2Crude(HIV_DIAGNOSIS, ref='No');
+%Table2Crude(FOREIGN_BORN, ref='No');
+%Table2Crude(HOMELESS_HISTORY, ref='No');
+%Table2Crude(EVER_IDU_HCV, ref='No');
+%Table2Crude(MENTAL_HEALTH_DIAG, ref='No');
+%Table2Crude(OTHER_SUBSTANCE_USE, ref='No');
+%Table2Crude(MATINF_HEPB, ref='No');
+%Table2Crude(MOUD_DURING_PREG, ref='No');
+%Table2Crude(MOUD_AT_DELIVERY, ref='No');
+%Table2Crude(OUD_CAPTURE, ref='No');
+%Table2Crude(IJI_DIAG, ref='No');
+%Table2Crude(EVER_INCARCERATED, ref='No');
+%Table2Crude(MATINF_HEPC, ref='No');
+%Table2Crude(AGE_BIRTH_GROUP, ref='26-35');
+%Table2Crude(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Crude(MOTHER_EDU_GROUP, ref='HS degree or');
+%Table2Crude(LD_PAY, ref='Public');
+%Table2Crude(KOTELCHUCK, ref='Adequate');
+%Table2Crude(prenat_site, ref='Private Physicians Office');

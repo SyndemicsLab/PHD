@@ -2,7 +2,7 @@
 /* Project: OUD Cascade 	    */
 /* Author: Ryan O'Dea  		    */ 
 /* Created: 4/27/2023 		    */
-/* Updated: 03/21/2024 by SJM	*/
+/* Updated: 04/02/2024 by SJM	*/
 /*==============================*/
 
 /*===== SUPRESSION CODE =========*/
@@ -70,7 +70,7 @@ PROC FORMAT;
 	'G2080', /*Opioid Trt */
  	'H0020','HZ81ZZZ','HZ84ZZZ','HZ91ZZZ','HZ94ZZZ',
     'J0570','J0571','J0572','J0573', 
- 	'J0574','J0575','J2315','Q9991','Q9992''S0109'/* Naloxone*/);
+ 	'J0574','J0575','J0592', 'J2315','Q9991','Q9992''S0109'/* Naloxone*/);
 
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
@@ -99,7 +99,7 @@ PROC SQL;
 QUIT;
 
 /*=========APCD DATA=============*/
-DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
+DATA apcd (KEEP= ID oud_apcd);
 	SET PHDAPCD.MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS
 								MED_ICD_PROC1-MED_ICD_PROC7
 								MED_ICD1-MED_ICD25
@@ -120,16 +120,11 @@ DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
 		DROP= i;
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
 	IF oud_apcd = 0 THEN DELETE;
-
-	year_apcd = MED_FROM_DATE_YEAR;
-    month_apcd = MED_FROM_DATE_MONTH;
 RUN;
 
-DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
+DATA pharm (KEEP= oud_pharm ID);
     SET PHDAPCD.MOUD_PHARM(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH
                                PHARM_FILL_DATE_YEAR PHARM_ICD ID);
-    month_pharm = PHARM_FILL_DATE_MONTH;
-    year_pharm = PHARM_FILL_DATE_YEAR;
 
     IF  PHARM_ICD IN &ICD OR 
         PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
@@ -138,17 +133,12 @@ RUN;
 
 /*======CASEMIX DATA==========*/
 /* ED */
-DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm month_cm);
+DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
 				  WHERE= (ED_ADMIT_YEAR IN &year));
 	IF ED_DIAG1 in &ICD OR 
         ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
 	ELSE oud_cm_ed = 0;
-	
-	IF oud_cm_ed > 0 THEN do;
-	year_cm = ED_ADMIT_YEAR;
-    month_cm = ED_ADMIT_MONTH;
-    end;
 RUN;
 
 /* ED_DIAG */
@@ -194,7 +184,7 @@ PROC SQL;
 	LEFT JOIN casemix_ed_proc ON casemix_ed_diag.ED_ID = casemix_ed_proc.ED_ID;
 QUIT;
 
-DATA casemix (KEEP= ID oud_ed year_cm age_ed month_cm);
+DATA casemix (KEEP= ID oud_ed);
 	SET casemix;
 	IF SUM(oud_cm_ed_proc, oud_cm_ed_diag, oud_cm_ed) > 0 THEN oud_ed = 1;
 	ELSE oud_ed = 0;
@@ -203,18 +193,13 @@ DATA casemix (KEEP= ID oud_ed year_cm age_ed month_cm);
 RUN;
 
 /* HD DATA */
-DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd month_hd);
+DATA hd (KEEP= HD_ID ID oud_hd_raw);
 	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
 					WHERE= (HD_ADMIT_YEAR IN &year));
 	IF HD_DIAG1 in &ICD OR
      HD_PROC1 in &PROC OR
      HD_ECODE IN &ICD THEN oud_hd_raw = 1;
 	ELSE oud_hd_raw = 0;
-
-IF oud_hd_raw > 0 THEN do;
-    year_hd = HD_ADMIT_YEAR;
-    month_hd = HD_ADMIT_MONTH;
-end;
 RUN;
 
 /* HD DIAG DATA */
@@ -260,7 +245,7 @@ PROC SQL;
 	LEFT JOIN hd_proc ON hd.HD_ID = hd_proc.HD_ID;
 QUIT;
 
-DATA hd (KEEP= ID oud_hd year_hd month_hd);
+DATA hd (KEEP= ID oud_hd);
 	SET hd;
 	IF SUM(oud_hd_diag, oud_hd_raw, oud_hd_proc) > 0 THEN oud_hd = 1;
 	ELSE oud_hd = 0;
@@ -269,7 +254,7 @@ DATA hd (KEEP= ID oud_hd year_hd month_hd);
 RUN;
 
 /* OO */
-DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
+DATA oo (KEEP= ID oud_oo);
     SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
                         OO_ADMIT_YEAR OO_ADMIT_MONTH
                         OO_CPT1-OO_CPT10
@@ -293,11 +278,7 @@ DATA oo (KEEP= ID oud_oo year_oo age_oo month_oo);
     ELSE oud_oo = 0;
 
     IF oud_oo = 0 THEN DELETE;
-
-	year_oo = OO_ADMIT_YEAR;
-    month_oo = OO_ADMIT_MONTH;
 RUN;
-
 
 /* MERGE ALL CM */
 PROC SQL;
@@ -305,16 +286,12 @@ PROC SQL;
     SELECT *
     FROM casemix
     FULL JOIN hd ON casemix.ID = hd.ID
-		AND casemix.year_cm = hd.year_hd
-        AND casemix.month_cm = hd.month_hd
-    FULL JOIN oo ON hd.ID = oo.ID
-		AND casemix.year_cm = oo.year_oo
-        AND casemix.month_cm = oo.month_oo;
+    FULL JOIN oo ON hd.ID = oo.ID;
 QUIT;
 
 PROC STDIZE DATA = casemix OUT = casemix reponly missing = 9999; RUN;
 
-DATA casemix (KEEP = ID oud_cm year_cm month_cm);
+DATA casemix (KEEP = ID oud_cm);
     SET casemix;
 
     IF oud_ed = 9999 THEN oud_ed = 0;
@@ -324,13 +301,10 @@ DATA casemix (KEEP = ID oud_cm year_cm month_cm);
     IF sum(oud_ed, oud_hd, oud_oo) > 0 THEN oud_cm = 1;
     ELSE oud_cm = 0;
     IF oud_cm = 0 THEN DELETE;
-
-	year_cm = min(year_oo, year_hd, year_cm);
-    month_cm = min(month_oo, month_hd, month_cm);
 RUN;
 
 /* BSAS */
-DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas);
+DATA bsas (KEEP= ID oud_bsas);
     SET PHDBSAS.BSAS (KEEP= ID CLT_ENR_OVERDOSES_LIFE
                              CLT_ENR_PRIMARY_DRUG
                              CLT_ENR_SECONDARY_DRUG
@@ -346,13 +320,10 @@ DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas);
         OR PDM_PRV_SERV_CAT = 7 THEN oud_bsas = 1;
     ELSE oud_bsas = 0;
     IF oud_bsas = 0 THEN DELETE;
-
-	year_bsas = ENR_YEAR_BSAS;
-    month_bsas = ENR_MONTH_BSAS;;
 RUN;
 
 /* MATRIS */
-DATA matris (KEEP= ID oud_matris year_matris month_matris);
+DATA matris (KEEP= ID oud_matris);
 SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
                           OPIOID_ORISUBCAT_MATRIS
                           inc_year_matris
@@ -363,35 +334,26 @@ SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
     IF OPIOID_ORI_MATRIS = 1 
         OR OPIOID_ORISUBCAT_MATRIS in (1:5) THEN oud_matris = 1;
     ELSE oud_matris = 0;
-    IF oud_matris = 0 THEN DELETE;
-
-	year_matris = inc_year_matris;
-    month_matris = inc_month_matris;
+    IF oud_matris = 0 THEN DELETE;;
 RUN;
 
 /* DEATH */
-DATA death (KEEP= ID oud_death year_death month_death);
+DATA death (KEEP= ID oud_death);
     SET PHDDEATH.DEATH (KEEP= ID OPIOID_DEATH YEAR_DEATH AGE_DEATH
                         WHERE= (YEAR_DEATH IN &year));
     IF OPIOID_DEATH = 1 THEN oud_death = 1;
     ELSE oud_death = 0;
     IF oud_death = 0 THEN DELETE;
-
-	year_death = YEAR_DEATH;
-    month_death = MONTH_DEATH;
 RUN;
 
 /* PMP */
-DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp);
+DATA pmp (KEEP= ID oud_pmp);
     SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year date_filled_month BUP_CAT_PMP
                     WHERE= (date_filled_year IN &year));
     IF BUPRENORPHINE_PMP = 1 AND 
         BUP_CAT_PMP = 1 THEN oud_pmp = 1;
     ELSE oud_pmp = 0;
     IF oud_pmp = 0 THEN DELETE;
-
-	year_pmp = date_filled_year;
-    month_pmp = date_filled_month;
 RUN;
 
 /*===========================*/
@@ -424,12 +386,24 @@ PROC SQL;
     SELECT * FROM demographics
     LEFT JOIN apcd ON apcd.ID = demographics.ID
     LEFT JOIN casemix ON casemix.ID = demographics.ID
+    LEFT JOIN death ON death.ID = demographics.ID
     LEFT JOIN bsas ON bsas.ID = demographics.ID
     LEFT JOIN matris ON matris.ID = demographics.ID
-    LEFT JOIN pmp ON pmp.ID = demographics.ID;
+    LEFT JOIN pmp ON pmp.ID = demographics.ID
+    LEFT JOIN pharm ON pharm.ID = demographics.ID;
+
+    CREATE TABLE oud AS
+    SELECT DISTINCT * 
+    FROM oud;
 QUIT;
 
 PROC STDIZE DATA = oud OUT = oud reponly missing = 9999; RUN;
+
+DATA _NULL_;
+    current_date = today(); /* Get the current date */
+    current_year = year(current_date); /* Extract the year from the current date */
+    CALL SYMPUT('current_year', current_year); /* Assign the current year to a macro variable */
+RUN;
 
 DATA oud;
     SET oud;
@@ -448,7 +422,7 @@ DATA oud;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-    age = year - YOB;
+    age = &current_year - YOB;
     age_grp_five = put(age, age_grps_five.);
 	IF age_grp_five  = 999 THEN DELETE;
 RUN;
@@ -459,7 +433,7 @@ RUN;
 
 PROC SQL;
     CREATE TABLE oud_distinct AS
-    SELECT DISTINCT ID, oud_age, age_grp_five as agegrp, FINAL_RE FROM oud;
+    SELECT DISTINCT ID, age, age_grp_five as agegrp, FINAL_RE FROM oud;
 QUIT;
 
 PROC SQL;
@@ -571,7 +545,7 @@ DATA moud_demo;
 
     IF flag_mim = 1 THEN DELETE;
 
-    age = year - YOB;
+    age = start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
 RUN;
 
@@ -588,11 +562,11 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
       year = year(new_date);
       month = month(new_date);
+      postexp_age = year - YOB;
+      age_grp_five = put(postexp_age, age_grps_five.);      
       OUTPUT;
     END;
-    
-    postexp_age = year - YOB;
-    age_grp_five = put(postexp_age, age_grps_five.);
+
 RUN;
 
 DATA moud_expanded;
@@ -1089,99 +1063,107 @@ PROC FORMAT;
 RUN;
 
 /*  NONSTRATIFIED CARE CASCADE TABLES */
+/* Sorting the dataset by CONFIRMED_HCV_INDICATOR */
+proc sort data=OUD_HCV_DAA;
+    by CONFIRMED_HCV_INDICATOR;
+run;
+
 title "HCV Care Cascade, OUD Cohort, Overall";
 proc freq data=OUD_HCV_DAA;
-tables ANY_HCV_TESTING_INDICATOR
-	   AB_TEST_INDICATOR
-	   RNA_TEST_INDICATOR
-	   HCV_SEROPOSITIVE_INDICATOR
-	   CONFIRMED_HCV_INDICATOR
-	   HCV_PRIMARY_DIAG
-	   DAA_START_INDICATOR
-	   BIRTH_INDICATOR
-	   EVENT_YEAR_HCV
-	   FIRST_DAA_START_YEAR /missing;
-	   ods output CrossTabFreqs=btbl;
+    tables ANY_HCV_TESTING_INDICATOR
+           AB_TEST_INDICATOR
+           RNA_TEST_INDICATOR
+           HCV_SEROPOSITIVE_INDICATOR
+           CONFIRMED_HCV_INDICATOR
+           HCV_PRIMARY_DIAG
+           DAA_START_INDICATOR
+           BIRTH_INDICATOR
+           EVENT_YEAR_HCV
+           FIRST_DAA_START_YEAR / missing norow nocol nopercent;
 run;
 
-PROC FREQ data = AB_YEARS_COHORT;
+proc freq data=OUD_HCV_DAA;
+    by CONFIRMED_HCV_INDICATOR;
+    tables HCV_PRIMARY_DIAG
+           GENO_TEST_INDICATOR
+           DAA_START_INDICATOR
+           BIRTH_INDICATOR / missing norow nocol nopercent;
+run;
+
+proc freq data=OUD_HCV_DAA;
+    by HCV_PRIMARY_DIAG;
+    tables HCV_SEROPOSITIVE_INDICATOR / missing norow nocol nopercent;
+run;
+
 title "AB Tests Per Year, In Cohort";
-table  AB_TEST_YEAR / norow nocol nopercent;
+PROC FREQ data = AB_YEARS_COHORT;
+table  AB_TEST_YEAR / missing norow nocol nopercent;
 run;
 
-PROC FREQ data = AB_YEARS;
 title "AB Tests Per Year, All MA Res.";
-table  AB_TEST_YEAR / norow nocol nopercent;
+PROC FREQ data = AB_YEARS;
+table  AB_TEST_YEAR / missing norow nocol nopercent;
 run;
 
-proc freq data=Testing;
 title   "Testing Among Confirmed HCV";
+proc freq data=Testing;
 where   CONFIRMED_HCV_INDICATOR = 1;
-tables  HCV_PRIMARY_DIAG
-        GENO_TEST_INDICATOR
-        DAA_START_INDICATOR
-        BIRTH_INDICATOR
+tables  BIRTH_INDICATOR
         EOT_RNA_TEST
 		SVR12_RNA_TEST
-		FIRST_DAA_START_YEAR / norow nopercent nocol;
+		FIRST_DAA_START_YEAR / missing norow nopercent nocol;
 run;
 
-/* CascadeTestFreq will output the stratified overall testing 
-   Counts stratified according to 'strata'
-   Note: We will use raw race formats here */
 %macro CascadeTestFreq(strata, mytitle, ageformat, raceformat);
-	   	TITLE  &mytitle;
-	   	PROC FREQ DATA = OUD_HCV_DAA;
-	   	TABLES ANY_HCV_TESTING_INDICATOR*&strata
-			   AB_TEST_INDICATOR*&strata
-			   RNA_TEST_INDICATOR*&strata
-			   HCV_SEROPOSITIVE_INDICATOR*&strata 
-			   CONFIRMED_HCV_INDICATOR*&strata /missing;
-		FORMAT num_agegrp &ageformat 
-			   final_re &raceformat
-			   BIRTH_INDICATOR birthfmt.;
-			   ods output CrossTabFreqs=btbl2;
+    TITLE &mytitle;
+    PROC FREQ DATA = OUD_HCV_DAA;
+        BY &strata;
+        TABLES ANY_HCV_TESTING_INDICATOR
+               AB_TEST_INDICATOR
+               RNA_TEST_INDICATOR
+               HCV_SEROPOSITIVE_INDICATOR
+               CONFIRMED_HCV_INDICATOR / missing norow nocol nopercent;
+        FORMAT num_agegrp &ageformat 
+               final_re &raceformat
+               BIRTH_INDICATOR birthfmt.;
 %mend CascadeTestFreq;
 
-/* For outcomes we'll collapse the formats to avoid low counts  */
 %macro CascadeCareFreq(strata, mytitle, ageformat, raceformat);
-	   	TITLE  &mytitle;
-	   	PROC FREQ DATA = OUD_HCV_DAA;
-	   	TABLES GENO_TEST_INDICATOR*&strata
-	   		   HCV_PRIMARY_DIAG*&strata
-	           DAA_START_INDICATOR*&strata /missing;
-		WHERE CONFIRMED_HCV_INDICATOR=1;
-		FORMAT num_agegrp &ageformat 
-			   final_re &raceformat
-			   BIRTH_INDICATOR birthfmt.;
-			   ods output CrossTabFreqs=btbl3;			
+    TITLE "&mytitle";
+    PROC FREQ DATA=OUD_HCV_DAA;
+    BY &strata;
+    TABLES GENO_TEST_INDICATOR
+           HCV_PRIMARY_DIAG
+           DAA_START_INDICATOR / missing norow nocol nopercent;
+    WHERE CONFIRMED_HCV_INDICATOR=1;
+    FORMAT num_agegrp &ageformat 
+           final_re &raceformat
+           BIRTH_INDICATOR birthfmt.;
 %mend CascadeCareFreq;
 
-/* End of Treatment */
 %macro EndofTrtFreq(strata, mytitle, ageformat, raceformat);
-	   	TITLE  &mytitle;	   	
-	   	PROC FREQ DATA = TESTING;
-	   	TABLES DAA_START_INDICATOR*&strata
-	   		   HCV_PRIMARY_DIAG*&strata
-	   		   EOT_RNA_TEST*&strata
-			   SVR12_RNA_TEST*&strata /missing;
-	   	WHERE  CONFIRMED_HCV_INDICATOR = 1;
-		FORMAT num_agegrp &ageformat 
-			   final_re &raceformat
-			   BIRTH_INDICATOR birthfmt.;
-			   ods output CrossTabFreqs=btbl4;			
+    TITLE &mytitle;
+    PROC FREQ DATA = TESTING;
+        BY &strata;
+        TABLES DAA_START_INDICATOR
+               HCV_PRIMARY_DIAG
+               EOT_RNA_TEST
+               SVR12_RNA_TEST / missing norow nocol nopercent;
+        WHERE CONFIRMED_HCV_INDICATOR = 1;
+        FORMAT num_agegrp &ageformat 
+               final_re &raceformat
+               BIRTH_INDICATOR birthfmt.;
 %mend EndofTrtFreq;
 
-/* Confirmed HCV and DAA Starts by YEAR */
 %macro YearFreq(var, strata, confirm_status, mytitle, ageformat, raceformat);
-	   	TITLE  &mytitle;
-	   	PROC FREQ DATA = OUD_HCV_DAA;
-		table  &var*&strata /missing;
-		WHERE  CONFIRMED_HCV_INDICATOR = &confirm_status;
-		FORMAT num_agegrp &ageformat
-			   final_re &raceformat
-			   BIRTH_INDICATOR birthfmt.;
-			   ods output CrossTabFreqs=btbl5;			
+    TITLE &mytitle;
+    PROC FREQ DATA = OUD_HCV_DAA;
+        BY &strata;
+        TABLE &var / missing norow nocol nopercent;
+        WHERE CONFIRMED_HCV_INDICATOR = &confirm_status;
+        FORMAT num_agegrp &ageformat
+               final_re &raceformat
+               BIRTH_INDICATOR birthfmt.;
 %mend YearFreq;
 
 /*  Age stratification */
@@ -1192,6 +1174,10 @@ run;
 %YearFreq(EVENT_YEAR_HCV, num_agegrp, 0, "Counts per year among probable, by Age", agefmt_comb., racefmt_all.)
 %YearFreq(FIRST_DAA_START_YEAR, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
 
+proc sort data=OUD_HCV_DAA;
+    by final_re;
+run;
+
 /*  Race Stratification */
 %CascadeTestFreq(final_re, "HCV Testing: Stratified by Race", agefmt_all., racefmt_all.);   
 %CascadeCareFreq(final_re, "HCV Care: Stratified by Race", agefmt_all., racefmt_all.);
@@ -1200,6 +1186,10 @@ run;
 %YearFreq(EVENT_YEAR_HCV, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
 %YearFreq(EVENT_YEAR_HCV, final_re, 0, "Counts per year among probable, by Race", agefmt_comb., racefmt_all.)
 %YearFreq(FIRST_DAA_START_YEAR, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
+
+proc sort data=OUD_HCV_DAA;
+    by birth_indicator;
+run;
 
 /*  Birth Stratification */
 %CascadeTestFreq(birth_indicator, "HCV Testing: Stratified by Birth", agefmt_all., racefmt_all.);   
