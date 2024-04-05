@@ -714,7 +714,7 @@ DATA moud_demo;
 
     IF flag_mim = 1 THEN DELETE;
 
-    age = year - YOB;
+    age = start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
 RUN;
 
@@ -732,10 +732,9 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       year = year(new_date);
       month = month(new_date);
       postexp_age = year - YOB;
+      age_grp_five = put(postexp_age, age_grps_five.);
       OUTPUT;
     END;
-
-    age_grp_five = put(postexp_age, age_grps_five.);
 RUN;
 
 DATA moud_expanded;
