@@ -1090,6 +1090,10 @@ proc freq data=OUD_HCV_DAA;
            BIRTH_INDICATOR / missing norow nocol nopercent;
 run;
 
+proc sort data=OUD_HCV_DAA;
+    by HCV_PRIMARY_DIAG;
+run;
+
 proc freq data=OUD_HCV_DAA;
     by HCV_PRIMARY_DIAG;
     tables HCV_SEROPOSITIVE_INDICATOR / missing norow nocol nopercent;
@@ -1167,6 +1171,14 @@ run;
 %mend YearFreq;
 
 /*  Age stratification */
+proc sort data=OUD_HCV_DAA;
+    by num_agegrp;
+run;
+
+proc sort data=TESTING;
+    by num_agegrp;
+run;
+
 %CascadeTestFreq(num_agegrp, "HCV Testing: Stratified by Age", agefmt_all., racefmt_all.);   
 %CascadeCareFreq(num_agegrp, "HCV Care: Stratified by Age", agefmt_all., racefmt_all.);
 %EndofTrtFreq(num_agegrp, "HCV EOT/SVR Testing Among Confirmed HCV by Age", agefmt_all., racefmt_comb.)
@@ -1174,11 +1186,15 @@ run;
 %YearFreq(EVENT_YEAR_HCV, num_agegrp, 0, "Counts per year among probable, by Age", agefmt_comb., racefmt_all.)
 %YearFreq(FIRST_DAA_START_YEAR, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
 
+/*  Race Stratification */
 proc sort data=OUD_HCV_DAA;
     by final_re;
 run;
 
-/*  Race Stratification */
+proc sort data=TESTING;
+    by final_re;
+run;
+
 %CascadeTestFreq(final_re, "HCV Testing: Stratified by Race", agefmt_all., racefmt_all.);   
 %CascadeCareFreq(final_re, "HCV Care: Stratified by Race", agefmt_all., racefmt_all.);
 %EndofTrtFreq(final_re, "HCV EOT/SVR Testing Among Confirmed HCV by Race - all", agefmt_all., racefmt_all.)
@@ -1187,11 +1203,15 @@ run;
 %YearFreq(EVENT_YEAR_HCV, final_re, 0, "Counts per year among probable, by Race", agefmt_comb., racefmt_all.)
 %YearFreq(FIRST_DAA_START_YEAR, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
 
+/*  Birth Stratification */
 proc sort data=OUD_HCV_DAA;
     by birth_indicator;
 run;
 
-/*  Birth Stratification */
+proc sort data=TESTING;
+    by birth_indicator;
+run;
+
 %CascadeTestFreq(birth_indicator, "HCV Testing: Stratified by Birth", agefmt_all., racefmt_all.);   
 %CascadeCareFreq(birth_indicator, "HCV Care: Stratified by Birth", agefmt_all., racefmt_comb.);
 %EndofTrtFreq(birth_indicator, "HCV EOT/SVR Testing Among Confirmed HCV by Birth", agefmt_all., racefmt_comb.)
@@ -2597,9 +2617,9 @@ proc sql;
     create table FINAL_INFANT_COHORT_COV as
     select 
         A.*, 
-        (case when B.MOM_ID is not null and B.OUD_AGE < A.AGE_BIRTH then 1 else 0 end) as OUD_CAPTURE
+        (case when B.MOM_ID is not null and B.AGE < A.AGE_BIRTH then 1 else 0 end) as OUD_CAPTURE
     from FINAL_INFANT_COHORT_COV as A
-    left join (select distinct MOM_ID, OUD_AGE from OUD_HCV_DAA) as B
+    left join (select distinct MOM_ID, AGE from OUD_HCV_DAA) as B
     on A.MOM_ID = B.MOM_ID;
 quit;
 
@@ -2853,7 +2873,7 @@ run;
 %Table2Crude(EVER_INCARCERATED, ref='No');
 %Table2Crude(MATINF_HEPC, ref='No');
 %Table2Crude(AGE_BIRTH_GROUP, ref='26-35');
-%Table2Crude(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Crude(LANGUAGE_SPOKEN, ref='English');
 %Table2Crude(MOTHER_EDU_GROUP, ref='HS degree or');
 %Table2Crude(LD_PAY, ref='Public');
 %Table2Crude(KOTELCHUCK, ref='Adequate');
