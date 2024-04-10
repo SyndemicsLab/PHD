@@ -502,7 +502,7 @@ DATA oud_monthly;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-	age = year(today()) - YOB;
+	age = year - YOB;
     age_grp_five = put(age, age_grps_five.);
 RUN;
 
