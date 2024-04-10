@@ -705,7 +705,7 @@ DATA moud_demo;
 	
 	IF FIRST.ID THEN diff = .; 
 	ELSE diff = start_date - lag(end_date);
-    IF end_date > lag(end_date) THEN temp_flag = 1;
+    IF end_date < lag(end_date) THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF first.ID THEN flag_mim = 0;
