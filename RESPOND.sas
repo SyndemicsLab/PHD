@@ -99,7 +99,7 @@ PROC SQL;
 QUIT;
 
 /*=========APCD DATA=============*/
-DATA apcd (KEEP= ID oud_apcd age_apcd);
+DATA apcd (KEEP= ID oud_apcd year_apcd);
 	SET PHDAPCD.MOUD_MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE
 								MED_ICD_PROC1-MED_ICD_PROC7
 								MED_ICD1-MED_ICD25
@@ -121,10 +121,10 @@ DATA apcd (KEEP= ID oud_apcd age_apcd);
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
 	IF oud_apcd = 0 THEN DELETE;
 
-	age_apcd = MED_AGE;
+	year_apcd = MED_FROM_DATE_YEAR;
 RUN;
 
-DATA pharm (KEEP= oud_pharm ID age_pharm);
+DATA pharm (KEEP= oud_pharm ID year_pharm);
     SET PHDAPCD.MOUD_PHARM(KEEP= PHARM_NDC PHARM_FILL_DATE_MONTH PHARM_AGE
                                PHARM_FILL_DATE_YEAR PHARM_ICD ID);
 
@@ -132,13 +132,13 @@ DATA pharm (KEEP= oud_pharm ID age_pharm);
         PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
 
-IF oud_pharm > 0 THEN age_pharm = PHARM_AGE;
+IF oud_pharm > 0 THEN year_pharm = PHARM_FILL_DATE_YEAR;
 
 RUN;
 
 /*======CASEMIX DATA==========*/
 /* ED */
-DATA casemix_ed (KEEP= ID oud_cm_ed age_ed ED_ID);
+DATA casemix_ed (KEEP= ID oud_cm_ed year_cm ED_ID);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
 				  WHERE= (ED_ADMIT_YEAR IN &year));
 	IF ED_DIAG1 in &ICD OR 
@@ -146,7 +146,7 @@ DATA casemix_ed (KEEP= ID oud_cm_ed age_ed ED_ID);
 	ELSE oud_cm_ed = 0;
 
 	IF oud_cm_ed > 0 THEN do;
-	age_ed = ED_AGE;
+	year_cm = ED_ADMIT_YEAR;
 end;
 RUN;
 
@@ -193,7 +193,7 @@ PROC SQL;
 	LEFT JOIN casemix_ed_proc ON casemix_ed_diag.ED_ID = casemix_ed_proc.ED_ID;
 QUIT;
 
-DATA casemix (KEEP= ID oud_ed age_ed);
+DATA casemix (KEEP= ID oud_ed year_cm);
 	SET casemix;
 	IF SUM(oud_cm_ed_proc, oud_cm_ed_diag, oud_cm_ed) > 0 THEN oud_ed = 1;
 	ELSE oud_ed = 0;
@@ -202,7 +202,7 @@ DATA casemix (KEEP= ID oud_ed age_ed);
 RUN;
 
 /* HD DATA */
-DATA hd (KEEP= HD_ID ID oud_hd_raw age_hd);
+DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd);
 	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
 					WHERE= (HD_ADMIT_YEAR IN &year));
 	IF HD_DIAG1 in &ICD OR
@@ -211,7 +211,7 @@ DATA hd (KEEP= HD_ID ID oud_hd_raw age_hd);
 	ELSE oud_hd_raw = 0;
 
 	IF oud_hd_raw > 0 THEN do;
-    age_hd = HD_AGE;
+    year_hd = HD_ADMIT_YEAR;
 end;
 RUN;
 
@@ -258,7 +258,7 @@ PROC SQL;
 	LEFT JOIN hd_proc ON hd.HD_ID = hd_proc.HD_ID;
 QUIT;
 
-DATA hd (KEEP= ID oud_hd age_hd);
+DATA hd (KEEP= ID oud_hd year_hd);
 	SET hd;
 	IF SUM(oud_hd_diag, oud_hd_raw, oud_hd_proc) > 0 THEN oud_hd = 1;
 	ELSE oud_hd = 0;
@@ -267,7 +267,7 @@ DATA hd (KEEP= ID oud_hd age_hd);
 RUN;
 
 /* OO */
-DATA oo (KEEP= ID oud_oo age_oo);
+DATA oo (KEEP= ID oud_oo year_oo);
     SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
                         OO_ADMIT_YEAR OO_ADMIT_MONTH OO_AGE
                         OO_CPT1-OO_CPT10
@@ -292,7 +292,7 @@ DATA oo (KEEP= ID oud_oo age_oo);
 
     IF oud_oo = 0 THEN DELETE;
 
-    age_oo = OO_AGE;
+    year_oo = OO_ADMIT_YEAR;
 RUN;
 
 /* MERGE ALL CM */
@@ -306,7 +306,7 @@ QUIT;
 
 PROC STDIZE DATA = casemix OUT = casemix reponly missing = 9999; RUN;
 
-DATA casemix (KEEP = ID oud_cm age_cm);
+DATA casemix (KEEP = ID oud_cm year_cm);
     SET casemix;
 
     IF oud_ed = 9999 THEN oud_ed = 0;
@@ -317,11 +317,11 @@ DATA casemix (KEEP = ID oud_cm age_cm);
     ELSE oud_cm = 0;
     IF oud_cm = 0 THEN DELETE;
 
-   age_cm = min(age_ed, age_hd, age_oo);
+   year_cm = min(year_oo, year_hd, year_cm);
 RUN;
 
 /* BSAS */
-DATA bsas (KEEP= ID oud_bsas age_bsas);
+DATA bsas (KEEP= ID oud_bsas year_bsas);
     SET PHDBSAS.BSAS (KEEP= ID CLT_ENR_OVERDOSES_LIFE
                              CLT_ENR_PRIMARY_DRUG
                              CLT_ENR_SECONDARY_DRUG
@@ -338,10 +338,13 @@ DATA bsas (KEEP= ID oud_bsas age_bsas);
         OR PDM_PRV_SERV_CAT = 7 THEN oud_bsas = 1;
     ELSE oud_bsas = 0;
     IF oud_bsas = 0 THEN DELETE;
+
+    year_bsas = ENR_YEAR_BSAS;
+
 RUN;
 
 /* MATRIS */
-DATA matris (KEEP= ID oud_matris age_matris);
+DATA matris (KEEP= ID oud_matris year_matris);
 SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
                           OPIOID_ORISUBCAT_MATRIS
                           inc_year_matris
@@ -354,32 +357,33 @@ SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
     ELSE oud_matris = 0;
     IF oud_matris = 0 THEN DELETE;
 
-	IF AGE_UNITS_MATRIS = 1 THEN age_matris = AGE_MATRIS/525600;
-	ELSE IF AGE_UNITS_MATRIS = 2 THEN age_matris = AGE_MATRIS/8760;
-	ELSE IF AGE_UNITS_MATRIS = 3 THEN age_matris = AGE_MATRIS/365.25;
-	ELSE IF AGE_UNITS_MATRIS = 4 THEN age_matris = AGE_MATRIS/52;
-	ELSE IF AGE_UNITS_MATRIS = 5 THEN age_matris = AGE_MATRIS/12;
-	ELSE IF AGE_UNITS_MATRIS = 6 THEN age_matris = AGE_MATRIS;
-	ELSE age_matris = 999;
+    year_matris = inc_year_matris;
+
 RUN;
 
 /* DEATH */
-DATA death (KEEP= ID oud_death age_death);
+DATA death (KEEP= ID oud_death year_death);
     SET PHDDEATH.DEATH (KEEP= ID OPIOID_DEATH YEAR_DEATH AGE_DEATH
                         WHERE= (YEAR_DEATH IN &year));
     IF OPIOID_DEATH = 1 THEN oud_death = 1;
     ELSE oud_death = 0;
     IF oud_death = 0 THEN DELETE;
+
+    year_death = YEAR_DEATH;
+
 RUN;
 
 /* PMP */
-DATA pmp (KEEP= ID oud_pmp age_pmp);
+DATA pmp (KEEP= ID oud_pmp year_pmp);
     SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year AGE_PMP date_filled_month BUP_CAT_PMP
                     WHERE= (date_filled_year IN &year));
     IF BUPRENORPHINE_PMP = 1 AND 
         BUP_CAT_PMP = 1 THEN oud_pmp = 1;
     ELSE oud_pmp = 0;
     IF oud_pmp = 0 THEN DELETE;
+
+    year_pmp = date_filled_year;
+
 RUN;
 
 /*===========================*/
@@ -442,11 +446,26 @@ DATA oud;
     ELSE oud_master = 0;
     IF oud_master = 0 THEN DELETE;
 
-	oud_age = min(age_apcd, age_cm, age_matris, age_bsas, age_pmp);
-    oud_age = round(oud_age); /* Round oud_age to nearest whole number */;
-    age_grp_five  = put(oud_age, age_grps_five.);
-    IF age_grp_five  = 999 THEN DELETE;
+	oud_year = min(year_apcd, year_cm, year_matris, year_bsas, year_pmp);
+    IF oud_year = 9999 THEN oud_age = 999;
+    ELSE IF oud_year ne 9999 THEN oud_age = oud_year - YOB;
 RUN;
+
+PROC SORT data=oud;
+    by ID oud_age;
+RUN;
+
+data oud;
+    set oud;
+    by ID;
+    if first.ID;
+run;	
+
+data oud;
+	set oud;
+	age_grp_five  = put(oud_age, age_grps_five.);
+    IF age_grp_five  = 999 THEN DELETE;
+run;
 
 /*=========================================*/
 /*    FINAL COHORT DATASET: oud_distinct   */
@@ -720,14 +739,6 @@ DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
 	BIRTH_INDICATOR = 1;
 run;
 
-PROC SQL;
-    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM all_births;
-QUIT;
-
-%put Number of unique IDs in all_births table: &num_unique_ids;
-
 proc SQL;
 CREATE TABLE births AS
 SELECT  ID,
@@ -736,6 +747,14 @@ SELECT  ID,
 		max(BIRTH_INDICATOR) as BIRTH_INDICATOR FROM all_births
 GROUP BY ID;
 run;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM births;
+QUIT;
+
+%put Number of unique IDs in births table: &num_unique_ids;
 
 PROC SQL;
     CREATE TABLE oud_preg AS
@@ -898,8 +917,8 @@ PROC SQL;
 	min(EVENT_DATE_HCV) as EVENT_DATE_HCV,
 	CASE 
             WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
-            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
-            WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 9) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
+            WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
+            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
             ELSE . /* Set to missing if none of the above conditions are met */
         END AS EVER_IDU_HCV_MAT,
 	1 as HCV_SEROPOSITIVE_INDICATOR,
