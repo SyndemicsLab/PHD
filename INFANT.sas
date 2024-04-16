@@ -1559,7 +1559,7 @@ run;
 
 PROC SQL;
 	CREATE TABLE demographics AS
-	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB, APCD_anyclaim, SELF_FUNDED
+	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB, APCD_anyclaim, SELF_FUNDED, LANGUAGE, FOREIGN_BORN
 	FROM PHDSPINE.DEMO;
 	QUIT;
 
@@ -2253,7 +2253,7 @@ title;
 proc sql noprint;
 select cats('WORK.',memname) into :to_delete separated by ' '
 from dictionary.tables
-where libname = 'WORK' and memname not in ('INFANT_DAA', 'OUD_HCV_DAA');
+where libname = 'WORK' and memname not in ('INFANT_DAA', 'OUD_HCV_DAA', 'TRT_TESTING15');
 quit;
 
 proc delete data=&to_delete.;
@@ -2332,6 +2332,11 @@ proc sql;
     left join PHDBIRTH.BIRTH_MOM as birthsmoms
     on FINAL_INFANT_COHORT.BIRTH_LINK_ID = birthsmoms.BIRTH_LINK_ID;
 quit;
+
+data FINAL_INFANT_COHORT;
+     set FINAL_INFANT_COHORT;
+     if AGE_BIRTH ne 9999;
+run;
 
 proc sort data=FINAL_INFANT_COHORT;
    by birth_link_id;
@@ -2723,22 +2728,16 @@ value fbornf
 value langf
     1 = 'English'
     2 = 'Spanish'
-    3 = 'Portuguese'
-    4 = 'Cape Verdean Creole'
-    5 = 'Haitian Creole'
-    6 = 'Khmer'
-    7 = 'Vietnamese'
-    8 = 'Cambodian'
-    9 = 'Somali'
-    10 = 'Arabic'
-    11 = 'Albanian'
-    12 = 'Chinese'
-    13 = 'Russian'
-    14 = 'American Sign Language'
-    15 = 'Other'
-    88 = 'Refused/Unknown'
-    99 = 'Unknown'
+    3-15 = 'Other'
+    88-99 = 'Refused/Unknown'
     other = 'N/A (MF Record)';
+
+/* Define format for LANGUAGE */
+value langfsecondary 
+	0 = 'Not Provided' | 'Unknown/missing'
+    1 = 'English Only'
+    2 = 'English and Another Language'
+    3 = 'Another Language';
 
 /* Define format for MOTHER_EDU */
 value moth_edu_fmt
@@ -2840,6 +2839,19 @@ run;
 %Table1freqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1freqs (iji_diag, flagf.);
 
+%macro Table1Freqs0_15(var, format);
+    title "Table 1, 0-15 Cohort, Unstratified";
+    proc freq data=TRT_TESTING15;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table1Freqs0_15 (FINAL_SEX, sexf.);
+%Table1Freqs0_15 (FINAL_RE, raceef.);
+%Table1Freqs0_15 (LANGUAGE, langfsecondary.);
+%Table1Freqs0_15 (FOREIGN_BORN, fbornf.);
+
 %macro Table1StrataFreqs(var, format);
     title "Table 1, Stratified";
     
@@ -2887,6 +2899,27 @@ run;
 %Table1Stratafreqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1Stratafreqs (iji_diag, flagf.);
 
+%macro Table1StrataFreqs0_15(var, format);
+    title "Table 1, 0-15 Cohort, Stratified";
+    
+    /* Sort the dataset by DAA_START_INDICATOR */
+    proc sort data=TRT_TESTING15;
+        by DAA_START_INDICATOR;
+    run;
+
+    /* Run PROC FREQ with BY statement */
+    proc freq data=TRT_TESTING15;
+        by DAA_START_INDICATOR;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table1StrataFreqs0_15 (FINAL_SEX, sexf.);
+%Table1StrataFreqs0_15 (FINAL_RE, raceef.);
+%Table1StrataFreqs0_15 (LANGUAGE, langfsecondary.);
+%Table1StrataFreqs0_15 (FOREIGN_BORN, fbornf.);
+
 %macro Table2Crude(var, ref= );
 title "Table 2, Crude";
 proc logistic data=FINAL_INFANT_COHORT_COV desc;
@@ -2924,3 +2957,125 @@ proc logistic data=FINAL_INFANT_COHORT_COV desc;
 %Table2Crude(LD_PAY, ref='1');
 %Table2Crude(KOTELCHUCK, ref='3');
 %Table2Crude(prenat_site, ref='1');
+
+%macro Table2Crude0_15(var, ref= );
+title "Table 2, 0-15 Cohort, Crude";
+proc logistic data=TRT_TESTING15 desc;
+        class &var (param=ref ref=&ref.);
+    model DAA_START_INDICATOR=&var;
+    run;
+%mend;
+
+%Table2Crude0_15 (FINAL_SEX, ref='1');
+%Table2Crude0_15 (FINAL_RE, ref='1');
+%Table2Crude0_15 (LANGUAGE, ref='1');
+%Table2Crude0_15 (FOREIGN_BORN, ref='0');
+
+/* ========================================================== */
+/*                    Collinearity and MV Regressions         */
+/* ========================================================== */
+
+/* Step 1: Assess collinearity among selected variables using chi-square tests */
+
+%macro ChiSquareTest(var1, var2);
+    title "Chi-Square Test between &var1 and &var2";
+    proc freq data=FINAL_INFANT_COHORT_COV;
+        tables &var1*(&var2) / chisq;
+    run;
+    title;
+%mend;
+
+%ChiSquareTest(MOMS_FINAL_RE, FOREIGN_BORN);
+%ChiSquareTest(MOMS_FINAL_RE, DISCH_WITH_MOM);
+%ChiSquareTest(MOMS_FINAL_RE, COUNTY);
+%ChiSquareTest(MOMS_FINAL_RE, AGE_BIRTH_GROUP);
+%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN);
+%ChiSquareTest(MOMS_FINAL_RE, LD_PAY);
+%ChiSquareTest(MOMS_FINAL_RE, MOUD_DURING_PREG);
+%ChiSquareTest(MOMS_FINAL_RE, MOUD_AT_DELIVERY);
+%ChiSquareTest(MOMS_FINAL_RE, MATINF_HEPC);
+
+%ChiSquareTest(FOREIGN_BORN, DISCH_WITH_MOM);
+%ChiSquareTest(FOREIGN_BORN, COUNTY);
+%ChiSquareTest(FOREIGN_BORN, AGE_BIRTH_GROUP);
+%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN);
+%ChiSquareTest(FOREIGN_BORN, LD_PAY);
+%ChiSquareTest(FOREIGN_BORN, MOUD_DURING_PREG);
+%ChiSquareTest(FOREIGN_BORN, MOUD_AT_DELIVERY);
+%ChiSquareTest(FOREIGN_BORN, MATINF_HEPC);
+
+%ChiSquareTest(DISCH_WITH_MOM, COUNTY);
+%ChiSquareTest(DISCH_WITH_MOM, AGE_BIRTH_GROUP);
+%ChiSquareTest(DISCH_WITH_MOM, LANGUAGE_SPOKEN);
+%ChiSquareTest(DISCH_WITH_MOM, LD_PAY);
+%ChiSquareTest(DISCH_WITH_MOM, MOUD_DURING_PREG);
+%ChiSquareTest(DISCH_WITH_MOM, MOUD_AT_DELIVERY);
+%ChiSquareTest(DISCH_WITH_MOM, MATINF_HEPC);
+
+%ChiSquareTest(COUNTY, AGE_BIRTH_GROUP);
+%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN);
+%ChiSquareTest(COUNTY, LD_PAY);
+%ChiSquareTest(COUNTY, MOUD_DURING_PREG);
+%ChiSquareTest(COUNTY, MOUD_AT_DELIVERY);
+%ChiSquareTest(COUNTY, MATINF_HEPC);
+
+%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN);
+%ChiSquareTest(AGE_BIRTH_GROUP, LD_PAY);
+%ChiSquareTest(AGE_BIRTH_GROUP, MOUD_DURING_PREG);
+%ChiSquareTest(AGE_BIRTH_GROUP, MOUD_AT_DELIVERY);
+%ChiSquareTest(AGE_BIRTH_GROUP, MATINF_HEPC);
+
+%ChiSquareTest(LANGUAGE_SPOKEN, LD_PAY);
+%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_DURING_PREG);
+%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_AT_DELIVERY);
+%ChiSquareTest(LANGUAGE_SPOKEN, MATINF_HEPC);
+
+%ChiSquareTest(LD_PAY, MOUD_DURING_PREG);
+%ChiSquareTest(LD_PAY, MOUD_AT_DELIVERY);
+%ChiSquareTest(LD_PAY, MATINF_HEPC);
+
+%ChiSquareTest(MOUD_DURING_PREG, MOUD_AT_DELIVERY);
+%ChiSquareTest(MOUD_DURING_PREG, MATINF_HEPC);
+
+%ChiSquareTest(MOUD_AT_DELIVERY, MATINF_HEPC);
+
+%macro ChiSquareTest0_15(var1, var2);
+    title "Chi-Square Test between &var1 and &var2 for 0-15 Cohort";
+    proc freq data=TRT_TESTING15;
+        tables &var1*(&var2) / chisq;
+    run;
+    title;
+%mend;
+
+%ChiSquareTest0_15(FINAL_RE, FOREIGN_BORN);
+%ChiSquareTest0_15(FINAL_RE, LANGUAGE);
+%ChiSquareTest0_15(FINAL_RE, FINAL_SEX);
+
+%ChiSquareTest0_15(FOREIGN_BORN, LANGUAGE);
+%ChiSquareTest0_15(FOREIGN_BORN, FINAL_SEX);
+
+%ChiSquareTest0_15(LANGUAGE, FINAL_SEX);
+
+/* Step 2: Based on chi-square test results, decide which variables to keep for multivariable analysis */
+
+/* Step 3: Run multivariable analysis with selected variables */
+%macro MultivariableLogistic(exposure, adjust_vars);
+    proc logistic data=FINAL_INFANT_COHORT_COV desc;
+        class &adjust_vars;
+        model &exposure = &adjust_vars / clparm=pl;
+    run;
+%mend;
+
+%MultivariableLogistic(APPROPRIATE_Testing, MOMS_FINAL_RE FOREIGN_BORN DISCH_WITH_MOM LD_PAY);
+
+/* or */
+
+%macro MultivariableLogistic_Strat(exposure, adjust_vars, stratify_var);
+    proc logistic data=FINAL_INFANT_COHORT_COV desc;
+        class &adjust_vars;
+        model &exposure = &adjust_vars;
+        strata &stratify_var;
+    run;
+%mend;
+
+%MultivariableLogistic_Strat(APPROPRIATE_Testing, MOMS_FINAL_RE FOREIGN_BORN LD_PAY, DISCH_WITH_MOM);
