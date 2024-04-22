@@ -1428,27 +1428,27 @@ quit;
 data HCV_MOMS;
     set HCV_MOMS;
 
-    /* Check if DOB_INFANT_TBL is missing */
-    if missing(DOB_INFANT_TBL) then do;
+    /* Check if DOB_MOM_TBL is missing */
+    if missing(DOB_MOM_TBL) then do;
         MOUD_DURING_PREG = .;
         MOUD_AT_DELIVERY = .;
     end;
     else do;
         /* Calculate the difference in days for DATE_START_MOUD */
-        days_difference_start = DATE_START_MOUD - DOB_INFANT_TBL ;
+        days_difference_start = DATE_START_MOUD - DOB_MOM_TBL ;
 
         /* Calculate the difference in days for DATE_END_MOUD */
-        days_difference_end = DATE_END_MOUD - DOB_INFANT_TBL ;
+        days_difference_end = DATE_END_MOUD - DOB_MOM_TBL ;
 
         /* Check if any of the conditions are met for MOUD_DURING_PREG (40 weeks*7 days per week) */
         MOUD_DURING_PREG = (days_difference_start >= -280 AND days_difference_start <= 0) OR
                                  (days_difference_end >= -280 AND days_difference_end <= 0) OR
-                                 (days_difference_start <= -280 AND DATE_END_MOUD > DOB_INFANT_TBL);
+                                 (days_difference_start <= -280 AND DATE_END_MOUD > DOB_MOM_TBL);
 
         /* Check if any of the conditions met for MOUD_AT_DELIVERY (2 months prior to delivery) */
         MOUD_AT_DELIVERY = 	(days_difference_start >= -60 AND days_difference_start <= 0) OR
                             (days_difference_end >= -60 AND days_difference_end <= 0) OR
-                            (days_difference_start <= -60 AND DATE_END_MOUD > DOB_INFANT_TBL);
+                            (days_difference_start <= -60 AND DATE_END_MOUD > DOB_MOM_TBL);
 
         /* Drop temporary variables */
         drop days_difference_start days_difference_end;
@@ -1498,7 +1498,7 @@ data HCV_MOMS;
     set HCV_MOMS;
 
     /* Calculate the difference in days */
-    hcv_duration_count = MOM_EVENT_DATE_HCV - DOB_INFANT_TBL ;
+    hcv_duration_count = MOM_EVENT_DATE_HCV - DOB_MOM_TBL ;
 
 run;
 
@@ -1516,7 +1516,7 @@ data HCV_MOMS;
     set HCV_MOMS;
 
     /* Check if diagnosis date was before birth */
-    if DIAGNOSIS_DATE_HIV < DOB_INFANT_TBL and DIAGNOSIS_DATE_HIV ne . then
+    if DIAGNOSIS_DATE_HIV < DOB_MOM_TBL and DIAGNOSIS_DATE_HIV ne . then
         HIV_DIAGNOSIS = 1;
     else
         HIV_DIAGNOSIS = 0;
@@ -2009,11 +2009,11 @@ proc freq data=TESTING;
 run;
 
 proc sort data=TESTING;
-	by APPROPRIATE_AB_Testing;
+    by INFANT_YEAR_BIRTH APPROPRIATE_AB_TESTING;
 run;
 
 proc freq data=TESTING;
-    by APPROPRIATE_AB_Testing;
+    by INFANT_YEAR_BIRTH APPROPRIATE_AB_TESTING;
     tables APPROPRIATE_RNA_Testing / missing norow nopercent nocol;
     where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
 run;
@@ -2262,6 +2262,7 @@ run;
 proc sql;
     create table FINAL_INFANT_COHORT as
     select INFANT_DAA.*,
+           demographics.HOMELESS_HISTORY,
            birthsinfants.DISCH_WITH_MOM,
            birthsinfants.FACILITY_ID_BIRTH,
            birthsinfants.GESTATIONAL_AGE,
@@ -2278,6 +2279,8 @@ proc sql;
            else .
            end as NAS_BC_TOTAL
     from INFANT_DAA
+    left join PHDSPINE.DEMO as demographics
+    on INFANT_DAA.INFANT_ID = demographics.ID
     left join PHDBIRTH.BIRTH_INFANT as birthsinfants
     on INFANT_DAA.INFANT_ID = birthsinfants.ID;
 
@@ -2317,7 +2320,6 @@ proc sql;
            demographics.FINAL_RE as MOMS_FINAL_RE, 
            demographics.EVER_INCARCERATED,
            demographics.FOREIGN_BORN,
-           demographics.HOMELESS_HISTORY,
            birthsmoms.AGE_BIRTH,
            birthsmoms.LD_PAY,
            birthsmoms.KOTELCHUCK,
@@ -2332,11 +2334,6 @@ proc sql;
     left join PHDBIRTH.BIRTH_MOM as birthsmoms
     on FINAL_INFANT_COHORT.BIRTH_LINK_ID = birthsmoms.BIRTH_LINK_ID;
 quit;
-
-data FINAL_INFANT_COHORT;
-     set FINAL_INFANT_COHORT;
-     if AGE_BIRTH ne 9999;
-run;
 
 proc sort data=FINAL_INFANT_COHORT;
    by birth_link_id;
@@ -2784,13 +2781,6 @@ proc sort data=FINAL_INFANT_COHORT_COV;
     by APPROPRIATE_Testing;
 run;
 
-/* Calculate mean age stratified by appropriate testing */
-proc means data=FINAL_INFANT_COHORT_COV;
-    by APPROPRIATE_Testing;
-    var AGE_BIRTH;
-    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
-run;
-
 /* Make gestational_age categorical */
 data FINAL_INFANT_COHORT_COV;
     set FINAL_INFANT_COHORT_COV;
@@ -2799,6 +2789,70 @@ data FINAL_INFANT_COHORT_COV;
     else if GESTATIONAL_AGE < 37 then GESTATIONAL_AGE_CAT = 'Preterm';
     else GESTATIONAL_AGE_CAT = 'Missing';
 run;
+
+/* Calculate mean age stratified by appropriate testing */
+proc means data=FINAL_INFANT_COHORT_COV;
+    by APPROPRIATE_Testing;
+    var AGE_BIRTH;
+    where AGE_BIRTH ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+proc sort data=FINAL_INFANT_COHORT_COV;
+  by MOM_ID;
+run;
+
+data want(keep=MOM_ID cnt_deliveries);
+  set FINAL_INFANT_COHORT_COV;
+  by MOM_ID;
+
+  retain cnt_deliveries 0;
+
+  /* Reset count for each new MOM_ID */
+  if first.MOM_ID then cnt_deliveries = 0;
+
+  /* Increment count for each delivery within the MOM_ID group */
+  if not missing(INFANT_ID) then cnt_deliveries = cnt_deliveries + 1;
+
+  /* Output count for each MOM_ID */
+  if last.MOM_ID then output;
+run;
+
+/* Use PROC UNIVARIATE to calculate mean, median, and range of cnt_deliveries */
+proc univariate data=want noprint;
+  var cnt_deliveries;
+  output out=summary_stats mean=mean_cnt_deliveries median=median_cnt_deliveries range=range_cnt_deliveries;
+run;
+
+proc print data=summary_stats;
+  title 'Summary Statistics of Number of Deliveries per MOM_ID';
+run;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT MOM_ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM FINAL_INFANT_COHORT_COV;
+QUIT;
+
+%put Number of unique MOM_ID in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
+
+data UNIQUE_MOMS(keep= MOM_ID MOMS_FINAL_RE FOREIGN_BORN OUD_CAPTURE APPROPRIATE_Testing);
+    set FINAL_INFANT_COHORT_COV;
+    by MOM_ID;
+    if first.MOM_ID;
+run;
+
+%macro Table1Freqs_UniqueMoms(var, format);
+    title "Table 1, Unstratified, Unique Moms";
+    proc freq data=UNIQUE_MOMS;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table1Freqs_UniqueMoms (MOMS_FINAL_RE, raceef.);
+%Table1Freqs_UniqueMoms (FOREIGN_BORN, fbornf.);
+%Table1Freqs_UniqueMoms (OUD_CAPTURE, flagf.);
 
 %macro Table1Freqs(var, format);
     title "Table 1, Unstratified";
@@ -2812,6 +2866,8 @@ run;
 %Table1freqs (GESTATIONAL_AGE_CAT);
 %Table1freqs (FINAL_RE, raceef.);
 %Table1freqs (MOMS_FINAL_RE, raceef.);
+%Table1freqs (FOREIGN_BORN, fbornf.);
+%Table1freqs (OUD_CAPTURE, flagf.);
 %Table1freqs (FACILITY_ID_BIRTH);
 %Table1freqs (county);
 %Table1freqs (well_child, flagf.);
@@ -2821,10 +2877,8 @@ run;
 %Table1freqs (HIV_DIAGNOSIS, flagf.);
 %Table1freqs (MOUD_DURING_PREG, flagf.);
 %Table1freqs (MOUD_AT_DELIVERY, flagf.);
-%Table1freqs (OUD_CAPTURE, flagf.);
 %Table1freqs (AGE_BIRTH_GROUP);
 %Table1freqs (EVER_INCARCERATED, flagf.);
-%Table1freqs (FOREIGN_BORN, fbornf.);
 %Table1freqs (HOMELESS_HISTORY, flagf.);
 %Table1freqs (LANGUAGE_SPOKEN, langf.);
 %Table1freqs (MOTHER_EDU, moth_edu_fmt.);
@@ -2921,12 +2975,25 @@ run;
 %Table1StrataFreqs0_15 (FOREIGN_BORN, fbornf.);
 
 %macro Table2Crude(var, ref= );
-title "Table 2, Crude";
-proc logistic data=FINAL_INFANT_COHORT_COV desc;
+    title "Table 2, Crude";
+    
+    /* Sort the dataset by DISCH_WITH_MOM */
+    proc sort data=FINAL_INFANT_COHORT_COV;
+        by DISCH_WITH_MOM;
+    run;
+    
+    /* Run logistic regression */
+    proc logistic data=FINAL_INFANT_COHORT_COV desc;
         class &var (param=ref ref=&ref.);
-    model APPROPRIATE_Testing=&var;
+        model APPROPRIATE_Testing=&var;
+        by DISCH_WITH_MOM;
     run;
 %mend;
+
+data FINAL_INFANT_COHORT_COV;
+   set FINAL_INFANT_COHORT_COV;
+    if AGE_BIRTH ne 9999;
+run;
 
 %Table2Crude(FINAL_SEX, ref='1');
 %Table2Crude(GESTATIONAL_AGE_CAT, ref='Term');
@@ -2935,7 +3002,6 @@ proc logistic data=FINAL_INFANT_COHORT_COV desc;
 %Table2Crude(county, ref='MIDDLESEX');
 %Table2Crude(well_child, ref='0');
 %Table2Crude(NAS_BC_TOTAL, ref='0');
-%Table2Crude(DISCH_WITH_MOM, ref='0');
 %Table2Crude(INF_VAC_HBIG, ref='0');
 %Table2Crude(HIV_DIAGNOSIS, ref='0');
 %Table2Crude(FOREIGN_BORN, ref='0');
@@ -2980,13 +3046,12 @@ proc logistic data=TRT_TESTING15 desc;
 %macro ChiSquareTest(var1, var2);
     title "Chi-Square Test between &var1 and &var2";
     proc freq data=FINAL_INFANT_COHORT_COV;
-        tables &var1*(&var2) / chisq;
+        tables &var1*(&var2) * DISCH_WITH_MOM / chisq nopercent nocol;
     run;
     title;
 %mend;
 
 %ChiSquareTest(MOMS_FINAL_RE, FOREIGN_BORN);
-%ChiSquareTest(MOMS_FINAL_RE, DISCH_WITH_MOM);
 %ChiSquareTest(MOMS_FINAL_RE, COUNTY);
 %ChiSquareTest(MOMS_FINAL_RE, AGE_BIRTH_GROUP);
 %ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN);
@@ -2995,7 +3060,6 @@ proc logistic data=TRT_TESTING15 desc;
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_AT_DELIVERY);
 %ChiSquareTest(MOMS_FINAL_RE, MATINF_HEPC);
 
-%ChiSquareTest(FOREIGN_BORN, DISCH_WITH_MOM);
 %ChiSquareTest(FOREIGN_BORN, COUNTY);
 %ChiSquareTest(FOREIGN_BORN, AGE_BIRTH_GROUP);
 %ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN);
@@ -3003,14 +3067,6 @@ proc logistic data=TRT_TESTING15 desc;
 %ChiSquareTest(FOREIGN_BORN, MOUD_DURING_PREG);
 %ChiSquareTest(FOREIGN_BORN, MOUD_AT_DELIVERY);
 %ChiSquareTest(FOREIGN_BORN, MATINF_HEPC);
-
-%ChiSquareTest(DISCH_WITH_MOM, COUNTY);
-%ChiSquareTest(DISCH_WITH_MOM, AGE_BIRTH_GROUP);
-%ChiSquareTest(DISCH_WITH_MOM, LANGUAGE_SPOKEN);
-%ChiSquareTest(DISCH_WITH_MOM, LD_PAY);
-%ChiSquareTest(DISCH_WITH_MOM, MOUD_DURING_PREG);
-%ChiSquareTest(DISCH_WITH_MOM, MOUD_AT_DELIVERY);
-%ChiSquareTest(DISCH_WITH_MOM, MATINF_HEPC);
 
 %ChiSquareTest(COUNTY, AGE_BIRTH_GROUP);
 %ChiSquareTest(COUNTY, LANGUAGE_SPOKEN);
@@ -3042,7 +3098,7 @@ proc logistic data=TRT_TESTING15 desc;
 %macro ChiSquareTest0_15(var1, var2);
     title "Chi-Square Test between &var1 and &var2 for 0-15 Cohort";
     proc freq data=TRT_TESTING15;
-        tables &var1*(&var2) / chisq;
+        tables &var1*(&var2) / chisq nopercent nocol;
     run;
     title;
 %mend;
@@ -3059,20 +3115,9 @@ proc logistic data=TRT_TESTING15 desc;
 /* Step 2: Based on chi-square test results, decide which variables to keep for multivariable analysis */
 
 /* Step 3: Run multivariable analysis with selected variables */
-%macro MultivariableLogistic(exposure, adjust_vars);
-    proc logistic data=FINAL_INFANT_COHORT_COV desc;
-        class &adjust_vars;
-        model &exposure = &adjust_vars / clparm=pl;
-    run;
-%mend;
-
-%MultivariableLogistic(APPROPRIATE_Testing, MOMS_FINAL_RE FOREIGN_BORN DISCH_WITH_MOM LD_PAY);
-
-/* or */
-
 %macro MultivariableLogistic_Strat(exposure, adjust_vars, stratify_var);
     proc logistic data=FINAL_INFANT_COHORT_COV desc;
-        class &adjust_vars;
+        class &adjust_vars / param=ref ref=first;
         model &exposure = &adjust_vars;
         strata &stratify_var;
     run;
