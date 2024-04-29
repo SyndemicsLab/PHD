@@ -61,7 +61,11 @@ PROC FORMAT;
 	'T40601A','T40601D','T40602A','T40602D', 
 	'T40603A','T40603D','T40604A','T40604D', 
 	'T40691A','T40692A','T40693A','T40694A', 
-	'T40691D','T40692D','T40693D','T40694D' /* Overdose Codes */);
+	'T40691D','T40692D','T40693D','T40694D',
+    'T40411A','T40411D','T40412A','T40412D', 
+    'T40413A','T40413D','T40414A','T40414D', 
+    'T40421A','T40421D','T40422A','T40422D', 
+    'T40423A','T40423D','T40424A','T40424D' /* Overdose Codes */);
            
 %LET PROC = ('G2067','G2068','G2069','G2070', 
 	'G2071','G2072','G2073','G2074', 
@@ -131,6 +135,7 @@ DATA pharm (KEEP= oud_pharm ID year_pharm);
     IF  PHARM_ICD IN &ICD OR 
         PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
+    IF oud_pharm = 0 THEN DELETE;
 
 IF oud_pharm > 0 THEN year_pharm = PHARM_FILL_DATE_YEAR;
 
@@ -918,7 +923,7 @@ PROC SQL;
 	CASE 
             WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
             WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
-            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
+            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN . 
             ELSE . /* Set to missing if none of the above conditions are met */
         END AS EVER_IDU_HCV_MAT,
 	1 as HCV_SEROPOSITIVE_INDICATOR,
@@ -1598,8 +1603,16 @@ RUN;
 
 PROC SQL;
 CREATE TABLE COHORT15 as
-SELECT DISTINCT ID, AGE_HCV, DISEASE_STATUS_HCV, EVENT_YEAR_HCV
+SELECT DISTINCT ID, AGE_HCV, DISEASE_STATUS_HCV, EVENT_YEAR_HCV, 
+	CASE 
+        WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
+        WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
+        WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN . 
+        ELSE . /* Set to missing if none of the above conditions are met */
+        END AS EVER_IDU_HCV
 FROM PHDHEPC.HCV
+    GROUP BY 
+        ID;
 WHERE AGE_HCV <=15 AND AGE_HCV NE .;
 quit;
 
@@ -1811,12 +1824,6 @@ PROC SQL;
         ID,
         MIN(EVENT_YEAR_HCV) AS EVENT_YEAR_HCV,
         MIN(EVENT_DATE_HCV) AS EVENT_DATE_HCV,
-        CASE 
-            WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
-            WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
-            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
-            ELSE . /* Set to missing if none of the above conditions are met */
-        END AS EVER_IDU_HCV_INFANT,
         MIN(AGE_HCV) AS AGE_AT_DX,
         1 AS HCV_SEROPOSITIVE_INDICATOR,
         CASE 
@@ -2246,6 +2253,12 @@ proc freq data=DAA15;
 run;
 title;
 
+title "<=15 EVER_IDU_HCV";
+proc freq data=TRT_TESTING15;
+    tables EVER_IDU_HCV / missing norow nopercent nocol;
+run;
+title;
+
 /* ========================================================== */
 /*                       Pull Covariates                      */
 /* ========================================================== */
@@ -2345,86 +2358,66 @@ data FINAL_INFANT_COHORT;
     if first.birth_link_id;
 run;
 
-%LET MENTAL_HEALTH = ('F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F28', 'F29',
-                      'F30', 'F31', 'F32', 'F33', 'F34', 'F39', 'F40', 'F41',
-                      'F42', 'F43', 'F44', 'F45', 'F48');
-
 proc sql;
 create table MENTAL_HEALTH_COHORT(where=(MENTAL_HEALTH_DIAG=1)) as
 select distinct FINAL_INFANT_COHORT.MOM_ID,
-  case
-       when apcd.MED_ECODE in &MENTAL_HEALTH or
-                       apcd.MED_ADM_DIAGNOSIS in &MENTAL_HEALTH or
-                       apcd.MED_PROC_CODE in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC1 in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC2 in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC3 in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC4 in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC5 in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC6 in &MENTAL_HEALTH or
-                       apcd.MED_ICD_PROC7 in &MENTAL_HEALTH or
-                       apcd.MED_ICD1 in &MENTAL_HEALTH or
-                       apcd.MED_ICD2 in &MENTAL_HEALTH or
-                       apcd.MED_ICD3 in &MENTAL_HEALTH or
-                       apcd.MED_ICD4 in &MENTAL_HEALTH or
-                       apcd.MED_ICD5 in &MENTAL_HEALTH or
-                       apcd.MED_ICD6 in &MENTAL_HEALTH or
-                       apcd.MED_ICD7 in &MENTAL_HEALTH or
-                       apcd.MED_ICD8 in &MENTAL_HEALTH or
-                       apcd.MED_ICD9 in &MENTAL_HEALTH or
-                       apcd.MED_ICD10 in &MENTAL_HEALTH or
-                       apcd.MED_ICD11 in &MENTAL_HEALTH or
-                       apcd.MED_ICD12 in &MENTAL_HEALTH or
-                       apcd.MED_ICD13 in &MENTAL_HEALTH or
-                       apcd.MED_ICD14 in &MENTAL_HEALTH or
-                       apcd.MED_ICD15 in &MENTAL_HEALTH or
-                       apcd.MED_ICD16 in &MENTAL_HEALTH or
-                       apcd.MED_ICD17 in &MENTAL_HEALTH or
-                       apcd.MED_ICD18 in &MENTAL_HEALTH or
-                       apcd.MED_ICD19 in &MENTAL_HEALTH or
-                       apcd.MED_ICD20 in &MENTAL_HEALTH or
-                       apcd.MED_ICD21 in &MENTAL_HEALTH or
-                       apcd.MED_ICD22 in &MENTAL_HEALTH or
-                       apcd.MED_ICD23 in &MENTAL_HEALTH or
-                       apcd.MED_ICD24 in &MENTAL_HEALTH or
-                       apcd.MED_ICD25 in &MENTAL_HEALTH or
-                       apcd.MED_DIS_DIAGNOSIS in &MENTAL_HEALTH or
-                       substr(apcd.MED_PROC_CODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD_PROC7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') 
-                       or substr(apcd.MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
+       case
+           when prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ECODE) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ADM_DIAGNOSIS) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD1) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD2) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD3) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD4) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD5) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD6) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD7) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD8) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD9) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD10) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD11) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD12) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD13) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD14) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD15) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD16) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD17) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD18) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD19) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD20) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD21) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD22) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD23) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD24) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD25) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_DIS_DIAGNOSIS) > 0 
+                or substr(apcd.MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
            else 0
        end as MENTAL_HEALTH_DIAG
 from FINAL_INFANT_COHORT
@@ -2443,7 +2436,7 @@ quit;
 /* Searching in full dataset because mental health codes are starts_with strings */
 
 %let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
-           '421', '4211', '4219', '4249*', 'A382', 'B376', 'I011', 'I059',
+           '421', '4211', '4219', 'A382', 'B376', 'I011', 'I059',
            'I079', 'I080', 'I083', 'I089', 'I330', 'I339', 'I358', 'I378',
            'I38', 'T826', 'I39', '681', '6811', '6819', '682', '6821', '6822',
            '6823', '6824', '6825', '6826', '6827', '6828', '6829', 'L030',
@@ -2457,41 +2450,33 @@ create table IJI_COHORT(where=(IJI_DIAG=1)) as
 select distinct FINAL_INFANT_COHORT.MOM_ID,
   case
        when apcd.MED_ECODE in &IJI or
-                    apcd.MED_ADM_DIAGNOSIS in &IJI or
-                    apcd.MED_PROC_CODE in &IJI or
-                    apcd.MED_ICD_PROC1 in &IJI or
-                    apcd.MED_ICD_PROC2 in &IJI or
-                    apcd.MED_ICD_PROC3 in &IJI or
-                    apcd.MED_ICD_PROC4 in &IJI or
-                    apcd.MED_ICD_PROC5 in &IJI or
-                    apcd.MED_ICD_PROC6 in &IJI or
-                    apcd.MED_ICD_PROC7 in &IJI or
-                    apcd.MED_ICD1 in &IJI or
-                    apcd.MED_ICD2 in &IJI or
-                    apcd.MED_ICD3 in &IJI or
-                    apcd.MED_ICD4 in &IJI or
-                    apcd.MED_ICD5 in &IJI or
-                    apcd.MED_ICD6 in &IJI or
-                    apcd.MED_ICD7 in &IJI or
-                    apcd.MED_ICD8 in &IJI or
-                    apcd.MED_ICD9 in &IJI or
-                    apcd.MED_ICD10 in &IJI or
-                    apcd.MED_ICD11 in &IJI or
-                    apcd.MED_ICD12 in &IJI or
-                    apcd.MED_ICD13 in &IJI or
-                    apcd.MED_ICD14 in &IJI or
-                    apcd.MED_ICD15 in &IJI or
-                    apcd.MED_ICD16 in &IJI or
-                    apcd.MED_ICD17 in &IJI or
-                    apcd.MED_ICD18 in &IJI or
-                    apcd.MED_ICD19 in &IJI or
-                    apcd.MED_ICD20 in &IJI or
-                    apcd.MED_ICD21 in &IJI or
-                    apcd.MED_ICD22 in &IJI or
-                    apcd.MED_ICD23 in &IJI or
-                    apcd.MED_ICD24 in &IJI or
-                    apcd.MED_ICD25 in &IJI or
-                    apcd.MED_DIS_DIAGNOSIS in &IJI then 1
+                    apcd.MED_ADM_DIAGNOSIS like '4249%' or apcd.MED_ADM_DIAGNOSIS in &IJI or
+                    apcd.MED_ICD1 like '4249%' or apcd.MED_ICD1 in &IJI or
+                    apcd.MED_ICD2 like '4249%' or apcd.MED_ICD2 in &IJI or
+                    apcd.MED_ICD3 like '4249%' or apcd.MED_ICD3 in &IJI or
+                    apcd.MED_ICD4 like '4249%' or apcd.MED_ICD4 in &IJI or
+                    apcd.MED_ICD5 like '4249%' or apcd.MED_ICD5 in &IJI or
+                    apcd.MED_ICD6 like '4249%' or apcd.MED_ICD6 in &IJI or
+                    apcd.MED_ICD7 like '4249%' or apcd.MED_ICD7 in &IJI or
+                    apcd.MED_ICD8 like '4249%' or apcd.MED_ICD8 in &IJI or
+                    apcd.MED_ICD9 like '4249%' or apcd.MED_ICD9 in &IJI or
+                    apcd.MED_ICD10 like '4249%' or apcd.MED_ICD10 in &IJI or
+                    apcd.MED_ICD11 like '4249%' or apcd.MED_ICD11 in &IJI or
+                    apcd.MED_ICD12 like '4249%' or apcd.MED_ICD12 in &IJI or
+                    apcd.MED_ICD13 like '4249%' or apcd.MED_ICD13 in &IJI or
+                    apcd.MED_ICD14 like '4249%' or apcd.MED_ICD14 in &IJI or
+                    apcd.MED_ICD15 like '4249%' or apcd.MED_ICD15 in &IJI or
+                    apcd.MED_ICD16 like '4249%' or apcd.MED_ICD16 in &IJI or
+                    apcd.MED_ICD17 like '4249%' or apcd.MED_ICD17 in &IJI or
+                    apcd.MED_ICD18 like '4249%' or apcd.MED_ICD18 in &IJI or
+                    apcd.MED_ICD19 like '4249%' or apcd.MED_ICD19 in &IJI or
+                    apcd.MED_ICD20 like '4249%' or apcd.MED_ICD20 in &IJI or
+                    apcd.MED_ICD21 like '4249%' or apcd.MED_ICD21 in &IJI or
+                    apcd.MED_ICD22 like '4249%' or apcd.MED_ICD22 in &IJI or
+                    apcd.MED_ICD23 like '4249%' or apcd.MED_ICD23 in &IJI or
+                    apcd.MED_ICD24 like '4249%' or apcd.MED_ICD24 in &IJI or
+                    apcd.MED_ICD25 like '4249%' or apcd.MED_ICD25 in &IJI or
+                    apcd.MED_DIS_DIAGNOSIS like '4249%' or apcd.MED_DIS_DIAGNOSIS in &IJI then 1
            else 0
        end as IJI_DIAG
 from FINAL_INFANT_COHORT
@@ -2544,14 +2529,6 @@ select distinct FINAL_INFANT_COHORT.MOM_ID,
   case
        when apcd.MED_ECODE in &OTHER_SUBSTANCE_USE or
                         apcd.MED_ADM_DIAGNOSIS in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC1 in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC2 in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC3 in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC4 in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC5 in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC6 in &OTHER_SUBSTANCE_USE or
-                        apcd.MED_ICD_PROC7 in &OTHER_SUBSTANCE_USE or
                         apcd.MED_ICD1 in &OTHER_SUBSTANCE_USE or
                         apcd.MED_ICD2 in &OTHER_SUBSTANCE_USE or
                         apcd.MED_ICD3 in &OTHER_SUBSTANCE_USE or
@@ -2598,49 +2575,13 @@ end as OTHER_SUBSTANCE_USE
 from FINAL_INFANT_COHORT_COV;
 quit;
 
-%let well_child = ('Z00129', 'Z00121',
-                    'V202', 'V700', 'V703', 'V705', 'V706', 'V708', 'V709');
+%let well_child = ('99381', '99391', '99381', '99391', '99381', '99391', '99382', '99392');
 
 proc sql;
 create table WELL_CHILD_COHORT(where=(WELL_CHILD=1)) as
 select distinct FINAL_INFANT_COHORT.INFANT_ID,
   case
-       when apcd.MED_ECODE in &WELL_CHILD or
-                        apcd.MED_ADM_DIAGNOSIS in &WELL_CHILD or
-                        apcd.MED_PROC_CODE in &WELL_CHILD or
-                        apcd.MED_ICD_PROC1 in &WELL_CHILD or
-                        apcd.MED_ICD_PROC2 in &WELL_CHILD or
-                        apcd.MED_ICD_PROC3 in &WELL_CHILD or
-                        apcd.MED_ICD_PROC4 in &WELL_CHILD or
-                        apcd.MED_ICD_PROC5 in &WELL_CHILD or
-                        apcd.MED_ICD_PROC6 in &WELL_CHILD or
-                        apcd.MED_ICD_PROC7 in &WELL_CHILD or
-                        apcd.MED_ICD1 in &WELL_CHILD or
-                        apcd.MED_ICD2 in &WELL_CHILD or
-                        apcd.MED_ICD3 in &WELL_CHILD or
-                        apcd.MED_ICD4 in &WELL_CHILD or
-                        apcd.MED_ICD5 in &WELL_CHILD or
-                        apcd.MED_ICD6 in &WELL_CHILD or
-                        apcd.MED_ICD7 in &WELL_CHILD or
-                        apcd.MED_ICD8 in &WELL_CHILD or
-                        apcd.MED_ICD9 in &WELL_CHILD or
-                        apcd.MED_ICD10 in &WELL_CHILD or
-                        apcd.MED_ICD11 in &WELL_CHILD or
-                        apcd.MED_ICD12 in &WELL_CHILD or
-                        apcd.MED_ICD13 in &WELL_CHILD or
-                        apcd.MED_ICD14 in &WELL_CHILD or
-                        apcd.MED_ICD15 in &WELL_CHILD or
-                        apcd.MED_ICD16 in &WELL_CHILD or
-                        apcd.MED_ICD17 in &WELL_CHILD or
-                        apcd.MED_ICD18 in &WELL_CHILD or
-                        apcd.MED_ICD19 in &WELL_CHILD or
-                        apcd.MED_ICD20 in &WELL_CHILD or
-                        apcd.MED_ICD21 in &WELL_CHILD or
-                        apcd.MED_ICD22 in &WELL_CHILD or
-                        apcd.MED_ICD23 in &WELL_CHILD or
-                        apcd.MED_ICD24 in &WELL_CHILD or
-                        apcd.MED_ICD25 in &WELL_CHILD or
-                        apcd.MED_DIS_DIAGNOSIS in &WELL_CHILD
+       when apcd.MED_PROC_CODE in &WELL_CHILD
            and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) >= 18*30 and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) <= 36*30 then 1
            else 0
        end as WELL_CHILD
@@ -2721,28 +2662,12 @@ value fbornf
     8 = 'Missing in dataset'
     9 = 'Not collected';
 
-/* Define format for LANGUAGE_SPOKEN */
-value langf
-    1 = 'English'
-    2 = 'Spanish'
-    3-15 = 'Other'
-    88-99 = 'Refused/Unknown'
-    other = 'N/A (MF Record)';
-
 /* Define format for LANGUAGE */
-value langfsecondary 
+value langf
 	0 = 'Not Provided' | 'Unknown/missing'
     1 = 'English Only'
     2 = 'English and Another Language'
     3 = 'Another Language';
-
-/* Define format for MOTHER_EDU */
-value moth_edu_fmt
-    1 = 'No HS'
-    2 = 'HS or GED'
-    3 = 'Associate or Bachelor'
-    4 = 'Post graduate'
-    5-10 = 'Other/Unknown';
 
 /* Define format for LD_PAY */
 value ld_pay_fmt
@@ -2776,6 +2701,24 @@ data FINAL_INFANT_COHORT_COV;
     else if AGE_BIRTH <= 35 then AGE_BIRTH_GROUP = '26-35';
     else AGE_BIRTH_GROUP = '>35';
 
+/* Modify langauage into a categorical variable */
+data FINAL_INFANT_COHORT_COV;
+    set FINAL_INFANT_COHORT_COV;
+    if LANGUAGE_SPOKEN = 1 then LANGUAGE_SPOKEN_GROUP = 'English';
+    else if LANGUAGE_SPOKEN = 2 then LANGUAGE_SPOKEN_GROUP = 'Spanish';
+    else if LANGUAGE_SPOKEN = 3-15 then LANGUAGE_SPOKEN_GROUP = 'Other';
+    else if LANGUAGE_SPOKEN >=88 then LANGUAGE_SPOKEN_GROUP = 'Refused/Unknown';
+    else LANGUAGE_SPOKEN_GROUP = 'N/A (MF Record)';
+
+/* Modify mother_edu into a categorical variable */
+data FINAL_INFANT_COHORT_COV;
+    set FINAL_INFANT_COHORT_COV;
+    if MOTHER_EDU = 1 then MOTHER_EDU_GROUP = 'No HS';
+    else if MOTHER_EDU = 2 then MOTHER_EDU_GROUP = 'HS or GED';
+    else if MOTHER_EDU = 3 then MOTHER_EDU_GROUP = 'Associate or Bachelors';
+    else if MOTHER_EDU = 4 then MOTHER_EDU_GROUP = 'Post graduate';
+    else MOTHER_EDU_GROUP = 'Other/Unknown';
+
 /* Sort the dataset by APPROPRIATE_Testing */
 proc sort data=FINAL_INFANT_COHORT_COV;
     by APPROPRIATE_Testing;
@@ -2791,6 +2734,12 @@ data FINAL_INFANT_COHORT_COV;
 run;
 
 /* Calculate mean age stratified by appropriate testing */
+proc means data=FINAL_INFANT_COHORT_COV;
+    var AGE_BIRTH;
+    where AGE_BIRTH ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
 proc means data=FINAL_INFANT_COHORT_COV;
     by APPROPRIATE_Testing;
     var AGE_BIRTH;
@@ -2880,15 +2829,14 @@ run;
 %Table1freqs (AGE_BIRTH_GROUP);
 %Table1freqs (EVER_INCARCERATED, flagf.);
 %Table1freqs (HOMELESS_HISTORY, flagf.);
-%Table1freqs (LANGUAGE_SPOKEN, langf.);
-%Table1freqs (MOTHER_EDU, moth_edu_fmt.);
+%Table1freqs (LANGUAGE_SPOKEN_GROUP);
+%Table1freqs (MOTHER_EDU_GROUP);
 %Table1freqs (LD_PAY, ld_pay_fmt.);
 %Table1freqs (KOTELCHUCK, kotel_fmt.);
 %Table1freqs (prenat_site, prenat_site_fmt.);
 %Table1freqs (MATINF_HEPC, flagf.);
 %Table1freqs (MATINF_HEPB, flagf.);
 %Table1freqs (EVER_IDU_HCV_MAT, flagf.);
-%Table1freqs (EVER_IDU_HCV_INFANT, flagf.);
 %Table1freqs (mental_health_diag, flagf.);
 %Table1freqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1freqs (iji_diag, flagf.);
@@ -2903,7 +2851,7 @@ run;
 
 %Table1Freqs0_15 (FINAL_SEX, sexf.);
 %Table1Freqs0_15 (FINAL_RE, raceef.);
-%Table1Freqs0_15 (LANGUAGE, langfsecondary.);
+%Table1Freqs0_15 (LANGUAGE, langf.);
 %Table1Freqs0_15 (FOREIGN_BORN, fbornf.);
 
 %macro Table1StrataFreqs(var, format);
@@ -2940,15 +2888,14 @@ run;
 %Table1Stratafreqs (EVER_INCARCERATED, flagf.);
 %Table1Stratafreqs (FOREIGN_BORN, fbornf.);
 %Table1Stratafreqs (HOMELESS_HISTORY, flagf.);
-%Table1Stratafreqs (LANGUAGE_SPOKEN, langf.);
-%Table1Stratafreqs (MOTHER_EDU, moth_edu_fmt.);
+%Table1Stratafreqs (LANGUAGE_SPOKEN_GROUP);
+%Table1Stratafreqs (MOTHER_EDU_GROUP);
 %Table1Stratafreqs (LD_PAY, ld_pay_fmt.);
 %Table1Stratafreqs (KOTELCHUCK, kotel_fmt.);
 %Table1Stratafreqs (prenat_site, prenat_site_fmt.);
 %Table1Stratafreqs (MATINF_HEPC, flagf.);
 %Table1Stratafreqs (MATINF_HEPB, flagf.);
 %Table1Stratafreqs (EVER_IDU_HCV_MAT, flagf.);
-%Table1Stratafreqs (EVER_IDU_HCV_INFANT, flagf.);
 %Table1Stratafreqs (mental_health_diag, flagf.);
 %Table1Stratafreqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1Stratafreqs (iji_diag, flagf.);
@@ -2971,22 +2918,14 @@ run;
 
 %Table1StrataFreqs0_15 (FINAL_SEX, sexf.);
 %Table1StrataFreqs0_15 (FINAL_RE, raceef.);
-%Table1StrataFreqs0_15 (LANGUAGE, langfsecondary.);
+%Table1StrataFreqs0_15 (LANGUAGE, langf.);
 %Table1StrataFreqs0_15 (FOREIGN_BORN, fbornf.);
 
 %macro Table2Crude(var, ref= );
-    title "Table 2, Crude";
-    
-    /* Sort the dataset by DISCH_WITH_MOM */
-    proc sort data=FINAL_INFANT_COHORT_COV;
-        by DISCH_WITH_MOM;
-    run;
-    
-    /* Run logistic regression */
-    proc logistic data=FINAL_INFANT_COHORT_COV desc;
+title "Table 2, Crude";
+proc logistic data=FINAL_INFANT_COHORT_COV desc;
         class &var (param=ref ref=&ref.);
-        model APPROPRIATE_Testing=&var;
-        by DISCH_WITH_MOM;
+    model APPROPRIATE_Testing=&var;
     run;
 %mend;
 
@@ -3007,7 +2946,6 @@ run;
 %Table2Crude(FOREIGN_BORN, ref='0');
 %Table2Crude(HOMELESS_HISTORY, ref='0');
 %Table2Crude(EVER_IDU_HCV_MAT, ref='0');
-%Table2Crude(EVER_IDU_HCV_INFANT, ref='0');
 %Table2Crude(MENTAL_HEALTH_DIAG, ref='0');
 %Table2Crude(OTHER_SUBSTANCE_USE, ref='0');
 %Table2Crude(MATINF_HEPB, ref='0');
@@ -3018,11 +2956,55 @@ run;
 %Table2Crude(EVER_INCARCERATED, ref='0');
 %Table2Crude(MATINF_HEPC, ref='0');
 %Table2Crude(AGE_BIRTH_GROUP, ref='26-35');
-%Table2Crude(LANGUAGE_SPOKEN, ref='1');
-%Table2Crude(MOTHER_EDU, ref='2');
+%Table2Crude(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Crude(MOTHER_EDU_GROUP, ref='HS or GED');
 %Table2Crude(LD_PAY, ref='1');
 %Table2Crude(KOTELCHUCK, ref='3');
 %Table2Crude(prenat_site, ref='1');
+
+%macro Table2Crude_Strat(var, ref= );
+    title "Table 2, Crude, Stratified";
+    
+    /* Sort the dataset by DISCH_WITH_MOM */
+    proc sort data=FINAL_INFANT_COHORT_COV;
+        by DISCH_WITH_MOM;
+    run;
+    
+    /* Run logistic regression */
+    proc logistic data=FINAL_INFANT_COHORT_COV desc;
+        class &var (param=ref ref=&ref.);
+        model APPROPRIATE_Testing=&var;
+        by DISCH_WITH_MOM;
+    run;
+%mend;
+
+%Table2Crude_Strat(FINAL_SEX, ref='1');
+%Table2Crude_Strat(GESTATIONAL_AGE_CAT, ref='Term');
+%Table2Crude_Strat(FINAL_RE, ref='1');
+%Table2Crude_Strat(MOMS_FINAL_RE, ref='1');
+%Table2Crude_Strat(county, ref='MIDDLESEX');
+%Table2Crude_Strat(well_child, ref='0');
+%Table2Crude_Strat(NAS_BC_TOTAL, ref='0');
+%Table2Crude_Strat(INF_VAC_HBIG, ref='0');
+%Table2Crude_Strat(HIV_DIAGNOSIS, ref='0');
+%Table2Crude_Strat(FOREIGN_BORN, ref='0');
+%Table2Crude_Strat(HOMELESS_HISTORY, ref='0');
+%Table2Crude_Strat(EVER_IDU_HCV_MAT, ref='0');
+%Table2Crude_Strat(MENTAL_HEALTH_DIAG, ref='0');
+%Table2Crude_Strat(OTHER_SUBSTANCE_USE, ref='0');
+%Table2Crude_Strat(MATINF_HEPB, ref='0');
+%Table2Crude_Strat(MOUD_DURING_PREG, ref='0');
+%Table2Crude_Strat(MOUD_AT_DELIVERY, ref='0');
+%Table2Crude_Strat(OUD_CAPTURE, ref='0');
+%Table2Crude_Strat(IJI_DIAG, ref='0');
+%Table2Crude_Strat(EVER_INCARCERATED, ref='0');
+%Table2Crude_Strat(MATINF_HEPC, ref='0');
+%Table2Crude_Strat(AGE_BIRTH_GROUP, ref='26-35');
+%Table2Crude_Strat(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Crude_Strat(MOTHER_EDU_GROUP, ref='HS or GED');
+%Table2Crude_Strat(LD_PAY, ref='1');
+%Table2Crude_Strat(KOTELCHUCK, ref='3');
+%Table2Crude_Strat(prenat_site, ref='1');
 
 %macro Table2Crude0_15(var, ref= );
 title "Table 2, 0-15 Cohort, Crude";
@@ -3054,7 +3036,7 @@ proc logistic data=TRT_TESTING15 desc;
 %ChiSquareTest(MOMS_FINAL_RE, FOREIGN_BORN);
 %ChiSquareTest(MOMS_FINAL_RE, COUNTY);
 %ChiSquareTest(MOMS_FINAL_RE, AGE_BIRTH_GROUP);
-%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN);
+%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(MOMS_FINAL_RE, LD_PAY);
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_DURING_PREG);
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_AT_DELIVERY);
@@ -3062,29 +3044,29 @@ proc logistic data=TRT_TESTING15 desc;
 
 %ChiSquareTest(FOREIGN_BORN, COUNTY);
 %ChiSquareTest(FOREIGN_BORN, AGE_BIRTH_GROUP);
-%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN);
+%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(FOREIGN_BORN, LD_PAY);
 %ChiSquareTest(FOREIGN_BORN, MOUD_DURING_PREG);
 %ChiSquareTest(FOREIGN_BORN, MOUD_AT_DELIVERY);
 %ChiSquareTest(FOREIGN_BORN, MATINF_HEPC);
 
 %ChiSquareTest(COUNTY, AGE_BIRTH_GROUP);
-%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN);
+%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(COUNTY, LD_PAY);
 %ChiSquareTest(COUNTY, MOUD_DURING_PREG);
 %ChiSquareTest(COUNTY, MOUD_AT_DELIVERY);
 %ChiSquareTest(COUNTY, MATINF_HEPC);
 
-%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN);
+%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(AGE_BIRTH_GROUP, LD_PAY);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_DURING_PREG);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_AT_DELIVERY);
 %ChiSquareTest(AGE_BIRTH_GROUP, MATINF_HEPC);
 
-%ChiSquareTest(LANGUAGE_SPOKEN, LD_PAY);
-%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_DURING_PREG);
-%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_AT_DELIVERY);
-%ChiSquareTest(LANGUAGE_SPOKEN, MATINF_HEPC);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, LD_PAY);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MOUD_DURING_PREG);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MOUD_AT_DELIVERY);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MATINF_HEPC);
 
 %ChiSquareTest(LD_PAY, MOUD_DURING_PREG);
 %ChiSquareTest(LD_PAY, MOUD_AT_DELIVERY);
