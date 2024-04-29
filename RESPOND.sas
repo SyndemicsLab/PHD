@@ -2,9 +2,20 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 4/27/2023 			*/
-/* Updated: 11/26/2023  		*/
+/* Updated: 4/29/2024   		*/
 /*==============================*/
-
+/* 
+Overall, the logic behind the known capture is fairly simple: 
+search through individual databases and flag if an ICD9, ICD10, 
+CPT, NDC, or other specialized code matches our lookup table. 
+If a record has one of these codes, it is 'flagged' for OUD. 
+The utilized databases are then joined onto the SPINE demographics 
+dataset and if the sum of flags is greater than zero, then the 
+record is flagged with OUD.  
+At current iteration, data being pulled through this method is 
+stratified by Year (or Year and Month), Race, Sex, and Age 
+(where age groups are defined in the table below).
+*/
 /*==============================*/
 /*  	GLOBAL VARIABLES   		*/
 /*==============================*/
@@ -76,6 +87,10 @@ PROC FORMAT;
 
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
+/* 
+Take NDC codes where buprenorphine has been identified,
+insert them into BUP_NDC as a macro variable 
+*/
 PROC SQL;
     CREATE TABLE ndc AS
     SELECT DISTINCT NDC 
@@ -92,6 +107,10 @@ QUIT;
 /*			DATA PULL			 */
 /*===============================*/ 
 /*======DEMOGRAPHIC DATA=========*/
+/* 
+Using data from DEMO, take the cartesian coordinate of years
+(as defined above) and months 1:12 to construct a shell table
+*/
 DATA demographics;
     SET PHDSPINE.DEMO (KEEP= ID FINAL_RE FINAL_SEX YOB);
     IF FINAL_RE = 9 THEN DELETE;
@@ -118,6 +137,22 @@ PROC SQL;
 QUIT;
 
 /*=========APCD DATA=============*/
+/* 
+The APCD consists of the Medical and Pharmacy Claims datasets and, 
+along with Casemix, are the datasets where we primarily search along 
+our ICD code list. We construct a variable named `OUD_APCD` within our 
+APCD Medical dataset using `MED_ICD1-25`, `MED_PROC1-7`, `MED_ECODE`, `MED_ADM_DIAGNOSIS`
+and `MED_DIS_DIAGNOSIS`. We preform a rowwise search and add one to a 
+temporary `count` variable if they appear within our ICD code list.
+At the end, if the `count` variable is strictly greater than one 
+then our `OUD_APCD` flag is set to 1.
+
+The APCD medical dataset does not hold variables for searching 
+for NDC Codes, so we add in the APCD pharmacy dataset with 
+`PHARM_NDC` to search for applicable NDC codes. 
+If `PHARM_NDC` or `PHARM_ICD` is within our OUD Codes lists above,
+then our `OUD_PHARM` flag is set to 1.
+*/
 DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
 	SET PHDAPCD.MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS
 								MED_ICD_PROC1-MED_ICD_PROC7
@@ -158,6 +193,52 @@ DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
 RUN;
 
 /*======CASEMIX DATA==========*/
+/* 
+### Emergency Department
+Casemix.ED (Emergency Department) has three smaller internally 
+linked tables: ED, ED_DIAG, and ED_PROC; all linked together by 
+their internal `ED_ID`, which is only found in the ED tables 
+and should not be linked back to the PHD ID.
+1. ED: Within the ED Dataset, we are interested in if `ED_DIAG1` 
+   or `ED_PRINCIPLE_ECODE` are within our OUD Code list. 
+   A temporary variable `OUD_ED_RAW` is created as a flag.
+2. ED_DIAG: Within the ED_DIAG Dataset, we construct our flag, 
+   `OUD_ED_DIAG` from the variable `ED_DIAG`
+3. ED_PROC: Within the ED_PROC Dataset, we construct our flag, 
+   `OUD_ED_PROC` from the variable `ED_PROC`
+4. Datasets ED, ED_DIAG, and ED_PROC and joined along 
+   their internal `ED_ID`. If the sum of created flags is 
+   strictly greater than zero, then the overall `OUD_CM_ED` 
+   flag is set to 1.
+
+### Hospital Inpatient Discharge
+Casemix.HD (Hospital Inpatient Discharge) follows the same pattern
+as ED and has three smaller internally linked tables: HD, HD_DIAG, 
+and HD_PROC; all linked together by their internal `HD_ID`, 
+which is only found in the HD tables and should not be linked 
+back to the PHD ID.
+1. HD: Within the HD Dataset, we are intersted in if `HD_PROC1` or 
+   `HD_DIAG1` are within our OUD Code list. A temporary variable 
+   `OUD_HD_RAW` is created as a flag.
+2. HD_DIAG: Within the HD_DIAG Dataset, we construct our flag, 
+   `OUD_HD_DIAG` from the variable `HD_DIAG`
+3. HD_PROC: Within the HD_PROC Dataset, we construct our flag, 
+   `OUD_HD_PROC` from the variable `HD_PROC`
+4. Datasets HD, HD_DIAG, and HD_PROC and joined along their 
+   internal `HD_ID`. If the sum of created flags is strictly 
+   greater than zero, then the overall `OUD_CM_HD` flag is set to 1.
+
+### Outpatient Observations
+Casemix.OO (Outpatient Observations) breaks from the previous 
+pattern of HD and ED by only have one attributing table. 
+Within this table, we construct our flag `OUD_CM_OO` by searching 
+through `OO_DIAG1-16`, `OO_PROC1-4`, `OO_CPT1-10`, and 
+`OO_PRINCIPALEXTERNAL_CAUSECODE`. We preform a rowwise search and 
+add one to a temporary `count` variable if they appear within our 
+code lists. At the end, if the `count` variable is strictly greater 
+than one then our `OUD_CM_OO` flag is set to 1.
+*/
+
 /* ED */
 DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm month_cm);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
@@ -320,6 +401,7 @@ DATA oo (KEEP= ID oud_oo year_oo month_oo);
 RUN;
 
 /* MERGE ALL CM */
+/* Perform full join for all casemix tables */
 PROC SQL;
     CREATE TABLE casemix AS
     SELECT *
@@ -350,6 +432,24 @@ DATA casemix (KEEP = ID oud_cm year_cm month_cm);
 RUN;
 
 /* BSAS */
+/* 
+Like Matris, the BSAS dataset involves some PHD level encoding. 
+We tag a record with our flag, `OUD_BSAS`, if 
+`CLT_ENR_PRIMARY_DRUG`, `CLT_ENR_SECONDARY_DRUG`, 
+`CLT_ENR_TERTIARY_DRUG` are in the encoded list: (5,6,7,21,22,23,24,26) 
+or if `PHD_PRV_SERV_CAT = 7` (Opioid Treatment).
+
+Descriptions of the BSAS drugs respective to 
+PHD level documentation
+1. 5: Heroin
+2. 6: Non-Rx Methadone
+3. 7: Other Opiates
+4. 21: Oxycodone
+5. 22: Non-Rx Suboxone
+6. 23: Rx Opiates
+7. 24: Non-Rx Opiates
+8. 26: Fentanyl
+*/
 DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas);
     SET PHDBSAS.BSAS (KEEP= ID CLT_ENR_OVERDOSES_LIFE
                              CLT_ENR_PRIMARY_DRUG
@@ -372,6 +472,11 @@ DATA bsas (KEEP= ID oud_bsas year_bsas month_bsas);
 RUN;
 
 /* MATRIS */
+/* 
+The MATRIS Dataset depends on PHD level encoding of variables 
+`OPIOID_ORI_MATRIS` and `OPIOID_ORISUBCAT_MATRIS` to 
+construct our flag variable, `OUD_MATRIS`.
+*/
 DATA matris (KEEP= ID oud_matris year_matris month_matris);
 SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
                           OPIOID_ORISUBCAT_MATRIS
@@ -390,6 +495,13 @@ SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
 RUN;
 
 /* DEATH */
+/* 
+The Death dataset holds the official cause and manner of 
+death assigned by physicians and medical examiners. For our 
+purposes, we are only interested in the variable `OPIOID_DEATH` 
+which is based on 'ICD10 codes or literal search' from other 
+PHD sources.
+*/
 DATA death (KEEP= ID oud_death year_death month_death);
     SET PHDDEATH.DEATH (KEEP= ID OPIOID_DEATH YEAR_DEATH AGE_DEATH
                         WHERE= (YEAR_DEATH IN &year));
@@ -402,6 +514,10 @@ DATA death (KEEP= ID oud_death year_death month_death);
 RUN;
 
 /* PMP */
+/* 
+Within the PMP dataset, we only use the `BUPRENORPHINE_PMP` 
+to define the flag `OUD_PMP` - conditioned on BUP_CAT_PMP = 1.
+*/
 DATA pmp (KEEP= ID oud_pmp year_pmp month_pmp);
     SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year date_filled_month BUP_CAT_PMP
                     WHERE= (date_filled_year IN &year));
@@ -417,6 +533,19 @@ RUN;
 /*===========================*/
 /*      MAIN MERGE           */
 /*===========================*/
+/* 
+As a final series of steps:
+1. APCD-Pharm, APCD-Medical, Casemix, Death, PMP, Matris, 
+   BSAS are joined together on the cartesian coordinate of Months 
+   (1:12), Year (2015:2021), and SPINE (Race, Sex, ID)
+2. The sum of the fabricated flags is taken. If the sum is strictly
+   greater than zero, then the master flag is set to 1. 
+   Zeros are deleted
+4. We select distinct ID, Age Bins, Race, Year, and Month and 
+   output the count of those detected with OUD
+5. Any count that is between 1 and 10 are suppressed and set to -1,
+   any zeros are true zeros
+*/
 PROC SQL;
     CREATE TABLE oo AS
     SELECT DISTINCT *
@@ -580,6 +709,16 @@ PROC EXPORT
 RUN;
 
 /* Data Origin Location */
+/* 
+Data used by the Capture Re-Capture Method (CRC) is pulled from 
+the Public Health Data Warehouse (PHDW) and is non-stratified. 
+This data details how many people are within the combination of
+databases we pull from. For example, a row detailing '1' in the 
+APCD and Casemix column would indicate that 'x' people in the 
+N_ID column were 'captured' in both APCD and Casemix in the time
+of interest (a given year.) This extends to all six of the 
+databases we currently pull from.
+*/
 PROC SQL;
     CREATE TABLE stratif_oud_origin_yearly AS
     SELECT DISTINCT oud_cm AS Casemix,
@@ -621,6 +760,24 @@ RUN;
 /*==============================*/
 /*         MOUD Counts          */
 /*==============================*/
+/* 
+The goal of this portion of the script is to extract MOUD counts and 
+starts while treating it as a formal subset of the code defined above 
+(OUDCounts.) The table most used in this portion is the relatively-new
+SPINE.MOUD table. 
+MOUD Starts are immediately given through SPINE.MOUD's DATE_START_*_MOUD
+MOUD Counts, on the other hand, require a type of 'expansion', where we
+create a new dataset filling out the months inbetween DATE_START_*_MOUD and 
+DATE_END_*_MOUD.
+
+Restrictions: 
+1. If the lapse between a record's end date and the next record's
+   start date is < 7, we merge the two records together.
+2. After this merge, if there are any more records which are <7 they 
+   are removed from counts/starts tabulation
+3. If medication A is found to be completely encompassed by another 
+   medication B, then we remove the record of medication A.
+*/
 DATA moud;
     SET PHDSPINE.MOUD;
 RUN;
@@ -640,6 +797,10 @@ PROC SORT DATA=moud_demo;
     by ID DATE_START_MOUD TYPE_MOUD;
 RUN;
 
+/* 
+Create `episode_id`, which forms the basis for merging when 
+two episode IDs are the same 
+*/
 DATA moud_demo;
     SET moud_demo;
     by ID TYPE_MOUD;
@@ -651,6 +812,8 @@ DATA moud_demo;
     
     diff = DATE_START_MOUD - lag_date;
     
+    /* If the difference is greater than MOUD leniency, assume 
+    it is another treatment episode */
     IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
     IF flag = 1 THEN episode_num = episode_num + 1;
 
@@ -661,6 +824,7 @@ PROC SORT data=moud_demo;
     BY episode_id;
 RUN;
 
+/* Filter cohort to OUD cohort above*/
 PROC SQL;
     CREATE TABLE moud_demo AS 
     SELECT * 
@@ -668,6 +832,11 @@ PROC SQL;
     WHERE ID IN (SELECT DISTINCT ID FROM oud_yearly);
 QUIT;
 
+/* 
+Merge where episode ID is the same, taking the 
+start_month/year of the first record, and the 
+end_month/year of the final record
+*/
 DATA moud_demo; 
     SET moud_demo;
 
