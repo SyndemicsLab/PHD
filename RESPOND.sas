@@ -153,6 +153,8 @@ DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
     IF  PHARM_ICD IN &ICD OR 
         PHARM_NDC IN (&BUP_NDC) THEN oud_pharm = 1;
     ELSE oud_pharm = 0;
+
+    IF oud_pharm = 0 THEN DELETE;
 RUN;
 
 /*======CASEMIX DATA==========*/
@@ -640,12 +642,12 @@ RUN;
 
 DATA moud_demo;
     SET moud_demo;
-    by ID;
+    by ID TYPE_MOUD;
     retain episode_num;
 
     lag_date = lag(DATE_END_MOUD);
-    IF FIRST.ID THEN lag_date = .;
-    IF FIRST.ID THEN episode_num = 1;
+    IF FIRST.TYPE_MOUD THEN lag_date = .;
+    IF FIRST.TYPE_MOUD THEN episode_num = 1;
     
     diff = DATE_START_MOUD - lag_date;
     
