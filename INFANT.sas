@@ -2,7 +2,7 @@
 /* Project: OUD Cascade 	    */
 /* Author: Ryan O'Dea  		    */ 
 /* Created: 4/27/2023 		    */
-/* Updated: 04/02/2024 by SJM	*/
+/* Updated: 04/30/2024 by SJM	*/
 /*==============================*/
 
 /*===== SUPRESSION CODE =========*/
@@ -14,6 +14,17 @@ proc template;
 %include "/sas/data/DPH/OPH/PHD/template.sas";
 run;
 /*==============================*/
+
+/* Overall, the logic behind the known capture is fairly simple: 
+search through individual databases and flag if an ICD9, ICD10, 
+CPT, NDC, or other specialized code matches our lookup table. 
+If a record has one of these codes, it is 'flagged' for OUD. 
+The utilized databases are then joined onto the SPINE demographics 
+dataset and if the sum of flags is greater than zero, then the 
+record is flagged with OUD.  
+At current iteration, data being pulled through this method is 
+stratified by Year (or Year and Month), Race, Sex, and Age 
+(where age groups are defined in the table below). */
 
 /*==============================*/
 /*  	GLOBAL VARIABLES   	    */
@@ -76,6 +87,9 @@ PROC FORMAT;
     'J0570','J0571','J0572','J0573', 
  	'J0574','J0575','J0592', 'J2315','Q9991','Q9992''S0109'/* Naloxone*/);
 
+/* Take NDC codes where buprenorphine has been identified,
+insert them into BUP_NDC as a macro variable */
+
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
 proc sql;
@@ -95,6 +109,9 @@ quit;
 /*===============================*/ 
 
 /*======DEMOGRAPHIC DATA=========*/
+/* Using data from DEMO, take the cartesian coordinate of years
+(as defined above) and months 1:12 to construct a shell table */
+
 PROC SQL;
 	CREATE TABLE demographics AS
 	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB, SELF_FUNDED
@@ -103,6 +120,22 @@ PROC SQL;
 QUIT;
 
 /*=========APCD DATA=============*/
+
+/* The APCD consists of the Medical and Pharmacy Claims datasets and, 
+along with Casemix, are the datasets where we primarily search along 
+our ICD code list. We construct a variable named `OUD_APCD` within our 
+APCD Medical dataset using `MED_ICD1-25`, `MED_PROC1-7`, `MED_ECODE`, `MED_ADM_DIAGNOSIS`
+and `MED_DIS_DIAGNOSIS`. We preform a rowwise search and add one to a 
+temporary `count` variable if they appear within our ICD code list.
+At the end, if the `count` variable is strictly greater than one 
+then our `OUD_APCD` flag is set to 1.
+
+The APCD medical dataset does not hold variables for searching 
+for NDC Codes, so we add in the APCD pharmacy dataset with 
+`PHARM_NDC` to search for applicable NDC codes. 
+If `PHARM_NDC` or `PHARM_ICD` is within our OUD Codes lists above,
+then our `OUD_PHARM` flag is set to 1.*/
+
 DATA apcd (KEEP= ID oud_apcd year_apcd);
 	SET PHDAPCD.MOUD_MEDICAL (KEEP= ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE
 								MED_ICD_PROC1-MED_ICD_PROC7
@@ -142,6 +175,51 @@ IF oud_pharm > 0 THEN year_pharm = PHARM_FILL_DATE_YEAR;
 RUN;
 
 /*======CASEMIX DATA==========*/
+
+/* ### Emergency Department
+Casemix.ED (Emergency Department) has three smaller internally 
+linked tables: ED, ED_DIAG, and ED_PROC; all linked together by 
+their internal `ED_ID`, which is only found in the ED tables 
+and should not be linked back to the PHD ID.
+1. ED: Within the ED Dataset, we are interested in if `ED_DIAG1` 
+   or `ED_PRINCIPLE_ECODE` are within our OUD Code list. 
+   A temporary variable `OUD_ED_RAW` is created as a flag.
+2. ED_DIAG: Within the ED_DIAG Dataset, we construct our flag, 
+   `OUD_ED_DIAG` from the variable `ED_DIAG`
+3. ED_PROC: Within the ED_PROC Dataset, we construct our flag, 
+   `OUD_ED_PROC` from the variable `ED_PROC`
+4. Datasets ED, ED_DIAG, and ED_PROC and joined along 
+   their internal `ED_ID`. If the sum of created flags is 
+   strictly greater than zero, then the overall `OUD_CM_ED` 
+   flag is set to 1.
+
+### Hospital Inpatient Discharge
+Casemix.HD (Hospital Inpatient Discharge) follows the same pattern
+as ED and has three smaller internally linked tables: HD, HD_DIAG, 
+and HD_PROC; all linked together by their internal `HD_ID`, 
+which is only found in the HD tables and should not be linked 
+back to the PHD ID.
+1. HD: Within the HD Dataset, we are intersted in if `HD_PROC1` or 
+   `HD_DIAG1` are within our OUD Code list. A temporary variable 
+   `OUD_HD_RAW` is created as a flag.
+2. HD_DIAG: Within the HD_DIAG Dataset, we construct our flag, 
+   `OUD_HD_DIAG` from the variable `HD_DIAG`
+3. HD_PROC: Within the HD_PROC Dataset, we construct our flag, 
+   `OUD_HD_PROC` from the variable `HD_PROC`
+4. Datasets HD, HD_DIAG, and HD_PROC and joined along their 
+   internal `HD_ID`. If the sum of created flags is strictly 
+   greater than zero, then the overall `OUD_CM_HD` flag is set to 1.
+
+### Outpatient Observations
+Casemix.OO (Outpatient Observations) breaks from the previous 
+pattern of HD and ED by only have one attributing table. 
+Within this table, we construct our flag `OUD_CM_OO` by searching 
+through `OO_DIAG1-16`, `OO_PROC1-4`, `OO_CPT1-10`, and 
+`OO_PRINCIPALEXTERNAL_CAUSECODE`. We preform a rowwise search and 
+add one to a temporary `count` variable if they appear within our 
+code lists. At the end, if the `count` variable is strictly greater 
+than one then our `OUD_CM_OO` flag is set to 1. */
+
 /* ED */
 DATA casemix_ed (KEEP= ID oud_cm_ed year_cm ED_ID);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
@@ -326,6 +404,24 @@ DATA casemix (KEEP = ID oud_cm year_cm);
 RUN;
 
 /* BSAS */
+
+/* Like Matris, the BSAS dataset involves some PHD level encoding. 
+We tag a record with our flag, `OUD_BSAS`, if 
+`CLT_ENR_PRIMARY_DRUG`, `CLT_ENR_SECONDARY_DRUG`, 
+`CLT_ENR_TERTIARY_DRUG` are in the encoded list: (5,6,7,21,22,23,24,26) 
+or if `PHD_PRV_SERV_CAT = 7` (Opioid Treatment).
+
+Descriptions of the BSAS drugs respective to 
+PHD level documentation
+1. 5: Heroin
+2. 6: Non-Rx Methadone
+3. 7: Other Opiates
+4. 21: Oxycodone
+5. 22: Non-Rx Suboxone
+6. 23: Rx Opiates
+7. 24: Non-Rx Opiates
+8. 26: Fentanyl */
+
 DATA bsas (KEEP= ID oud_bsas year_bsas);
     SET PHDBSAS.BSAS (KEEP= ID CLT_ENR_OVERDOSES_LIFE
                              CLT_ENR_PRIMARY_DRUG
@@ -349,6 +445,11 @@ DATA bsas (KEEP= ID oud_bsas year_bsas);
 RUN;
 
 /* MATRIS */
+
+/* The MATRIS Dataset depends on PHD level encoding of variables 
+`OPIOID_ORI_MATRIS` and `OPIOID_ORISUBCAT_MATRIS` to 
+construct our flag variable, `OUD_MATRIS`. */
+
 DATA matris (KEEP= ID oud_matris year_matris);
 SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
                           OPIOID_ORISUBCAT_MATRIS
@@ -367,6 +468,13 @@ SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
 RUN;
 
 /* DEATH */
+
+/* The Death dataset holds the official cause and manner of 
+death assigned by physicians and medical examiners. For our 
+purposes, we are only interested in the variable `OPIOID_DEATH` 
+which is based on 'ICD10 codes or literal search' from other 
+PHD sources.*/
+
 DATA death (KEEP= ID oud_death year_death);
     SET PHDDEATH.DEATH (KEEP= ID OPIOID_DEATH YEAR_DEATH AGE_DEATH
                         WHERE= (YEAR_DEATH IN &year));
@@ -379,6 +487,10 @@ DATA death (KEEP= ID oud_death year_death);
 RUN;
 
 /* PMP */
+
+/* Within the PMP dataset, we only use the `BUPRENORPHINE_PMP` 
+to define the flag `OUD_PMP` - conditioned on BUP_CAT_PMP = 1. */
+
 DATA pmp (KEEP= ID oud_pmp year_pmp);
     SET PHDPMP.PMP (KEEP= ID BUPRENORPHINE_PMP date_filled_year AGE_PMP date_filled_month BUP_CAT_PMP
                     WHERE= (date_filled_year IN &year));
@@ -394,6 +506,18 @@ RUN;
 /*===========================*/
 /*      MAIN MERGE           */
 /*===========================*/
+
+/* As a final series of steps:
+1. APCD-Pharm, APCD-Medical, Casemix, Death, PMP, Matris, 
+   BSAS are joined together on the cartesian coordinate of Months 
+   (1:12), Year (2015:2021), and SPINE (Race, Sex, ID)
+2. The sum of the fabricated flags is taken. If the sum is strictly
+   greater than zero, then the master flag is set to 1. 
+   Zeros are deleted
+4. We select distinct ID, Age Bins, Race, Year, and Month and 
+   output the count of those detected with OUD
+5. Any count that is between 1 and 10 are suppressed and set to -1,
+   any zeros are true zeros */
 
 PROC SQL;
     CREATE TABLE oo AS
@@ -492,6 +616,24 @@ QUIT;
 /*==============================*/
 /*         MOUD Counts          */
 /*==============================*/
+
+/* The goal of this portion of the script is to extract MOUD counts and 
+starts while treating it as a formal subset of the code defined above 
+(OUDCounts.) The table most used in this portion is the relatively-new
+SPINE.MOUD table. 
+MOUD Starts are immediately given through SPINE.MOUD's DATE_START_*_MOUD
+MOUD Counts, on the other hand, require a type of 'expansion', where we
+create a new dataset filling out the months inbetween DATE_START_*_MOUD and 
+DATE_END_*_MOUD.
+
+Restrictions: 
+1. If the lapse between a record's end date and the next record's
+   start date is < 7, we merge the two records together.
+2. After this merge, if there are any more records which are <7 they 
+   are removed from counts/starts tabulation
+3. If medication A is found to be completely encompassed by another 
+   medication B, then we remove the record of medication A. */
+
 /* Age Demography Creation */
 DATA moud;
     SET PHDSPINE.MOUD;
@@ -512,17 +654,23 @@ PROC SORT DATA=moud_demo;
     by ID DATE_START_MOUD TYPE_MOUD;
 RUN;
 
+/* Create `episode_id`, which forms the basis for merging when 
+two episode IDs are the same */
+
 DATA moud_demo;
     SET moud_demo;
-    by ID;
+    by ID TYPE_MOUD;
     retain episode_num;
 
     lag_date = lag(DATE_END_MOUD);
-    IF FIRST.ID THEN lag_date = .;
-    IF FIRST.ID THEN episode_num = 1;
+    IF FIRST.TYPE_MOUD THEN lag_date = .;
+    IF FIRST.TYPE_MOUD THEN episode_num = 1;
     
     diff = DATE_START_MOUD - lag_date;
     
+    /* If the difference is greater than MOUD leniency, assume 
+    it is another treatment episode */
+
     IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
     IF flag = 1 THEN episode_num = episode_num + 1;
 
@@ -533,12 +681,17 @@ PROC SORT data=moud_demo;
     BY episode_id;
 RUN;
 
+/* Filter cohort to OUD cohort above*/
 PROC SQL;
     CREATE TABLE moud_demo AS 
     SELECT * 
     FROM moud_demo
     WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
 QUIT;
+
+/* Merge where episode ID is the same, taking the 
+start_month/year of the first record, and the 
+end_month/year of the final record */
 
 DATA moud_demo; 
     SET moud_demo;
@@ -923,8 +1076,8 @@ PROC SQL;
 	CASE 
             WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
             WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
-            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN . 
-            ELSE . /* Set to missing if none of the above conditions are met */
+            WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
+            ELSE 9
         END AS EVER_IDU_HCV_MAT,
 	1 as HCV_SEROPOSITIVE_INDICATOR,
 	CASE WHEN min(DISEASE_STATUS_HCV) = 1 THEN 1 ELSE 0 END as CONFIRMED_HCV_INDICATOR FROM PHDHEPC.HCV
@@ -1602,19 +1755,22 @@ RUN;
 /*====================================*/
 
 PROC SQL;
-CREATE TABLE COHORT15 as
-SELECT DISTINCT ID, AGE_HCV, DISEASE_STATUS_HCV, EVENT_YEAR_HCV, 
-	CASE 
-        WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
-        WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
-        WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN . 
-        ELSE . /* Set to missing if none of the above conditions are met */
+    CREATE TABLE COHORT15 AS
+    SELECT DISTINCT 
+        ID, 
+        min(AGE_HCV) as AGE_HCV, 
+        DISEASE_STATUS_HCV, 
+        min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
+        CASE 
+            WHEN SUM(CASE WHEN EVER_IDU_HCV = 1 THEN 1 ELSE 0 END) > 0 THEN 1
+            WHEN SUM(CASE WHEN EVER_IDU_HCV = 0 THEN 1 ELSE 0 END) > 0 THEN 0
+            WHEN SUM(CASE WHEN EVER_IDU_HCV = 9 THEN 1 ELSE 0 END) > 0 THEN 9
+            ELSE .
         END AS EVER_IDU_HCV
-FROM PHDHEPC.HCV
-    GROUP BY 
-        ID;
-WHERE AGE_HCV <=15 AND AGE_HCV NE .;
-quit;
+    FROM PHDHEPC.HCV
+    WHERE AGE_HCV <= 15 AND AGE_HCV NE .
+    GROUP BY ID;
+QUIT;
 
 /*============================ */
 /*        HCV CASCADE          */
@@ -2005,12 +2161,12 @@ proc freq data=TESTING;
 run;
 
 proc sort data=TESTING;
-	by RNA_TEST_INDICATOR;
+	by APPROPRIATE_RNA_Testing;
 run;
 
 proc freq data=TESTING;
-    by RNA_TEST_INDICATOR;
-    tables AB_TEST_INDICATOR
+    by APPROPRIATE_RNA_Testing;
+    tables APPROPRIATE_AB_Testing
     		CONFIRMED_HCV_INDICATOR / missing norow nopercent nocol;
     where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
 run;
@@ -2332,6 +2488,7 @@ proc sql;
     select FINAL_INFANT_COHORT.*,
            demographics.FINAL_RE as MOMS_FINAL_RE, 
            demographics.EVER_INCARCERATED,
+           demographics.HOMELESS_HISTORY as MOMS_HOMELESS_HISTORY,
            demographics.FOREIGN_BORN,
            birthsmoms.AGE_BIRTH,
            birthsmoms.LD_PAY,
@@ -2701,23 +2858,21 @@ data FINAL_INFANT_COHORT_COV;
     else if AGE_BIRTH <= 35 then AGE_BIRTH_GROUP = '26-35';
     else AGE_BIRTH_GROUP = '>35';
 
-/* Modify langauage into a categorical variable */
-data FINAL_INFANT_COHORT_COV;
-    set FINAL_INFANT_COHORT_COV;
-    if LANGUAGE_SPOKEN = 1 then LANGUAGE_SPOKEN_GROUP = 'English';
-    else if LANGUAGE_SPOKEN = 2 then LANGUAGE_SPOKEN_GROUP = 'Spanish';
-    else if LANGUAGE_SPOKEN = 3-15 then LANGUAGE_SPOKEN_GROUP = 'Other';
-    else if LANGUAGE_SPOKEN >=88 then LANGUAGE_SPOKEN_GROUP = 'Refused/Unknown';
-    else LANGUAGE_SPOKEN_GROUP = 'N/A (MF Record)';
+/* Define format for LANGUAGE_SPOKEN */
+value langf
+    1 = 'English'
+    2 = 'Spanish'
+    3-15 = 'Other'
+    88-99 = 'Refused/Unknown'
+    other = 'N/A (MF Record)';
 
-/* Modify mother_edu into a categorical variable */
-data FINAL_INFANT_COHORT_COV;
-    set FINAL_INFANT_COHORT_COV;
-    if MOTHER_EDU = 1 then MOTHER_EDU_GROUP = 'No HS';
-    else if MOTHER_EDU = 2 then MOTHER_EDU_GROUP = 'HS or GED';
-    else if MOTHER_EDU = 3 then MOTHER_EDU_GROUP = 'Associate or Bachelors';
-    else if MOTHER_EDU = 4 then MOTHER_EDU_GROUP = 'Post graduate';
-    else MOTHER_EDU_GROUP = 'Other/Unknown';
+/* Define format for MOTHER_EDU */
+value moth_edu_fmt
+    1 = 'No HS'
+    2 = 'HS or GED'
+    3 = 'Associate or Bachelor'
+    4 = 'Post graduate'
+    5-10 = 'Other/Unknown';
 
 /* Sort the dataset by APPROPRIATE_Testing */
 proc sort data=FINAL_INFANT_COHORT_COV;
@@ -2829,8 +2984,9 @@ run;
 %Table1freqs (AGE_BIRTH_GROUP);
 %Table1freqs (EVER_INCARCERATED, flagf.);
 %Table1freqs (HOMELESS_HISTORY, flagf.);
-%Table1freqs (LANGUAGE_SPOKEN_GROUP);
-%Table1freqs (MOTHER_EDU_GROUP);
+%Table1freqs (MOMS_HOMELESS_HISTORY, flagf.);
+%Table1freqs (LANGUAGE_SPOKEN, langf.);
+%Table1freqs (MOTHER_EDU, moth_edu_fmt.);
 %Table1freqs (LD_PAY, ld_pay_fmt.);
 %Table1freqs (KOTELCHUCK, kotel_fmt.);
 %Table1freqs (prenat_site, prenat_site_fmt.);
@@ -2888,8 +3044,9 @@ run;
 %Table1Stratafreqs (EVER_INCARCERATED, flagf.);
 %Table1Stratafreqs (FOREIGN_BORN, fbornf.);
 %Table1Stratafreqs (HOMELESS_HISTORY, flagf.);
-%Table1Stratafreqs (LANGUAGE_SPOKEN_GROUP);
-%Table1Stratafreqs (MOTHER_EDU_GROUP);
+%Table1Stratafreqs (MOMS_HOMELESS_HISTORY, flagf.);
+%Table1Stratafreqs (LANGUAGE_SPOKEN, langf.);
+%Table1Stratafreqs (MOTHER_EDU, moth_edu_fmt.);
 %Table1Stratafreqs (LD_PAY, ld_pay_fmt.);
 %Table1Stratafreqs (KOTELCHUCK, kotel_fmt.);
 %Table1Stratafreqs (prenat_site, prenat_site_fmt.);
@@ -2945,6 +3102,7 @@ run;
 %Table2Crude(HIV_DIAGNOSIS, ref='0');
 %Table2Crude(FOREIGN_BORN, ref='0');
 %Table2Crude(HOMELESS_HISTORY, ref='0');
+%Table2Crude(MOMS_HOMELESS_HISTORY, ref='0');
 %Table2Crude(EVER_IDU_HCV_MAT, ref='0');
 %Table2Crude(MENTAL_HEALTH_DIAG, ref='0');
 %Table2Crude(OTHER_SUBSTANCE_USE, ref='0');
@@ -2956,10 +3114,10 @@ run;
 %Table2Crude(EVER_INCARCERATED, ref='0');
 %Table2Crude(MATINF_HEPC, ref='0');
 %Table2Crude(AGE_BIRTH_GROUP, ref='26-35');
-%Table2Crude(LANGUAGE_SPOKEN_GROUP, ref='English');
-%Table2Crude(MOTHER_EDU_GROUP, ref='HS or GED');
+%Table2Crude(LANGUAGE_SPOKEN, ref='1');
+%Table2Crude(MOTHER_EDU, ref='2');
 %Table2Crude(LD_PAY, ref='1');
-%Table2Crude(KOTELCHUCK, ref='3');
+%Table2Crude(KOTELCHUCK, ref='2');
 %Table2Crude(prenat_site, ref='1');
 
 %macro Table2Crude_Strat(var, ref= );
@@ -2989,6 +3147,7 @@ run;
 %Table2Crude_Strat(HIV_DIAGNOSIS, ref='0');
 %Table2Crude_Strat(FOREIGN_BORN, ref='0');
 %Table2Crude_Strat(HOMELESS_HISTORY, ref='0');
+%Table2Crude_Strat(MOMS_HOMELESS_HISTORY, ref='0');
 %Table2Crude_Strat(EVER_IDU_HCV_MAT, ref='0');
 %Table2Crude_Strat(MENTAL_HEALTH_DIAG, ref='0');
 %Table2Crude_Strat(OTHER_SUBSTANCE_USE, ref='0');
@@ -3000,8 +3159,8 @@ run;
 %Table2Crude_Strat(EVER_INCARCERATED, ref='0');
 %Table2Crude_Strat(MATINF_HEPC, ref='0');
 %Table2Crude_Strat(AGE_BIRTH_GROUP, ref='26-35');
-%Table2Crude_Strat(LANGUAGE_SPOKEN_GROUP, ref='English');
-%Table2Crude_Strat(MOTHER_EDU_GROUP, ref='HS or GED');
+%Table2Crude_Strat(LANGUAGE_SPOKEN, ref='1');
+%Table2Crude_Strat(MOTHER_EDU, ref='2');
 %Table2Crude_Strat(LD_PAY, ref='1');
 %Table2Crude_Strat(KOTELCHUCK, ref='3');
 %Table2Crude_Strat(prenat_site, ref='1');
@@ -3036,7 +3195,7 @@ proc logistic data=TRT_TESTING15 desc;
 %ChiSquareTest(MOMS_FINAL_RE, FOREIGN_BORN);
 %ChiSquareTest(MOMS_FINAL_RE, COUNTY);
 %ChiSquareTest(MOMS_FINAL_RE, AGE_BIRTH_GROUP);
-%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN_GROUP);
+%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN);
 %ChiSquareTest(MOMS_FINAL_RE, LD_PAY);
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_DURING_PREG);
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_AT_DELIVERY);
@@ -3044,29 +3203,29 @@ proc logistic data=TRT_TESTING15 desc;
 
 %ChiSquareTest(FOREIGN_BORN, COUNTY);
 %ChiSquareTest(FOREIGN_BORN, AGE_BIRTH_GROUP);
-%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN_GROUP);
+%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN);
 %ChiSquareTest(FOREIGN_BORN, LD_PAY);
 %ChiSquareTest(FOREIGN_BORN, MOUD_DURING_PREG);
 %ChiSquareTest(FOREIGN_BORN, MOUD_AT_DELIVERY);
 %ChiSquareTest(FOREIGN_BORN, MATINF_HEPC);
 
 %ChiSquareTest(COUNTY, AGE_BIRTH_GROUP);
-%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN_GROUP);
+%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN);
 %ChiSquareTest(COUNTY, LD_PAY);
 %ChiSquareTest(COUNTY, MOUD_DURING_PREG);
 %ChiSquareTest(COUNTY, MOUD_AT_DELIVERY);
 %ChiSquareTest(COUNTY, MATINF_HEPC);
 
-%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN_GROUP);
+%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN);
 %ChiSquareTest(AGE_BIRTH_GROUP, LD_PAY);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_DURING_PREG);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_AT_DELIVERY);
 %ChiSquareTest(AGE_BIRTH_GROUP, MATINF_HEPC);
 
-%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, LD_PAY);
-%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MOUD_DURING_PREG);
-%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MOUD_AT_DELIVERY);
-%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MATINF_HEPC);
+%ChiSquareTest(LANGUAGE_SPOKEN, LD_PAY);
+%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_DURING_PREG);
+%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_AT_DELIVERY);
+%ChiSquareTest(LANGUAGE_SPOKEN, MATINF_HEPC);
 
 %ChiSquareTest(LD_PAY, MOUD_DURING_PREG);
 %ChiSquareTest(LD_PAY, MOUD_AT_DELIVERY);
@@ -3097,12 +3256,8 @@ proc logistic data=TRT_TESTING15 desc;
 /* Step 2: Based on chi-square test results, decide which variables to keep for multivariable analysis */
 
 /* Step 3: Run multivariable analysis with selected variables */
-%macro MultivariableLogistic_Strat(exposure, adjust_vars, stratify_var);
-    proc logistic data=FINAL_INFANT_COHORT_COV desc;
-        class &adjust_vars / param=ref ref=first;
-        model &exposure = &adjust_vars;
-        strata &stratify_var;
-    run;
-%mend;
-
-%MultivariableLogistic_Strat(APPROPRIATE_Testing, MOMS_FINAL_RE FOREIGN_BORN LD_PAY, DISCH_WITH_MOM);
+proc glimmix data=FINAL_INFANT_COHORT_COV;
+    class MOMS_FINAL_RE (ref='1') FOREIGN_BORN LD_PAY (ref='1') FACILITY_ID_BIRTH (ref='2307') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY / solution ddfm=kr;
+    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
+run;
