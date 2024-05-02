@@ -1730,6 +1730,7 @@ SELECT DISTINCT
     M.INFANT_YEAR_BIRTH,
     M.MONTH_BIRTH,
     M.DOB_INFANT_TBL,
+    M.DOB_MOM_TBL,
     M.MOM_DISEASE_STATUS_HCV,
     M.MOM_EVENT_DATE_HCV,
     D.FINAL_RE,
@@ -2578,7 +2579,7 @@ select distinct FINAL_INFANT_COHORT.MOM_ID,
            else 0
        end as MENTAL_HEALTH_DIAG
 from FINAL_INFANT_COHORT
-left join PHDAPCD.MEDICAL as apcd
+left join PHDAPCD.MOUD_MEDICAL as apcd
 on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
 quit;
 
@@ -2590,7 +2591,6 @@ else 0
 end as MENTAL_HEALTH_DIAG
 from FINAL_INFANT_COHORT;
 quit;
-/* Searching in full dataset because mental health codes are starts_with strings */
 
 %let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
            '421', '4211', '4219', 'A382', 'B376', 'I011', 'I059',
@@ -2756,6 +2756,60 @@ end as WELL_CHILD
 from FINAL_INFANT_COHORT_COV;
 quit;
 
+%LET HCV_ICD = ('7051', '7054', '707',
+				'7041', '7044', '7071',
+				'B1710','B182', 'B1920',
+				'B1711','B1921');
+                
+proc sql;
+create table HCV_DIAG_COHORT (where=(HCV_DIAG=1)) as
+select distinct FINAL_INFANT_COHORT.MOM_ID,
+  case
+       when apcd.MED_ECODE in &HCV_ICD or
+                        apcd.MED_ADM_DIAGNOSIS in &HCV_ICD or
+                        apcd.MED_ICD1 in &HCV_ICD or
+                        apcd.MED_ICD2 in &HCV_ICD or
+                        apcd.MED_ICD3 in &HCV_ICD or
+                        apcd.MED_ICD4 in &HCV_ICD or
+                        apcd.MED_ICD5 in &HCV_ICD or
+                        apcd.MED_ICD6 in &HCV_ICD or
+                        apcd.MED_ICD7 in &HCV_ICD or
+                        apcd.MED_ICD8 in &HCV_ICD or
+                        apcd.MED_ICD9 in &HCV_ICD or
+                        apcd.MED_ICD10 in &HCV_ICD or
+                        apcd.MED_ICD11 in &HCV_ICD or
+                        apcd.MED_ICD12 in &HCV_ICD or
+                        apcd.MED_ICD13 in &HCV_ICD or
+                        apcd.MED_ICD14 in &HCV_ICD or
+                        apcd.MED_ICD15 in &HCV_ICD or
+                        apcd.MED_ICD16 in &HCV_ICD or
+                        apcd.MED_ICD17 in &HCV_ICD or
+                        apcd.MED_ICD18 in &HCV_ICD or
+                        apcd.MED_ICD19 in &HCV_ICD or
+                        apcd.MED_ICD20 in &HCV_ICD or
+                        apcd.MED_ICD21 in &HCV_ICD or
+                        apcd.MED_ICD22 in &HCV_ICD or
+                        apcd.MED_ICD23 in &HCV_ICD or
+                        apcd.MED_ICD24 in &HCV_ICD or
+                        apcd.MED_ICD25 in &HCV_ICD or
+                        apcd.MED_DIS_DIAGNOSIS in &HCV_ICD 
+                        and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_MOM_TBL) >= 30 and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_MOM_TBL) <= 30 
+                   then 1
+           else 0
+       end as HCV_DIAG
+from FINAL_INFANT_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd on FINAL_INFANT_COHORT.MOM_ID = apcd.ID;
+quit;
+
+proc sql;
+create table FINAL_INFANT_COHORT_COV as select *,
+case
+when MOM_ID in (select MOM_ID from HCV_DIAG_COHORT) then 1
+else 0
+end as HCV_DIAG
+from FINAL_INFANT_COHORT_COV;
+quit;
+
 proc sql;
     create table FINAL_INFANT_COHORT_COV as
     select 
@@ -2886,6 +2940,16 @@ data FINAL_INFANT_COHORT_COV;
     else if GESTATIONAL_AGE >= 37 then GESTATIONAL_AGE_CAT = 'Term';
     else if GESTATIONAL_AGE < 37 then GESTATIONAL_AGE_CAT = 'Preterm';
     else GESTATIONAL_AGE_CAT = 'Missing';
+run;
+
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by MOM_DISEASE_STATUS_HCV;
+run;
+
+title "HCV Diagnosis by ICD Code/Birth Certificate by MOM_DISEASE_STATUS_HCV";
+proc freq data=FINAL_INFANT_COHORT_COV;
+    by MOM_DISEASE_STATUS_HCV;
+tables HCV_DIAG MATINF_HEPC / missing norow nocol nopercent;
 run;
 
 /* Calculate mean age stratified by appropriate testing */

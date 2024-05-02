@@ -73,7 +73,7 @@ QUIT;
 	'00074006328', '00074309301', '00074309328', '61958240101', '61958220301', 
 	'61958220401', '61958220501', '00006307402', '51167010001', '51167010003', 
 	'59676022507', '59676022528', '00085031402', '3642', '9884', '11281', '11504', 
-	'11514', '11594', '421', '4211', '4219', '4249*', 'A382', 'B376', 'I011', 
+	'11514', '11594', '421', '4211', '4219', 'A382', 'B376', 'I011', 
 	'I059', 'I079', 'I080', 'I083', 'I089', 'I330', 'I339', 'I358', 'I378', 'I38', 
 	'T826', 'I39', '681', '6811', '6819', '682', '6821', '6822', '6823', '6824', 
 	'6825', '6826', '6827', '6828', '6829', 'L030', 'L031', 'L032', 'L033', 
@@ -119,28 +119,111 @@ QUIT;
 /*==============================*/
 
 DATA apcd_medical_filtered;
-	SET PHDAPCD.MEDICAL (KEEP=ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE 
-		MED_DIS_DIAGNOSIS MED_ICD_PROC1-MED_ICD_PROC7 MED_ICD1-MED_ICD25 
-		MED_PROC_CODE MED_FROM_DATE_year MED_INSURANCE_TYPE MED_MEDICAID 
-		MED_FROM_DATE_MONTH MED_SEX MED_FROM_DATE MED_ADM_TYPE
-		
-		WHERE=(MED_FROM_DATE_YEAR IN &years));
-		
-	cnt_flags=0;
-	ARRAY vars{*} MED_ECODE MED_ADM_DIAGNOSIS MED_ICD_PROC1-MED_ICD_PROC7 
-		MED_ICD1-MED_ICD25 MED_DIS_DIAGNOSIS MED_PROC_CODE;
+    SET PHDAPCD.MEDICAL (
+        KEEP=ID MED_ECODE MED_ADM_DIAGNOSIS MED_AGE MED_DIS_DIAGNOSIS
+             MED_ICD_PROC1-MED_ICD_PROC7 MED_ICD1-MED_ICD25 MED_PROC_CODE
+             MED_FROM_DATE_year MED_INSURANCE_TYPE MED_MEDICAID MED_FROM_DATE
+             MED_SEX MED_FROM_DATE MED_ADM_TYPE
+        WHERE=(MED_FROM_DATE_YEAR IN &years)
+    );
 
-	DO i=1 TO dim(vars);
+    cnt_flags = 0;
+    ARRAY vars{*} MED_ECODE MED_ADM_DIAGNOSIS MED_ICD_PROC1-MED_ICD_PROC7
+        MED_ICD1-MED_ICD25 MED_DIS_DIAGNOSIS MED_PROC_CODE;
 
-		IF vars[i] IN &codes THEN
-			cnt_flags=cnt_flags + 1;
+    DO i = 1 TO dim(vars);
+        IF vars[i] IN &codes THEN
+            cnt_flags = cnt_flags + 1;
+    END;
+    DROP i;
 
-		
-	END;
-	DROP=i;
-
-	IF cnt_flags=0 THEN
-		DELETE;
+    IF substr(MED_ADM_DIAGNOSIS, 1, 4) = '4249' or
+       substr(MED_ICD1, 1, 4) = '4249' or
+       substr(MED_ICD2, 1, 4) = '4249' or
+       substr(MED_ICD3, 1, 4) = '4249' or
+       substr(MED_ICD4, 1, 4) = '4249' or
+       substr(MED_ICD5, 1, 4) = '4249' or
+       substr(MED_ICD6, 1, 4) = '4249' or
+       substr(MED_ICD7, 1, 4) = '4249' or
+       substr(MED_ICD8, 1, 4) = '4249' or
+       substr(MED_ICD9, 1, 4) = '4249' or
+       substr(MED_ICD10, 1, 4) = '4249' or
+       substr(MED_ICD11, 1, 4) = '4249' or
+       substr(MED_ICD12, 1, 4) = '4249' or
+       substr(MED_ICD13, 1, 4) = '4249' or
+       substr(MED_ICD14, 1, 4) = '4249' or
+       substr(MED_ICD15, 1, 4) = '4249' or
+       substr(MED_ICD16, 1, 4) = '4249' or
+       substr(MED_ICD17, 1, 4) = '4249' or
+       substr(MED_ICD18, 1, 4) = '4249' or
+       substr(MED_ICD19, 1, 4) = '4249' or
+       substr(MED_ICD20, 1, 4) = '4249' or
+       substr(MED_ICD21, 1, 4) = '4249' or
+       substr(MED_ICD22, 1, 4) = '4249' or
+       substr(MED_ICD23, 1, 4) = '4249' or
+       substr(MED_ICD24, 1, 4) = '4249' or
+       substr(MED_ICD25, 1, 4) = '4249' or
+       substr(MED_DIS_DIAGNOSIS, 1, 4) = '4249' or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ECODE) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ADM_DIAGNOSIS) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD1) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD2) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD3) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD4) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD5) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD6) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD7) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD8) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD9) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD10) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD11) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD12) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD13) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD14) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD15) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD16) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD17) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD18) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD19) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD20) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD21) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD22) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD23) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD24) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_ICD25) > 0 or
+       prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', MED_DIS_DIAGNOSIS) > 0 or
+       substr(MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') or
+       substr(MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311')
+       THEN
+            cnt_flags = cnt_flags + 1;
+       
+    IF cnt_flags = 0 THEN DELETE;
 RUN;
 
 /*==============================*/
