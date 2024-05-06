@@ -1760,7 +1760,7 @@ PROC SQL;
     SELECT DISTINCT 
         ID, 
         min(AGE_HCV) as AGE_HCV, 
-        DISEASE_STATUS_HCV, 
+        min(DISEASE_STATUS_HCV) as DISEASE_STATUS_HCV, 
         min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
         CASE 
             WHEN SUM(CASE WHEN EVER_IDU_HCV = 1 THEN 1 ELSE 0 END) > 0 THEN 1
@@ -1772,6 +1772,14 @@ PROC SQL;
     WHERE AGE_HCV <= 15 AND AGE_HCV NE .
     GROUP BY ID;
 QUIT;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM COHORT15;
+QUIT;
+
+%put Number of unique IDs in COHORT15 table: &num_unique_ids;
 
 /*============================ */
 /*        HCV CASCADE          */
@@ -2867,6 +2875,7 @@ proc format;
     99 = 'Not an MA resident';
 
 /* Define format for FOREIGN_BORN */
+proc format;
 value fbornf
     0 = 'No'
     1 = 'Yes'
@@ -2874,6 +2883,7 @@ value fbornf
     9 = 'Not collected';
 
 /* Define format for LANGUAGE */
+proc format;
 value langf
 	0 = 'Not Provided' | 'Unknown/missing'
     1 = 'English Only'
@@ -2881,12 +2891,14 @@ value langf
     3 = 'Another Language';
 
 /* Define format for LD_PAY */
+proc format;
 value ld_pay_fmt
     1 = 'Public'
     2 = 'Private'
     9 = 'Unknown';
 
 /* Define format for KOTELCHUCK */
+proc format;
 value kotel_fmt
     0 = 'Missing/Unknown'
     1 = 'Inadequate'
@@ -2895,6 +2907,7 @@ value kotel_fmt
     4 = 'Intensive';
 
 /* Define format for PRENAT_SITE */
+proc format;
 value prenat_site_fmt
     1 = 'Private Physicians Office'
     2 = 'Community Health Center'
@@ -2902,6 +2915,27 @@ value prenat_site_fmt
     4 = 'Hospital Clinic'
     5 = 'Other'
     9 = 'Unknown';
+
+data FINAL_INFANT_COHORT_COV;
+    length LANGUAGE_SPOKEN_GROUP $30;
+    set FINAL_INFANT_COHORT_COV;
+    if LANGUAGE_SPOKEN = 1 then LANGUAGE_SPOKEN_GROUP = 'English';
+    else if LANGUAGE_SPOKEN = 2 then LANGUAGE_SPOKEN_GROUP = 'Spanish';
+    else if 3 <= LANGUAGE_SPOKEN <= 15 then LANGUAGE_SPOKEN_GROUP = 'Other';
+    else if LANGUAGE_SPOKEN >= 88 then LANGUAGE_SPOKEN_GROUP = 'Refused or Unknown';
+    else LANGUAGE_SPOKEN_GROUP = 'N/A (MF Record)';
+run;
+
+/* Modify mother_edu into a categorical variable */
+data FINAL_INFANT_COHORT_COV;
+    length MOTHER_EDU_GROUP $30;
+    set FINAL_INFANT_COHORT_COV;
+    if MOTHER_EDU = 1 then MOTHER_EDU_GROUP = 'No HS';
+    else if MOTHER_EDU = 2 then MOTHER_EDU_GROUP = 'HS or GED';
+    else if MOTHER_EDU = 3 then MOTHER_EDU_GROUP = 'Associate or Bachelor';
+    else if MOTHER_EDU = 4 then MOTHER_EDU_GROUP = 'Post graduate';
+    else MOTHER_EDU_GROUP = 'Other or Unknown';
+run;
 
 /* Modify age_birth into a categorical variable */
 data FINAL_INFANT_COHORT_COV;
@@ -2911,27 +2945,6 @@ data FINAL_INFANT_COHORT_COV;
     else if AGE_BIRTH <= 25 then AGE_BIRTH_GROUP = '19-25';
     else if AGE_BIRTH <= 35 then AGE_BIRTH_GROUP = '26-35';
     else AGE_BIRTH_GROUP = '>35';
-
-/* Define format for LANGUAGE_SPOKEN */
-value langf
-    1 = 'English'
-    2 = 'Spanish'
-    3-15 = 'Other'
-    88-99 = 'Refused/Unknown'
-    other = 'N/A (MF Record)';
-
-/* Define format for MOTHER_EDU */
-value moth_edu_fmt
-    1 = 'No HS'
-    2 = 'HS or GED'
-    3 = 'Associate or Bachelor'
-    4 = 'Post graduate'
-    5-10 = 'Other/Unknown';
-
-/* Sort the dataset by APPROPRIATE_Testing */
-proc sort data=FINAL_INFANT_COHORT_COV;
-    by APPROPRIATE_Testing;
-run;
 
 /* Make gestational_age categorical */
 data FINAL_INFANT_COHORT_COV;
@@ -2952,11 +2965,26 @@ proc freq data=FINAL_INFANT_COHORT_COV;
 tables HCV_DIAG MATINF_HEPC / missing norow nocol nopercent;
 run;
 
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by MATINF_HEPC ;
+run;
+
+title "HCV Diagnosis by ICD Code/Birth Certificate by MOM_DISEASE_STATUS_HCV";
+proc freq data=FINAL_INFANT_COHORT_COV;
+    by MATINF_HEPC ;
+tables HCV_DIAG / missing norow nocol nopercent;
+run;
+
 /* Calculate mean age stratified by appropriate testing */
 proc means data=FINAL_INFANT_COHORT_COV;
     var AGE_BIRTH;
     where AGE_BIRTH ne 9999;
     output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+/* Sort the dataset by APPROPRIATE_Testing */
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by APPROPRIATE_Testing;
 run;
 
 proc means data=FINAL_INFANT_COHORT_COV;
@@ -3049,12 +3077,13 @@ run;
 %Table1freqs (EVER_INCARCERATED, flagf.);
 %Table1freqs (HOMELESS_HISTORY, flagf.);
 %Table1freqs (MOMS_HOMELESS_HISTORY, flagf.);
-%Table1freqs (LANGUAGE_SPOKEN, langf.);
-%Table1freqs (MOTHER_EDU, moth_edu_fmt.);
+%Table1freqs (LANGUAGE_SPOKEN_GROUP);
+%Table1freqs (MOTHER_EDU_GROUP);
 %Table1freqs (LD_PAY, ld_pay_fmt.);
 %Table1freqs (KOTELCHUCK, kotel_fmt.);
 %Table1freqs (prenat_site, prenat_site_fmt.);
 %Table1freqs (MATINF_HEPC, flagf.);
+%Table1freqs (HCV_DIAG, flagf.);
 %Table1freqs (MATINF_HEPB, flagf.);
 %Table1freqs (EVER_IDU_HCV_MAT, flagf.);
 %Table1freqs (mental_health_diag, flagf.);
@@ -3075,7 +3104,7 @@ run;
 %Table1Freqs0_15 (FOREIGN_BORN, fbornf.);
 
 %macro Table1StrataFreqs(var, format);
-    title "Table 1, Stratified";
+    title "Table 1, Stratified by APPROPRIATE_Testing";
     
     /* Sort the dataset by APPROPRIATE_Testing */
     proc sort data=FINAL_INFANT_COHORT_COV;
@@ -3109,17 +3138,65 @@ run;
 %Table1Stratafreqs (FOREIGN_BORN, fbornf.);
 %Table1Stratafreqs (HOMELESS_HISTORY, flagf.);
 %Table1Stratafreqs (MOMS_HOMELESS_HISTORY, flagf.);
-%Table1Stratafreqs (LANGUAGE_SPOKEN, langf.);
-%Table1Stratafreqs (MOTHER_EDU, moth_edu_fmt.);
+%Table1Stratafreqs (LANGUAGE_SPOKEN_GROUP);
+%Table1Stratafreqs (MOTHER_EDU_GROUP);
 %Table1Stratafreqs (LD_PAY, ld_pay_fmt.);
 %Table1Stratafreqs (KOTELCHUCK, kotel_fmt.);
 %Table1Stratafreqs (prenat_site, prenat_site_fmt.);
 %Table1Stratafreqs (MATINF_HEPC, flagf.);
+%Table1Stratafreqs (HCV_DIAG, flagf.);
 %Table1Stratafreqs (MATINF_HEPB, flagf.);
 %Table1Stratafreqs (EVER_IDU_HCV_MAT, flagf.);
 %Table1Stratafreqs (mental_health_diag, flagf.);
 %Table1Stratafreqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1Stratafreqs (iji_diag, flagf.);
+
+%macro Table2StrataFreqs(var, format);
+    title "Table 1, Stratified by DISCH_WITH_MOM";
+    
+    /* Sort the dataset by DISCH_WITH_MOM */
+    proc sort data=FINAL_INFANT_COHORT_COV;
+        by DISCH_WITH_MOM;
+    run;
+
+    /* Run PROC FREQ with BY statement */
+    proc freq data=FINAL_INFANT_COHORT_COV;
+        by DISCH_WITH_MOM;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table2StrataFreqs (FINAL_SEX, sexf.);
+%Table2StrataFreqs (GESTATIONAL_AGE_CAT);
+%Table2StrataFreqs (FINAL_RE, raceef.);
+%Table2StrataFreqs (MOMS_FINAL_RE, raceef.);
+%Table2StrataFreqs (FACILITY_ID_BIRTH);
+%Table2StrataFreqs (county);
+%Table2StrataFreqs (well_child, flagf.);
+%Table2StrataFreqs (NAS_BC_TOTAL, flagf.);
+%Table2StrataFreqs (INF_VAC_HBIG, flagf.);
+%Table2StrataFreqs (HIV_DIAGNOSIS, flagf.);
+%Table2StrataFreqs (MOUD_DURING_PREG, flagf.);
+%Table2StrataFreqs (MOUD_AT_DELIVERY, flagf.);
+%Table2StrataFreqs (OUD_CAPTURE, flagf.);
+%Table2StrataFreqs (AGE_BIRTH_GROUP);
+%Table2StrataFreqs (EVER_INCARCERATED, flagf.);
+%Table2StrataFreqs (FOREIGN_BORN, fbornf.);
+%Table2StrataFreqs (HOMELESS_HISTORY, flagf.);
+%Table2StrataFreqs (MOMS_HOMELESS_HISTORY, flagf.);
+%Table2StrataFreqs (LANGUAGE_SPOKEN_GROUP);
+%Table2StrataFreqs (MOTHER_EDU_GROUP);
+%Table2StrataFreqs (LD_PAY, ld_pay_fmt.);
+%Table2StrataFreqs (KOTELCHUCK, kotel_fmt.);
+%Table2StrataFreqs (prenat_site, prenat_site_fmt.);
+%Table2StrataFreqs (MATINF_HEPC, flagf.);
+%Table2StrataFreqs (HCV_DIAG, flagf.);
+%Table2StrataFreqs (MATINF_HEPB, flagf.);
+%Table2StrataFreqs (EVER_IDU_HCV_MAT, flagf.);
+%Table2StrataFreqs (mental_health_diag, flagf.);
+%Table2StrataFreqs (OTHER_SUBSTANCE_USE, flagf.);
+%Table2StrataFreqs (iji_diag, flagf.);
 
 %macro Table1StrataFreqs0_15(var, format);
     title "Table 1, 0-15 Cohort, Stratified";
@@ -3177,9 +3254,10 @@ run;
 %Table2Crude(IJI_DIAG, ref='0');
 %Table2Crude(EVER_INCARCERATED, ref='0');
 %Table2Crude(MATINF_HEPC, ref='0');
+%Table2Crude(HCV_DIAG, ref='0');
 %Table2Crude(AGE_BIRTH_GROUP, ref='26-35');
-%Table2Crude(LANGUAGE_SPOKEN, ref='1');
-%Table2Crude(MOTHER_EDU, ref='2');
+%Table2Crude(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Crude(MOTHER_EDU_GROUP, ref='HS or GED');
 %Table2Crude(LD_PAY, ref='1');
 %Table2Crude(KOTELCHUCK, ref='2');
 %Table2Crude(prenat_site, ref='1');
@@ -3223,8 +3301,8 @@ run;
 %Table2Crude_Strat(EVER_INCARCERATED, ref='0');
 %Table2Crude_Strat(MATINF_HEPC, ref='0');
 %Table2Crude_Strat(AGE_BIRTH_GROUP, ref='26-35');
-%Table2Crude_Strat(LANGUAGE_SPOKEN, ref='1');
-%Table2Crude_Strat(MOTHER_EDU, ref='2');
+%Table2Crude_Strat(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Crude_Strat(MOTHER_EDU_GROUP, ref='HS or GED');
 %Table2Crude_Strat(LD_PAY, ref='1');
 %Table2Crude_Strat(KOTELCHUCK, ref='3');
 %Table2Crude_Strat(prenat_site, ref='1');
@@ -3259,7 +3337,7 @@ proc logistic data=TRT_TESTING15 desc;
 %ChiSquareTest(MOMS_FINAL_RE, FOREIGN_BORN);
 %ChiSquareTest(MOMS_FINAL_RE, COUNTY);
 %ChiSquareTest(MOMS_FINAL_RE, AGE_BIRTH_GROUP);
-%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN);
+%ChiSquareTest(MOMS_FINAL_RE, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(MOMS_FINAL_RE, LD_PAY);
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_DURING_PREG);
 %ChiSquareTest(MOMS_FINAL_RE, MOUD_AT_DELIVERY);
@@ -3267,29 +3345,29 @@ proc logistic data=TRT_TESTING15 desc;
 
 %ChiSquareTest(FOREIGN_BORN, COUNTY);
 %ChiSquareTest(FOREIGN_BORN, AGE_BIRTH_GROUP);
-%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN);
+%ChiSquareTest(FOREIGN_BORN, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(FOREIGN_BORN, LD_PAY);
 %ChiSquareTest(FOREIGN_BORN, MOUD_DURING_PREG);
 %ChiSquareTest(FOREIGN_BORN, MOUD_AT_DELIVERY);
 %ChiSquareTest(FOREIGN_BORN, MATINF_HEPC);
 
 %ChiSquareTest(COUNTY, AGE_BIRTH_GROUP);
-%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN);
+%ChiSquareTest(COUNTY, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(COUNTY, LD_PAY);
 %ChiSquareTest(COUNTY, MOUD_DURING_PREG);
 %ChiSquareTest(COUNTY, MOUD_AT_DELIVERY);
 %ChiSquareTest(COUNTY, MATINF_HEPC);
 
-%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN);
+%ChiSquareTest(AGE_BIRTH_GROUP, LANGUAGE_SPOKEN_GROUP);
 %ChiSquareTest(AGE_BIRTH_GROUP, LD_PAY);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_DURING_PREG);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_AT_DELIVERY);
 %ChiSquareTest(AGE_BIRTH_GROUP, MATINF_HEPC);
 
-%ChiSquareTest(LANGUAGE_SPOKEN, LD_PAY);
-%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_DURING_PREG);
-%ChiSquareTest(LANGUAGE_SPOKEN, MOUD_AT_DELIVERY);
-%ChiSquareTest(LANGUAGE_SPOKEN, MATINF_HEPC);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, LD_PAY);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MOUD_DURING_PREG);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MOUD_AT_DELIVERY);
+%ChiSquareTest(LANGUAGE_SPOKEN_GROUP, MATINF_HEPC);
 
 %ChiSquareTest(LD_PAY, MOUD_DURING_PREG);
 %ChiSquareTest(LD_PAY, MOUD_AT_DELIVERY);
@@ -3320,8 +3398,13 @@ proc logistic data=TRT_TESTING15 desc;
 /* Step 2: Based on chi-square test results, decide which variables to keep for multivariable analysis */
 
 /* Step 3: Run multivariable analysis with selected variables */
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by DISCH_WITH_MOM;
+run;
+
 proc glimmix data=FINAL_INFANT_COHORT_COV;
-    class MOMS_FINAL_RE (ref='1') FOREIGN_BORN LD_PAY (ref='1') FACILITY_ID_BIRTH (ref='2307') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY / solution ddfm=kr;
+    by DISCH_WITH_MOM;
+    class MOMS_FINAL_RE (ref='1') FOREIGN_BORN LD_PAY (ref='1') MOUD_DURING_PREG (ref='0') MATINF_HEPC (ref='0') FACILITY_ID_BIRTH (ref='2124') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC / solution ddfm=kr;
     random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
 run;
