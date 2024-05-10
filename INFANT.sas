@@ -3038,6 +3038,11 @@ data UNIQUE_MOMS(keep= MOM_ID MOMS_FINAL_RE FOREIGN_BORN OUD_CAPTURE APPROPRIATE
     if first.MOM_ID;
 run;
 
+data TRT_TESTING15;
+    set TRT_TESTING15;
+    if DISEASE_STATUS_HCV = 1 and YOB >= 2018;
+run;
+
 %macro Table1Freqs_UniqueMoms(var, format);
     title "Table 1, Unstratified, Unique Moms";
     proc freq data=UNIQUE_MOMS;
@@ -3150,53 +3155,6 @@ run;
 %Table1Stratafreqs (mental_health_diag, flagf.);
 %Table1Stratafreqs (OTHER_SUBSTANCE_USE, flagf.);
 %Table1Stratafreqs (iji_diag, flagf.);
-
-%macro Table2StrataFreqs(var, format);
-    title "Table 1, Stratified by DISCH_WITH_MOM";
-    
-    /* Sort the dataset by DISCH_WITH_MOM */
-    proc sort data=FINAL_INFANT_COHORT_COV;
-        by DISCH_WITH_MOM;
-    run;
-
-    /* Run PROC FREQ with BY statement */
-    proc freq data=FINAL_INFANT_COHORT_COV;
-        by DISCH_WITH_MOM;
-        tables &var / missing norow nopercent nocol;
-        format &var &format.;
-    run;
-%mend;
-
-%Table2StrataFreqs (FINAL_SEX, sexf.);
-%Table2StrataFreqs (GESTATIONAL_AGE_CAT);
-%Table2StrataFreqs (FINAL_RE, raceef.);
-%Table2StrataFreqs (MOMS_FINAL_RE, raceef.);
-%Table2StrataFreqs (FACILITY_ID_BIRTH);
-%Table2StrataFreqs (county);
-%Table2StrataFreqs (well_child, flagf.);
-%Table2StrataFreqs (NAS_BC_TOTAL, flagf.);
-%Table2StrataFreqs (INF_VAC_HBIG, flagf.);
-%Table2StrataFreqs (HIV_DIAGNOSIS, flagf.);
-%Table2StrataFreqs (MOUD_DURING_PREG, flagf.);
-%Table2StrataFreqs (MOUD_AT_DELIVERY, flagf.);
-%Table2StrataFreqs (OUD_CAPTURE, flagf.);
-%Table2StrataFreqs (AGE_BIRTH_GROUP);
-%Table2StrataFreqs (EVER_INCARCERATED, flagf.);
-%Table2StrataFreqs (FOREIGN_BORN, fbornf.);
-%Table2StrataFreqs (HOMELESS_HISTORY, flagf.);
-%Table2StrataFreqs (MOMS_HOMELESS_HISTORY, flagf.);
-%Table2StrataFreqs (LANGUAGE_SPOKEN_GROUP);
-%Table2StrataFreqs (MOTHER_EDU_GROUP);
-%Table2StrataFreqs (LD_PAY, ld_pay_fmt.);
-%Table2StrataFreqs (KOTELCHUCK, kotel_fmt.);
-%Table2StrataFreqs (prenat_site, prenat_site_fmt.);
-%Table2StrataFreqs (MATINF_HEPC, flagf.);
-%Table2StrataFreqs (HCV_DIAG, flagf.);
-%Table2StrataFreqs (MATINF_HEPB, flagf.);
-%Table2StrataFreqs (EVER_IDU_HCV_MAT, flagf.);
-%Table2StrataFreqs (mental_health_diag, flagf.);
-%Table2StrataFreqs (OTHER_SUBSTANCE_USE, flagf.);
-%Table2StrataFreqs (iji_diag, flagf.);
 
 %macro Table1StrataFreqs0_15(var, format);
     title "Table 1, 0-15 Cohort, Stratified";
@@ -3395,16 +3353,146 @@ proc logistic data=TRT_TESTING15 desc;
 
 %ChiSquareTest0_15(LANGUAGE, FINAL_SEX);
 
+title 'Crosstabulation of Variables by FACILITY_ID_BIRTH';
+proc freq data=FINAL_INFANT_COHORT_COV;
+  tables APPROPRIATE_Testing*FACILITY_ID_BIRTH
+         MOMS_FINAL_RE*FACILITY_ID_BIRTH
+         FOREIGN_BORN*FACILITY_ID_BIRTH
+         LD_PAY*FACILITY_ID_BIRTH
+         MOUD_DURING_PREG*FACILITY_ID_BIRTH
+         MATINF_HEPC*FACILITY_ID_BIRTH
+         DISCH_WITH_MOM*FACILITY_ID_BIRTH;
+run;
+
+title;
+
 /* Step 2: Based on chi-square test results, decide which variables to keep for multivariable analysis */
 
 /* Step 3: Run multivariable analysis with selected variables */
+data FINAL_INFANT_COHORT_COV;
+    set FINAL_INFANT_COHORT_COV;
+    if DISCH_WITH_MOM ne 9 and not (FACILITY_ID_BIRTH in (0, 70, 80)) and FOREIGN_BORN ne 8 and LD_PAY ne 9;
+run;
+
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM / solution ddfm=kr;
+    random intercept / subject=MOM_ID;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
+    ods output ParameterEstimates=ParameterEstimates;
+run;
+
+/* Calculate odds ratios */
+data OddsRatios;
+    set ParameterEstimates;
+    by DISCH_WITH_MOM;
+    retain Intercept; /* Retain Intercept value within DISCH_WITH_MOM group */
+
+    if first.DISCH_WITH_MOM then Intercept = .; /* Initialize Intercept for each group */
+    
+    if Effect = 'Intercept' then do;
+        Intercept = Estimate;
+        LowerCI = .; /* No CI for Intercept */
+        UpperCI = .; /* No CI for Intercept */
+    end;
+        else do;
+        LowerCI = exp(Estimate - 1.96 * StdErr); /* Exponentiate and calculate lower bound of the 95% CI */
+        UpperCI = exp(Estimate + 1.96 * StdErr); /* Exponentiate and calculate upper bound of the 95% CI */
+        if Estimate ne 0 then do; /* Check if Estimate is not equal to 0 */
+        OddsRatio = exp(Estimate);
+    end;
+        else OddsRatio = .; /* Set OddsRatio to missing if Estimate is 0 */
+    /* Create a new dataset with odds ratios */
+    output;
+end;
+run;
+
+/* Print odds ratios with CIs */
+proc print data=OddsRatios;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM OddsRatio LowerCI UpperCI;
+    title 'Odds Ratios with 95% Confidence Intervals';
+run;
+
 proc sort data=FINAL_INFANT_COHORT_COV;
     by DISCH_WITH_MOM;
 run;
 
-proc glimmix data=FINAL_INFANT_COHORT_COV;
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='1') FOREIGN_BORN LD_PAY (ref='1') MOUD_DURING_PREG (ref='0') MATINF_HEPC (ref='0') FACILITY_ID_BIRTH (ref='2124') MOM_ID;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
     model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC / solution ddfm=kr;
     random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
+    ods output ParameterEstimates=ParameterEstimates;
+run;
+
+/* Calculate odds ratios */
+data OddsRatios;
+    set ParameterEstimates;
+    by DISCH_WITH_MOM;
+    retain Intercept; /* Retain Intercept value within DISCH_WITH_MOM group */
+
+    if first.DISCH_WITH_MOM then Intercept = .; /* Initialize Intercept for each group */
+    
+    if Effect = 'Intercept' then do;
+        Intercept = Estimate;
+        LowerCI = .; /* No CI for Intercept */
+        UpperCI = .; /* No CI for Intercept */
+    end;
+        else do;
+        LowerCI = exp(Estimate - 1.96 * StdErr); /* Exponentiate and calculate lower bound of the 95% CI */
+        UpperCI = exp(Estimate + 1.96 * StdErr); /* Exponentiate and calculate upper bound of the 95% CI */
+        if Estimate ne 0 then do; /* Check if Estimate is not equal to 0 */
+        OddsRatio = exp(Estimate);
+    end;
+        else OddsRatio = .; /* Set OddsRatio to missing if Estimate is 0 */
+    /* Create a new dataset with odds ratios */
+    output;
+end;
+run;
+
+/* Print odds ratios with CIs */
+proc print data=OddsRatios;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM OddsRatio LowerCI UpperCI;
+    title 'Odds Ratios with 95% Confidence Intervals';
+run;
+
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    by DISCH_WITH_MOM;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH / solution ddfm=kr;
+    random intercept / subject=MOM_ID;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
+    ods output ParameterEstimates=ParameterEstimates;
+run;
+
+/* Calculate odds ratios */
+data OddsRatios;
+    set ParameterEstimates;
+    by DISCH_WITH_MOM;
+    retain Intercept; /* Retain Intercept value within DISCH_WITH_MOM group */
+
+    if first.DISCH_WITH_MOM then Intercept = .; /* Initialize Intercept for each group */
+    
+    if Effect = 'Intercept' then do;
+        Intercept = Estimate;
+        LowerCI = .; /* No CI for Intercept */
+        UpperCI = .; /* No CI for Intercept */
+    end;
+        else do;
+        LowerCI = exp(Estimate - 1.96 * StdErr); /* Exponentiate and calculate lower bound of the 95% CI */
+        UpperCI = exp(Estimate + 1.96 * StdErr); /* Exponentiate and calculate upper bound of the 95% CI */
+        if Estimate ne 0 then do; /* Check if Estimate is not equal to 0 */
+        OddsRatio = exp(Estimate);
+    end;
+        else OddsRatio = .; /* Set OddsRatio to missing if Estimate is 0 */
+    /* Create a new dataset with odds ratios */
+    output;
+end;
+run;
+
+/* Print odds ratios with CIs */
+proc print data=OddsRatios;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM OddsRatio LowerCI UpperCI;
+    title 'Odds Ratios with 95% Confidence Intervals';
 run;
