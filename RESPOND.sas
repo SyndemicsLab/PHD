@@ -672,10 +672,10 @@ PROC SQL;
     GROUP BY age_grp_five, year, FINAL_SEX, FINAL_RE;
 
     CREATE TABLE oud_monthly_out AS 
-    SELECT DISTINCT year,
+    SELECT DISTINCT year, month
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_monthly
-    GROUP BY year;
+    GROUP BY year, month;
 
     CREATE TABLE stratif_oud_monthly_out AS
     SELECT DISTINCT age_grp_five, year, month, FINAL_SEX, FINAL_RE,
