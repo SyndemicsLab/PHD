@@ -953,7 +953,7 @@ DATA moud_demo;
     age_grp_twenty = put(age, age_grps_twenty.);
 RUN;
 
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five age_grp_ten age_grp_fifteen age_grp_twenty);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
