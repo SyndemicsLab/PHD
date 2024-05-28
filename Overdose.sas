@@ -53,7 +53,7 @@ PROC SQL;
 	SELECT overdose.OD_YEAR, overdose.OD_MONTH, overdose.FATAL_OD_DEATH AS fod, overdose.ID,
 		   demo.FINAL_RE, demo.FINAL_SEX, demo.YOB
 	FROM PHDSPINE.OVERDOSE
-	LEFT JOIN PHDSPINE.DEMO ON demo.ID = od.ID;
+	LEFT JOIN PHDSPINE.DEMO ON demo.ID = overdose.ID;
 QUIT;
 
 DATA OD;
