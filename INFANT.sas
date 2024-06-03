@@ -2748,32 +2748,54 @@ quit;
 
 %let well_child = ('99381', '99391', '99381', '99391', '99381', '99391', '99382', '99392');
 
+/* Step 1: Create ALL_WELL_CHILD_COHORT table */
 proc sql;
-create table WELL_CHILD_COHORT(where=(WELL_CHILD=1)) as
+create table ALL_WELL_CHILD_COHORT(where=(WELL_CHILD=1)) as
 select distinct FINAL_INFANT_COHORT.INFANT_ID,
-  case
+    case
        when apcd.MED_PROC_CODE in &WELL_CHILD
-           and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) >= 18*30 and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) <= 36*30 then 1
-           else 0
-       end as WELL_CHILD,
-    apcd.MED_PROV_CITY,
-    apcd.MED_PROV_ZIP
+           and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) >= 18*30 
+           and (apcd.MED_FROM_DATE - FINAL_INFANT_COHORT.DOB_INFANT_TBL) <= 36*30 then 1
+       else 0
+    end as WELL_CHILD
 from FINAL_INFANT_COHORT
 left join PHDAPCD.MOUD_MEDICAL as apcd
 on FINAL_INFANT_COHORT.INFANT_ID = apcd.ID;
 quit;
 
+/* Step 2: Create ALL_WELL_CHILD_COHORT table */
+proc sql;
+create table ALL_WELL_CHILD_COHORT as
+select distinct a.INFANT_ID,
+       b.MED_PROV_CITY,
+       b.MED_PROV_ZIP
+from ALL_WELL_CHILD_COHORT as a
+left join PHDAPCD.MOUD_MEDICAL as b
+on a.INFANT_ID = b.ID
+where b.MED_FROM_DATE is not missing
+    and (b.MED_FROM_DATE - (select DOB_INFANT_TBL from FINAL_INFANT_COHORT where INFANT_ID = a.INFANT_ID)) >= 18*30
+    and (b.MED_FROM_DATE - (select DOB_INFANT_TBL from FINAL_INFANT_COHORT where INFANT_ID = a.INFANT_ID)) <= 36*30
+order by a.INFANT_ID, b.MED_FROM_DATE; /* Sorting by INFANT_ID and MED_FROM_DATE */
+quit;
+
+/* Additional step to pull only the first instance */
+data DEDUP_WELL_CHILD_COHORT;
+set ALL_WELL_CHILD_COHORT;
+by INFANT_ID;
+if first.INFANT_ID;
+run;
+
 proc sql;
 create table FINAL_INFANT_COHORT_COV as 
     select FINAL_INFANT_COHORT_COV.*, 
            case 
-               when WELL_CHILD_COHORT.INFANT_ID is not null then 1 
+               when DEDUP_WELL_CHILD_COHORT.INFANT_ID is not null then 1 
                else 0 
            end as WELL_CHILD,
-           WELL_CHILD_COHORT.MED_PROV_CITY,
-           WELL_CHILD_COHORT.MED_PROV_ZIP
+           DEDUP_WELL_CHILD_COHORT.MED_PROV_CITY,
+           DEDUP_WELL_CHILD_COHORT.MED_PROV_ZIP
     from FINAL_INFANT_COHORT_COV
-    left join WELL_CHILD_COHORT on FINAL_INFANT_COHORT_COV.INFANT_ID = WELL_CHILD_COHORT.INFANT_ID;
+    left join DEDUP_WELL_CHILD_COHORT on FINAL_INFANT_COHORT_COV.INFANT_ID = DEDUP_WELL_CHILD_COHORT.INFANT_ID;
 quit;
 
 data FINAL_INFANT_COHORT_COV;
