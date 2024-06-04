@@ -73,28 +73,28 @@ RUN;
 
 PROC SQL;
 	CREATE TABLE overdose_five AS 
-	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod,
+	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod;
+	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
 	
 	CREATE TABLE overdose_ten AS 
-	SELECT age_grp_ten, FINAL_RE, FINAL_SEX, fod,
+	SELECT age_grp_ten, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY age_grp_ten, FINAL_RE, FINAL_SEX, fod;
+	GROUP BY age_grp_ten, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
 	
 	CREATE TABLE overdose_fifteen AS 
-	SELECT age_grp_fifteen, FINAL_RE, FINAL_SEX, fod,
+	SELECT age_grp_fifteen, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY age_grp_fifteen, FINAL_RE, FINAL_SEX, fod;
+	GROUP BY age_grp_fifteen, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
 	
 	CREATE TABLE overdose_twenty AS 
-	SELECT age_grp_twenty, FINAL_RE, FINAL_SEX, fod,
+	SELECT age_grp_twenty, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY age_grp_twenty, FINAL_RE, FINAL_SEX, fod;
+	GROUP BY age_grp_twenty, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
 QUIT;
 
 PROC EXPORT
