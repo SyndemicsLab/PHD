@@ -120,3 +120,68 @@ PROC EXPORT
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
+
+/* EDA Portion */
+PROC SQL;
+	CREATE TABLE overdose_five_unsupp AS 
+	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
+	COUNT(DISTINCT ID) AS N_ID
+	FROM OD
+	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
+
+	CREATE TABLE overdose_twenty_unsupp AS 
+	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
+	COUNT(DISTINCT ID) AS N_ID
+	FROM OD
+	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
+QUIT;
+
+PROC SORT DATA=overdose_five_unsupp OUT=overdose_five_unsupp;
+    BY FINAL_SEX FINAL_RE age_grp_five;
+RUN;
+
+PROC MEANS DATA=overdose_five_unsupp NOPRINT;
+    BY FINAL_SEX FINAL_RE age_grp_five;
+    VAR N_ID;
+    OUTPUT OUT=overdose_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
+RUN;
+
+PROC SORT DATA=overdose_twenty_unsupp OUT=overdose_twenty_unsupp;
+    BY FINAL_SEX FINAL_RE age_grp_twenty;
+RUN;
+
+PROC MEANS DATA=overdose_twenty_unsupp NOPRINT;
+    BY FINAL_SEX FINAL_RE age_grp_twenty;
+    VAR N_ID;
+    OUTPUT OUT=overdose_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
+RUN;
+
+DATA overdose_five_stats;
+	SET overdose_five_stats;
+	
+	IF Stdev_N_ID < 1 THEN DO;
+		Mean_N_ID = -1;
+		Stdev_N_ID = -1;
+	END;
+RUN;
+
+DATA overdose_twenty_stats;
+	SET overdose_twenty_stats;
+	
+	IF Stdev_N_ID < 1 THEN DO;
+		Mean_N_ID = -1;
+		Stdev_N_ID = -1;
+	END;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_five_stats
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseFive_Distro_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_twenty_stats
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_Distro_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
