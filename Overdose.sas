@@ -95,7 +95,20 @@ PROC SQL;
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
 	GROUP BY age_grp_twenty, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
+
+	CREATE TABLE overdose_out AS
+	SELECT fod, OD_YEAR AS year, OD_MONTH AS month,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR, OD_MONTH;
+
 QUIT;
+
+PROC EXPORT
+	DATA= overdose_out
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Overdose_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
 
 PROC EXPORT
 	DATA= overdose_five
@@ -153,7 +166,7 @@ RUN;
 PROC MEANS DATA=overdose_twenty_unsupp NOPRINT;
     BY FINAL_SEX FINAL_RE age_grp_twenty;
     VAR N_ID;
-    OUTPUT OUT=overdose_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
+    OUTPUT OUT=overdose_twenty_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
 RUN;
 
 DATA overdose_five_stats;
