@@ -102,6 +102,29 @@ PROC SQL;
 	FROM OD
 	GROUP BY fod, OD_YEAR, OD_MONTH;
 
+	CREATE TABLE overdose_race_monthly AS 
+	SELECT fod, OD_YEAR AS year, OD_MONTH AS month, FINAL_RE,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR, OD_MONTH, FINAL_RE;
+
+	CREATE TABLE overdose_race_yearly AS
+	SELECT fod, OD_YEAR AS year, FINAL_RE,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR, FINAL_RE;
+
+	CREATE TABLE overdose_sex_monthly AS 
+	SELECT fod, OD_YEAR AS year, OD_MONTH AS month, FINAL_SEX,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR, OD_MONTH, FINAL_SEX;
+
+	CREATE TABLE overdose_sex_yearly AS 
+	SELECT fod, OD_YEAR AS year, FINAL_SEX,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR, FINAL_SEX;
 QUIT;
 
 PROC EXPORT
@@ -131,6 +154,30 @@ RUN;
 PROC EXPORT
 	DATA= overdose_twenty
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_race_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseRace_Yearly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_race_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseRace_Monthly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_sex_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseSex_Monthly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_sex_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseSex_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
