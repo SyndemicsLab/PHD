@@ -1095,6 +1095,45 @@ PROC SQL;
     FROM moud_demo
     GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
 
+    CREATE TABLE moud_ends AS
+    SELECT end_month, end_year, 
+    TYPE_moud AS treatment,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY end_month, end_year, TYPE_MOUD;
+
+    CREATE TABLE moud_ends_five AS
+    SELECT end_month, end_year, 
+    TYPE_moud AS treatment,
+    age_grp_five,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY end_month, end_year, TYPE_MOUD, age_grp_five;
+
+    CREATE TABLE moud_ends_twenty AS
+    SELECT end_month, end_year, 
+    TYPE_moud AS treatment,
+    age_grp_twenty,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY end_month, end_year, TYPE_MOUD, age_grp_twenty;
+
+    CREATE TABLE moud_ends_sex AS
+    SELECT end_month, end_year, 
+    TYPE_moud AS treatment,
+    FINAL_SEX,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY end_month, end_year, TYPE_MOUD, FINAL_SEX;
+
+    CREATE TABLE moud_ends_race AS
+    SELECT end_month, end_year, 
+    TYPE_moud AS treatment,
+    FINAL_RE,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY end_month, end_year, TYPE_MOUD, FINAL_RE;
+
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
@@ -1124,7 +1163,6 @@ PROC SQL;
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
     GROUP BY month, year, treatment, FINAL_RE;
-
 
 QUIT;
 
@@ -1184,6 +1222,36 @@ RUN;
 
 PROC EXPORT
 	DATA= moud_starts_race
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Race_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= moud_ends
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= moud_ends_five
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Five_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= moud_ends_twenty
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Twenty_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= moud_ends_sex
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Sex_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= moud_ends_race
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Race_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
