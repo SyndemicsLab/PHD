@@ -2,7 +2,7 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 4/27/2023 			*/
-/* Updated: 4/29/2024   		*/
+/* Updated: 6/24/2024   		*/
 /*==============================*/
 /* 
 Overall, the logic behind the known capture is fairly simple: 
@@ -735,6 +735,12 @@ PROC EXPORT
 RUN;
 
 PROC EXPORT
+	DATA= oud_out_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Monthly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
 	DATA= oud_five_yearly
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Five_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
@@ -794,20 +800,57 @@ of interest (a given year.) This extends to all six of the
 databases we currently pull from.
 */
 PROC SQL;
-    CREATE TABLE stratif_oud_origin_yearly AS
+    CREATE TABLE oud_origin_five AS
     SELECT DISTINCT oud_cm AS Casemix,
                     IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
                     oud_bsas AS BSAS,
                     oud_pmp AS PMP,
                     oud_matris AS Matris,
                     oud_death AS Death,
-                    FINAL_RE, FINAL_SEX, year,
+                    year,
                     age_grp_five,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
-    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, FINAL_RE, FINAL_SEX, year, age_grp_five;
+    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year, age_grp_five;
 
-    CREATE TABLE oud_origin_yearly AS
+    CREATE TABLE oud_origin_twenty AS
+    SELECT DISTINCT oud_cm AS Casemix,
+                    IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
+                    oud_bsas AS BSAS,
+                    oud_pmp AS PMP,
+                    oud_matris AS Matris,
+                    oud_death AS Death,
+                    year,
+                    age_grp_twenty,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_yearly
+    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year, age_grp_twenty;
+
+    CREATE TABLE oud_origin_race AS
+    SELECT DISTINCT oud_cm AS Casemix,
+                    IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
+                    oud_bsas AS BSAS,
+                    oud_pmp AS PMP,
+                    oud_matris AS Matris,
+                    oud_death AS Death,
+                    FINAL_RE, year,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_yearly
+    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year, FINAL_RE;
+
+    CREATE TABLE oud_origin_sex AS
+    SELECT DISTINCT oud_cm AS Casemix,
+                    IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
+                    oud_bsas AS BSAS,
+                    oud_pmp AS PMP,
+                    oud_matris AS Matris,
+                    oud_death AS Death,
+                    FINAL_SEX, year,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_yearly
+    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, year, FINAL_SEX;
+
+    CREATE TABLE oud_origin AS
     SELECT DISTINCT oud_cm AS Casemix,
                     IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
                     oud_bsas AS BSAS,
@@ -820,14 +863,32 @@ PROC SQL;
 QUIT;
 
 PROC EXPORT
-	DATA= stratif_oud_origin_yearly
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_Stratif_&formatted_date..csv"
+	DATA= oud_origin
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= oud_origin_yearly
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_&formatted_date..csv"
+	DATA= oud_origin_five
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_Five_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= oud_origin_twenty
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_Twenty_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= oud_origin_race
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_Race_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= oud_origin_sex
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDOrigin_Sex_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
@@ -961,12 +1022,10 @@ DATA moud_demo;
 
     age = start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
-    age_grp_ten = put(age, age_grps_ten.);
-    age_grp_fifteen = put(age, age_grps_fifteen.);
     age_grp_twenty = put(age, age_grps_twenty.);
 RUN;
 
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five age_grp_ten age_grp_fifteen age_grp_twenty);
+DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five age_grp_twenty);
     SET moud_demo;
     treatment = TYPE_MOUD;
 
@@ -981,8 +1040,6 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
       month = month(new_date);
       postexp_age = year - YOB;
       age_grp_five = put(postexp_age, age_grps_five.);
-      age_grp_ten = put(postexp_age, age_grps_ten.);
-      age_grp_fifteen = put(postexp_age, age_grps_fifteen.);
       age_grp_twenty = put(postexp_age, age_grps_twenty.);
       OUTPUT;
     END;
@@ -1002,41 +1059,41 @@ PROC SQL;
     FROM moud_demo
     GROUP BY start_month, start_year, TYPE_MOUD;
 
-    CREATE TABLE stratif_moud_starts_five AS
+    CREATE TABLE moud_starts_five AS
     SELECT start_month AS month,
            start_year AS year,
            TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_five,
+           age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
+    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_five;
 
-    CREATE TABLE stratif_moud_starts_ten AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_ten,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_ten;
-
-    CREATE TABLE stratif_moud_starts_fifteen AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_fifteen,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_fifteen;
-
-    CREATE TABLE stratif_moud_starts_twenty AS
+    CREATE TABLE moud_starts_twenty AS
     SELECT start_month AS month,
            start_year AS year,
            TYPE_MOUD AS treatment,
            FINAL_RE, FINAL_SEX, age_grp_twenty,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_twenty;
+    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_twenty;
+
+    CREATE TABLE moud_starts_sex AS
+    SELECT start_month AS month,
+           start_year AS year,
+           TYPE_MOUD AS treatment,
+           FINAL_SEX,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_SEX;
+
+    CREATE TABLE moud_starts_race AS
+    SELECT start_month AS month,
+           start_year AS year,
+           TYPE_MOUD AS treatment,
+           FINAL_RE,
+           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM moud_demo
+    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
 
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
@@ -1044,29 +1101,31 @@ PROC SQL;
     FROM moud_expanded
     GROUP BY month, year, treatment;
 
-    CREATE TABLE stratif_moud_counts_five AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_five,
+    CREATE TABLE moud_counts_five AS
+    SELECT year, month, treatment, age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
+    GROUP BY month, year, treatment, age_grp_five;
 
-    CREATE TABLE stratif_moud_counts_ten AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_ten,
+    CREATE TABLE moud_counts_twenty AS
+    SELECT year, month, treatment, age_grp_twenty,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_ten;
+    GROUP BY month, year, treatment, age_grp_twenty;
 
-    CREATE TABLE stratif_moud_counts_fifteen AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_fifteen,
+    CREATE TABLE moud_counts_sex AS
+    SELECT year, month, treatment, FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_fifteen;
+    GROUP BY month, year, treatment, FINAL_SEX;
 
-    CREATE TABLE stratif_moud_counts_twenty AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_twenty,
+    CREATE TABLE moud_counts_race AS
+    SELECT year, month, treatment, FINAL_RE,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_twenty;
+    GROUP BY month, year, treatment, FINAL_RE;
+
+
 QUIT;
 
 PROC EXPORT
@@ -1076,26 +1135,26 @@ PROC EXPORT
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_counts_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_StratifFive_&formatted_date..csv"
+	DATA= moud_counts_five
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Five_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_counts_ten
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_StratifTen_&formatted_date..csv"
+	DATA= moud_counts_twenty
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Twenty_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_counts_fifteen
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_StratifFifteen_&formatted_date..csv"
+	DATA= moud_counts_sex
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Sex_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_counts_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_StratifTwenty_&formatted_date..csv"
+	DATA= moud_counts_race
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Race_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
@@ -1106,25 +1165,25 @@ PROC EXPORT
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_starts_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_StratifFive_&formatted_date..csv"
+	DATA= moud_starts_five
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Five_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_starts_ten
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_StratifTen_&formatted_date..csv"
+	DATA= moud_starts_twenty
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Twenty_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_starts_fifteen
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_StratifFifteen_&formatted_date..csv"
+	DATA= moud_starts_sex
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Sex_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_moud_starts_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_StratifTwenty_&formatted_date..csv"
+	DATA= moud_starts_race
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Race_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
