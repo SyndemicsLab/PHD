@@ -2,7 +2,7 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 4/27/2023 			*/
-/* Updated: 5/28/2024   		*/
+/* Updated: 6/24/2024   		*/
 /*==============================*/
 
 /*==============================*/
@@ -27,22 +27,6 @@ PROC FORMAT;
 		999 = '999';
 
 PROC FORMAT;
-    VALUE age_grps_ten
-        low-10 = '1' 11-20 = '2'
-        21-30 = '3' 31-40 = '4'
-        41-50 = '5' 51-60 = '6'
-        61-70 = '7' 71-80 = '8'
-        81-90 = '9' 91-998 = '10'
-        999 = '999';
-
-PROC FORMAT;
-    VALUE age_grps_fifteen
-        low-15 = '1' 16-30 = '2'
-        31-45 = '3' 46-60 = '4'
-        61-75 = '5' 76-90 = '6'
-        90-998 = '7' 999 = '999';
-
-PROC FORMAT;
     VALUE age_grps_twenty
     low-20 = '1' 21-40 = '2'
     41-60 = '3' 61-80 = '4'
@@ -61,8 +45,6 @@ DATA OD;
 	
 	age = OD_YEAR - YOB;
 	age_grp_five = put(age, age_grps_five.);
-	age_grp_ten = put(age, age_grps_ten.);
-	age_grp_fifteen = put(age, age_grps_fifteen.);
 	age_grp_twenty = put(age, age_grps_twenty.);
 	
 	IF FINAL_RE = 9 THEN DELETE;
@@ -72,35 +54,29 @@ DATA OD;
 RUN;
 
 PROC SQL;
-	CREATE TABLE overdose_five AS 
-	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
+	CREATE TABLE overdose_five_monthly AS 
+	SELECT age_grp_five, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
+	GROUP BY age_grp_five, fod, OD_YEAR, OD_MONTH;
 	
-	CREATE TABLE overdose_ten AS 
-	SELECT age_grp_ten, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
+	CREATE TABLE overdose_twenty_monthly AS 
+	SELECT age_grp_twenty, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY age_grp_ten, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
-	
-	CREATE TABLE overdose_fifteen AS 
-	SELECT age_grp_fifteen, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
-	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-	FROM OD
-	GROUP BY age_grp_fifteen, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
-	
-	CREATE TABLE overdose_twenty AS 
-	SELECT age_grp_twenty, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
-	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-	FROM OD
-	GROUP BY age_grp_twenty, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
+	GROUP BY age_grp_twenty, fod, OD_YEAR, OD_MONTH;
 
-	CREATE TABLE overdose_out AS
-	SELECT fod, OD_YEAR AS year, OD_MONTH AS month,
+	CREATE TABLE overdose_five_yearly AS 
+	SELECT age_grp_five, fod, OD_YEAR AS year,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
-	GROUP BY fod, OD_YEAR, OD_MONTH;
+	GROUP BY age_grp_five, fod, OD_YEAR;
+	
+	CREATE TABLE overdose_twenty_yearly AS 
+	SELECT age_grp_twenty, fod, OD_YEAR AS year,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY age_grp_twenty, fod, OD_YEAR;
 
 	CREATE TABLE overdose_race_monthly AS 
 	SELECT fod, OD_YEAR AS year, OD_MONTH AS month, FINAL_RE,
@@ -128,32 +104,26 @@ PROC SQL;
 QUIT;
 
 PROC EXPORT
-	DATA= overdose_out
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Overdose_&formatted_date..csv"
+	DATA= overdose_five_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseFive_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= overdose_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseFive_&formatted_date..csv"
+	DATA= overdose_twenty_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= overdose_ten
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTen_&formatted_date..csv"
+	DATA= overdose_five_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseFive_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= overdose_fifteen
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseFifteen_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= overdose_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_&formatted_date..csv"
+	DATA= overdose_twenty_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
@@ -178,70 +148,5 @@ RUN;
 PROC EXPORT
 	DATA= overdose_sex_yearly
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseSex_Yearly_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-/* EDA Portion */
-PROC SQL;
-	CREATE TABLE overdose_five_unsupp AS 
-	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
-	COUNT(DISTINCT ID) AS N_ID
-	FROM OD
-	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
-
-	CREATE TABLE overdose_twenty_unsupp AS 
-	SELECT age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR AS year, OD_MONTH AS month,
-	COUNT(DISTINCT ID) AS N_ID
-	FROM OD
-	GROUP BY age_grp_five, FINAL_RE, FINAL_SEX, fod, OD_YEAR, OD_MONTH;
-QUIT;
-
-PROC SORT DATA=overdose_five_unsupp OUT=overdose_five_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_five;
-RUN;
-
-PROC MEANS DATA=overdose_five_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_five;
-    VAR N_ID;
-    OUTPUT OUT=overdose_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=overdose_twenty_unsupp OUT=overdose_twenty_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-RUN;
-
-PROC MEANS DATA=overdose_twenty_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-    VAR N_ID;
-    OUTPUT OUT=overdose_twenty_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-DATA overdose_five_stats;
-	SET overdose_five_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA overdose_twenty_stats;
-	SET overdose_twenty_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-PROC EXPORT
-	DATA= overdose_five_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseFive_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= overdose_twenty_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OverdoseTwenty_Distro_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
