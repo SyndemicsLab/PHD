@@ -40,22 +40,6 @@ PROC FORMAT;
 		999 = '999';
 
 PROC FORMAT;
-    VALUE age_grps_ten
-        low-10 = '1' 11-20 = '2'
-        21-30 = '3' 31-40 = '4'
-        41-50 = '5' 51-60 = '6'
-        61-70 = '7' 71-80 = '8'
-        81-90 = '9' 91-998 = '10'
-        999 = '999';
-
-PROC FORMAT;
-    VALUE age_grps_fifteen
-        low-15 = '1' 16-30 = '2'
-        31-45 = '3' 46-60 = '4'
-        61-75 = '5' 76-90 = '6'
-        90-998 = '7' 999 = '999';
-
-PROC FORMAT;
     VALUE age_grps_twenty
     low-20 = '1' 21-40 = '2'
     41-60 = '3' 61-80 = '4'
@@ -657,8 +641,6 @@ DATA oud_monthly;
 
 	age = year - YOB;
     age_grp_five = put(age, age_grps_five.);
-    age_grp_ten = put(age, age_grps_ten.);
-    age_grp_fifteen = put(age, age_grps_fifteen.);
     age_grp_twenty = put(age, age_grps_twenty.);
 RUN;
 
@@ -681,94 +663,122 @@ DATA oud_yearly;
 
     age = year - YOB;
     age_grp_five = put(age, age_grps_five.);
-    age_grp_ten = put(age, age_grps_ten.);
-    age_grp_fifteen = put(age, age_grps_fifteen.);
     age_grp_twenty = put(age, age_grps_twenty.);
 RUN;
 
 PROC SQL;
-    CREATE TABLE oud_out AS 
+    CREATE TABLE oud_out_yearly AS 
     SELECT DISTINCT year,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_yearly
     GROUP BY year;
 
-    CREATE TABLE stratif_oud_out AS
-    SELECT DISTINCT age_grp_five, year, FINAL_SEX, FINAL_RE,
-    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM oud_yearly
-    GROUP BY age_grp_five, year, FINAL_SEX, FINAL_RE;
-
-    CREATE TABLE oud_monthly_out AS 
+    CREATE TABLE oud_out_monthly AS 
     SELECT DISTINCT year, month,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_monthly
     GROUP BY year, month;
 
-    CREATE TABLE stratif_oud_monthly_out_five AS
-    SELECT DISTINCT age_grp_five, year, month, FINAL_SEX, FINAL_RE,
+    CREATE TABLE oud_five_yearly AS
+    SELECT DISTINCT age_grp_five, year,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM oud_monthly
-    GROUP BY age_grp_five, year, month, FINAL_SEX, FINAL_RE;
+    FROM oud_yearly
+    GROUP BY age_grp_five, year, FINAL_SEX, FINAL_RE;
 
-    CREATE TABLE stratif_oud_monthly_out_ten AS
-    SELECT DISTINCT age_grp_ten, year, month, FINAL_SEX, FINAL_RE,
+    CREATE TABLE oud_twenty_yearly AS
+    SELECT DISTINCT age_grp_twenty, year,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM oud_monthly
-    GROUP BY age_grp_ten, year, month, FINAL_SEX, FINAL_RE;
+    FROM oud_yearly
+    GROUP BY age_grp_twenty, year;
 
-    CREATE TABLE stratif_oud_monthly_out_fifteen AS
-    SELECT DISTINCT age_grp_fifteen, year, month, FINAL_SEX, FINAL_RE,
+    CREATE TABLE oud_five_monthly AS
+    SELECT DISTINCT age_grp_five, year, month,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_monthly
-    GROUP BY age_grp_fifteen, year, month, FINAL_SEX, FINAL_RE;
+    GROUP BY age_grp_five, year, month;
 
-    CREATE TABLE stratif_oud_monthly_out_twenty AS
-    SELECT DISTINCT age_grp_twenty, year, month, FINAL_SEX, FINAL_RE,
+    CREATE TABLE oud_twenty_monthly AS
+    SELECT DISTINCT age_grp_twenty, year, month,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM oud_monthly
-    GROUP BY age_grp_twenty, year, month, FINAL_SEX, FINAL_RE;
+    GROUP BY age_grp_twenty, year, month;
+
+    CREATE TABLE oud_sex_yearly AS
+    SELECT DISTINCT year, FINAL_SEX,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_yearly
+    GROUP BY year, FINAL_SEX;
+
+    CREATE TABLE oud_sex_monthly AS
+    SELECT DISTINCT year, month, FINAL_SEX,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_monthly
+    GROUP BY year, month, FINAL_SEX;
+
+    CREATE TABLE oud_race_yearly AS
+    SELECT DISTINCT year, FINAL_RE,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_yearly
+    GROUP BY year, FINAL_RE;
+
+    CREATE TABLE oud_race_monthly AS
+    SELECT DISTINCT year, month, FINAL_RE,
+    IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+    FROM oud_monthly
+    GROUP BY year, month, FINAL_RE;
 QUIT;
 
 PROC EXPORT
-	DATA= oud_out
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_&formatted_date..csv"
+	DATA= oud_out_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_oud_out
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Stratif_&formatted_date..csv"
+	DATA= oud_five_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Five_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= oud_monthly_out
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCountMonthly_&formatted_date..csv"
+	DATA= oud_twenty_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Twenty_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_oud_monthly_out_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCountMonthly_StratifFive_&formatted_date..csv"
+	DATA= oud_five_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Five_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_oud_monthly_out_ten
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCountMonthly_StratifTen_&formatted_date..csv"
+	DATA= oud_twenty_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Twenty_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_oud_monthly_out_fifteen
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCountMonthly_StratifFifteen_&formatted_date..csv"
+	DATA= oud_sex_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Sex_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
-	DATA= stratif_oud_monthly_out_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCountMonthly_StratifTwenty_&formatted_date..csv"
+	DATA= oud_sex_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Sex_Yearly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= oud_race_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Race_Monthly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= oud_race_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCount_Race_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
@@ -1116,277 +1126,5 @@ RUN;
 PROC EXPORT
 	DATA= stratif_moud_starts_twenty
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_StratifTwenty_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-/* EDA Means/Stdev of suppressed cells */
-
-PROC SQL;
-    CREATE TABLE oud_counts_five_unsupp AS
-    SELECT DISTINCT age_grp_five, year, month, FINAL_SEX, FINAL_RE,
-    COUNT(DISTINCT ID) AS N_ID
-    FROM oud_monthly
-    GROUP BY age_grp_five, year, month, FINAL_SEX, FINAL_RE;
-
-    CREATE TABLE oud_counts_twenty_unsupp AS
-    SELECT DISTINCT age_grp_twenty, year, month, FINAL_SEX, FINAL_RE,
-    COUNT(DISTINCT ID) AS N_ID
-    FROM oud_monthly
-    GROUP BY age_grp_twenty, year, month, FINAL_SEX, FINAL_RE;
-    
-    CREATE TABLE moud_starts_five_unsupp AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_five,
-           COUNT(DISTINCT ID) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_five;
-
-    CREATE TABLE moud_starts_twenty_unsupp AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_twenty,
-           COUNT(DISTINCT ID) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE, FINAL_SEX, age_grp_twenty;
-
-    CREATE TABLE moud_counts_five_unsupp AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_five,
-           COUNT(DISTINCT ID) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_five;
-
-    CREATE TABLE moud_counts_twenty_unsupp AS
-    SELECT year, month, treatment, FINAL_RE, FINAL_SEX, age_grp_twenty,
-           COUNT(DISTINCT ID) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE, FINAL_SEX, age_grp_twenty;
-    
-    CREATE TABLE origin_five_unsupp AS
-    SELECT DISTINCT oud_cm AS Casemix,
-                    IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
-                    oud_bsas AS BSAS,
-                    oud_pmp AS PMP,
-                    oud_matris AS Matris,
-                    oud_death AS Death,
-                    FINAL_RE, FINAL_SEX, year,
-                    age_grp_five,
-    COUNT(DISTINCT ID) AS N_ID
-    FROM oud_yearly
-    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, FINAL_RE, FINAL_SEX, year, age_grp_five;
-    
-    CREATE TABLE origin_twenty_unsupp AS
-    SELECT DISTINCT oud_cm AS Casemix,
-                    IFN(sum(oud_apcd, oud_pharm)>0, 1, 0) AS APCD,
-                    oud_bsas AS BSAS,
-                    oud_pmp AS PMP,
-                    oud_matris AS Matris,
-                    oud_death AS Death,
-                    FINAL_RE, FINAL_SEX, year,
-                    age_grp_twenty,
-    COUNT(DISTINCT ID) AS N_ID
-    FROM oud_yearly
-    GROUP BY Casemix, APCD, BSAS, PMP, Matris, Death, FINAL_RE, FINAL_SEX, year, age_grp_twenty;
-QUIT;
-
-PROC SORT DATA=oud_counts_five_unsupp OUT=oud_counts_five_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_five;
-RUN;
-
-PROC MEANS DATA=oud_counts_five_unsupp NOPRINT;
-    by FINAL_SEX FINAL_RE age_grp_five;
-    VAR N_ID;
-    OUTPUT OUT=oud_counts_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=oud_counts_twenty_unsupp OUT=oud_counts_twenty_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-RUN;
-
-PROC MEANS DATA=oud_counts_twenty_unsupp NOPRINT;
-    by FINAL_SEX FINAL_RE age_grp_twenty;
-    VAR N_ID;
-    OUTPUT OUT=oud_counts_twenty_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=moud_starts_five_unsupp OUT=moud_starts_five_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_five;
-RUN;
-
-PROC MEANS DATA=moud_starts_five_unsupp NOPRINT;
-    by FINAL_SEX FINAL_RE age_grp_five;
-    VAR N_ID;
-    OUTPUT OUT=moud_starts_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=moud_starts_twenty_unsupp OUT=moud_starts_twenty_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-RUN;
-
-PROC MEANS DATA=moud_starts_twenty_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-    VAR N_ID;
-    OUTPUT OUT=moud_starts_twenty_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=moud_counts_five_unsupp OUT=moud_counts_five_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_five;
-RUN;
-
-PROC MEANS DATA=moud_counts_five_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_five;
-    VAR N_ID;
-    OUTPUT OUT=moud_counts_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=moud_counts_twenty_unsupp OUT=moud_counts_twenty_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-RUN;
-
-PROC MEANS DATA=moud_counts_twenty_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_twenty;
-    VAR N_ID;
-    OUTPUT OUT=moud_counts_twenty_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=origin_five_unsupp OUT=origin_five_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_five Casemix APCD BSAS PMP Matris Death;
-RUN;
-
-PROC MEANS DATA=origin_five_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_five Casemix APCD BSAS PMP Matris Death;
-    VAR N_ID;
-    OUTPUT OUT=origin_five_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-PROC SORT DATA=origin_twenty_unsupp OUT=origin_twenty_unsupp;
-    BY FINAL_SEX FINAL_RE age_grp_twenty Casemix APCD BSAS PMP Matris Death;
-RUN;
-
-PROC MEANS DATA=origin_twenty_unsupp NOPRINT;
-    BY FINAL_SEX FINAL_RE age_grp_twenty Casemix APCD BSAS PMP Matris Death;
-    VAR N_ID;
-    OUTPUT OUT=origin_twenty_stats(DROP=_TYPE_ _FREQ_) MEAN=Mean_N_ID STDDEV=Stdev_N_ID;
-RUN;
-
-DATA oud_counts_five_stats;
-	SET oud_counts_five_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA oud_counts_twenty_stats;
-	SET oud_counts_twenty_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA moud_counts_five_stats;
-	SET moud_counts_five_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA moud_counts_twenty_stats;
-	SET moud_counts_twenty_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA moud_starts_five_stats;
-	SET moud_starts_five_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA moud_starts_twenty_stats;
-	SET moud_starts_twenty_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA origin_five_stats;
-	SET origin_five_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-DATA origin_twenty_stats;
-	SET origin_twenty_stats;
-	
-	IF Stdev_N_ID < 1 THEN DO;
-		Mean_N_ID = -1;
-		Stdev_N_ID = -1;
-	END;
-RUN;
-
-PROC EXPORT
-	DATA= oud_counts_five_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCounts_Five_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= oud_counts_twenty_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/OUDCounts_Twenty_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= moud_counts_five_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Five_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= moud_counts_twenty_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Twenty_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= moud_starts_five_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Five_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= moud_starts_twenty_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDStarts_Twenty_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= origin_five_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Origin_Five_Distro_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= origin_twenty_stats
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Origin__Distro_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
