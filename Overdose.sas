@@ -54,6 +54,18 @@ DATA OD;
 RUN;
 
 PROC SQL;
+	CREATE TABLE overdose_monthly AS 
+	SELECT age_grp_five, fod, OD_YEAR AS year, OD_MONTH AS month,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR, OD_MONTH;
+
+	CREATE TABLE overdose_yearly AS 
+	SELECT fod, OD_YEAR AS year,
+	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
+	FROM OD
+	GROUP BY fod, OD_YEAR;
+
 	CREATE TABLE overdose_five_monthly AS 
 	SELECT age_grp_five, fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
@@ -102,6 +114,18 @@ PROC SQL;
 	FROM OD
 	GROUP BY fod, OD_YEAR, FINAL_SEX;
 QUIT;
+
+PROC EXPORT
+	DATA= overdose_monthly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Overdose_Monthly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= overdose_yearly
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Overdose_Yearly_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
 
 PROC EXPORT
 	DATA= overdose_five_monthly
