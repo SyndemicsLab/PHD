@@ -2,7 +2,7 @@
 /* Project: RESPOND    			                */
 /* Author: Ryan O'Dea  			                */ 
 /* Created: 12/26/2022 		                	*/
-/* Updated: 2/8/2023   			                */
+/* Updated: 4/15/2024  			                */
 /*==============================================*/
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
@@ -82,11 +82,17 @@ PROC SQL;
     FROM out
     GROUP BY od_death, year, age_grp_five, FINAL_RE, FINAL_SEX;
 
-	CREATE TABLE death_monthly AS
+	CREATE TABLE death_monthly_strat AS
 	SELECT age_grp, FINAL_RE, FINAL_SEX, year, month, od_death,
 	IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
 	FROM out
 	GROUP BY od_death, year, month, age_grp, FINAL_RE, FINAL_SEX;
+
+	CREATE TABLE death_monthly AS
+	SELECT year, month, od_death,
+	IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM out
+	GROUP BY od_death, year, month;
 QUIT;
 
 PROC EXPORT DATA = death_ten
@@ -98,6 +104,10 @@ PROC EXPORT DATA = death_five
 	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Five_&formatted_date..csv"
 	DBMS = csv REPLACE;
 RUN;
+
+PROC EXPORT DATA = death_monthly_strat
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCountMonthly_Stratified_&formatted_date..csv"
+	DBMS = csv REPLACE;
 
 PROC EXPORT DATA = death_monthly
 	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCountMonthly_&formatted_date..csv"
