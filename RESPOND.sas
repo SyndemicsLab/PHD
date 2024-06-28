@@ -1071,8 +1071,8 @@ PROC SQL;
     CREATE TABLE moud_starts_twenty AS
     SELECT start_month AS month,
            start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_RE, FINAL_SEX, age_grp_twenty,
+           TYPE_MOUD AS treatment
+           , age_grp_twenty,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
     GROUP BY start_month, start_year, TYPE_MOUD, age_grp_twenty;
