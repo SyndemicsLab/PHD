@@ -3031,7 +3031,7 @@ proc sort data=FINAL_INFANT_COHORT_COV;
     by MATINF_HEPC ;
 run;
 
-title "HCV Diagnosis by ICD Code/Birth Certificate by MOM_DISEASE_STATUS_HCV";
+title "HCV Diagnosis by ICD Code/Birth Certificate by MATINF_HEPC";
 proc freq data=FINAL_INFANT_COHORT_COV;
     by MATINF_HEPC ;
 tables HCV_DIAG / missing norow nocol nopercent;
@@ -3260,7 +3260,7 @@ run;
 
 data FINAL_INFANT_COHORT_COV;
     set FINAL_INFANT_COHORT_COV;
-    if DISCH_WITH_MOM ne 9 and not (FACILITY_ID_BIRTH in (0, 70, 80)) and FOREIGN_BORN ne 8 and LD_PAY ne 9;
+    if DISCH_WITH_MOM ne 9 and not (FACILITY_ID_BIRTH in (0, 70, 80)) and FOREIGN_BORN ne 8;
 run;
 
 %Table2Crude(FINAL_SEX, ref='1');
@@ -3291,8 +3291,10 @@ run;
 %Table2Crude(LANGUAGE_SPOKEN_GROUP, ref='English');
 %Table2Crude(MOTHER_EDU_GROUP, ref='HS or GED');
 %Table2Crude(LD_PAY, ref='1');
-%Table2Crude(KOTELCHUCK, ref='2');
+%Table2Crude(KOTELCHUCK, ref='3');
 %Table2Crude(prenat_site, ref='1');
+%Table2Crude(DISCH_WITH_MOM, ref='0');
+
 
 %macro Table2Crude_Strat(var, ref= );
     title "Table 2, Crude, Stratified";
@@ -3333,6 +3335,7 @@ run;
 %Table2Crude_Strat(EVER_INCARCERATED, ref='0');
 %Table2Crude_Strat(MATINF_HEPC, ref='0');
 %Table2Crude_Strat(MOM_DISEASE_STATUS_HCV, ref='1');
+%Table2Crude_Strat(HCV_DIAG, ref='0');
 %Table2Crude_Strat(AGE_BIRTH_GROUP, ref='26-35');
 %Table2Crude_Strat(LANGUAGE_SPOKEN_GROUP, ref='English');
 %Table2Crude_Strat(MOTHER_EDU_GROUP, ref='HS or GED');
@@ -3624,16 +3627,16 @@ proc print data=OddsRatios;
 run;
 
 /* ========================================================== */
-/*      REPLACE MATINF_HEPC WITH MOM_DISEASE_STATUS_HCV       */
+/*      REPLACE MATINF_HEPC WITH HCV_DIAG                     */
 /* ========================================================== */
 
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV FACILITY_ID_BIRTH DISCH_WITH_MOM w/ cluster SE by MOM_ID';
+title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM w/ cluster SE by MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MOM_DISEASE_STATUS_HCV (ref='Confirmed') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV FACILITY_ID_BIRTH DISCH_WITH_MOM / solution ddfm=kr;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM / solution ddfm=kr;
     random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MOM_DISEASE_STATUS_HCV momhcvfmt. DISCH_WITH_MOM flagf.;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
 ods select all;
@@ -3647,16 +3650,16 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
 run;
 
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV MED_PROV_COUNTY DISCH_WITH_MOM w/ cluster SE by MOM_ID';
+title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM w/ cluster SE by MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MOM_DISEASE_STATUS_HCV (ref='Confirmed') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV MED_PROV_COUNTY DISCH_WITH_MOM / solution ddfm=kr;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM / solution ddfm=kr;
     random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MOM_DISEASE_STATUS_HCV momhcvfmt. DISCH_WITH_MOM flagf.;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
 ods select all;
@@ -3670,21 +3673,21 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
 run;
 
 proc sort data=FINAL_INFANT_COHORT_COV;
     by DISCH_WITH_MOM;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV w/ cluster SE by FACILITY_ID_BIRTH and MOM_ID';
+title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by FACILITY_ID_BIRTH and MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MOM_DISEASE_STATUS_HCV (ref='Confirmed') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV / solution ddfm=kr;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG / solution ddfm=kr;
     random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MOM_DISEASE_STATUS_HCV momhcvfmt. DISCH_WITH_MOM flagf.;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
 ods select all;
@@ -3698,17 +3701,17 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV w/ cluster SE by MED_PROV_COUNTY and MOM_ID';
+title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by MED_PROV_COUNTY and MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MOM_DISEASE_STATUS_HCV (ref='Confirmed') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV / solution ddfm=kr;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG / solution ddfm=kr;
     random intercept / subject=MED_PROV_COUNTY(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MOM_DISEASE_STATUS_HCV momhcvfmt. DISCH_WITH_MOM flagf.;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
 ods select all;
@@ -3722,17 +3725,17 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV FACILITY_ID_BIRTH w/ cluster SE by MOM_ID';
+title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH w/ cluster SE by MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MOM_DISEASE_STATUS_HCV (ref='Confirmed') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV FACILITY_ID_BIRTH / solution ddfm=kr;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH / solution ddfm=kr;
     random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MOM_DISEASE_STATUS_HCV momhcvfmt. DISCH_WITH_MOM flagf.;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
 ods select all;
@@ -3746,17 +3749,17 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV MED_PROV_COUNTY w/ cluster SE by MOM_ID';
+title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY w/ cluster SE by MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MOM_DISEASE_STATUS_HCV (ref='Confirmed') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV MED_PROV_COUNTY / solution ddfm=kr;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY / solution ddfm=kr;
     random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MOM_DISEASE_STATUS_HCV momhcvfmt. DISCH_WITH_MOM flagf.;
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
 ods select all;
@@ -3770,5 +3773,5 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MOM_DISEASE_STATUS_HCV MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL;
 run;
