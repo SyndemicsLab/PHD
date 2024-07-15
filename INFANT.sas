@@ -3102,7 +3102,7 @@ run;
 
 data TRT_TESTING15;
     set TRT_TESTING15;
-    if DISEASE_STATUS_HCV = 1 and YOB >= 2018;
+    if DISEASE_STATUS_HCV = 1 and YOB <= 2018;
 run;
 
 %macro Table1Freqs_UniqueMoms(var, format);
