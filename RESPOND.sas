@@ -19,7 +19,7 @@ stratified by Year (or Year and Month), Race, Sex, and Age
 /*==============================*/
 /*  	GLOBAL VARIABLES   		*/
 /*==============================*/
-%LET year = (2015:2021);
+%LET year = (2015:2022);
 %LET MOUD_leniency = 7;
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
