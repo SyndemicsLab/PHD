@@ -1,9 +1,26 @@
-/*==============================*/
-/* Project: OUD Cascade 	    */
-/* Author: Ryan O'Dea  		    */ 
-/* Created: 4/27/2023 		    */
-/* Updated: 04/30/2024 by SJM	*/
-/*==============================*/
+/*==============================================*/
+/* Project: Infant Cascade      				*/
+/* Author:  BB / SM 		                    */ 
+/* Created: 12/16/2022 							*/
+/* Updated: 10/02/2024 by SM           			*/
+/*==============================================*/
+
+/*	Project Goal:
+	Characterize and model the HCV care cascade of infants and children born to mothers seropositive for HCV
+
+    Part 1: Construct OUD cohort to eventually link maternal OUD and injection states to deliveries
+        Note: This is a large portion of Ryan's RESPOND code. Part 1, though quite long and ancillary to the infant analysis, 
+        is necessary so that we can include OUD_CAPTURE and EVER_IDU_HCV_MAT variables in the cohort chracteristic tables and regression
+    Part 2: HCV Care Cascade for Infants
+    Part 3: HCV Care Cascade for Children <= 15 years of age
+    Part 4: Cohort Tables for manuscript
+    Part 5: Collinearity and MV Regressions
+
+	Cleaning notes: Multiple INFANT_IDS matched to more than one BIRTH_LINK_ID
+					Multiple BIRTH_LINK_IDs matched to more than one mom
+
+	Detailed documentation of all datasets and variables:
+	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation */
 
 /*===== SUPRESSION CODE =========*/
 ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
@@ -29,7 +46,7 @@ stratified by Year (or Year and Month), Race, Sex, and Age
 /*==============================*/
 /*  	GLOBAL VARIABLES   	    */
 /*==============================*/
-%LET year = (2014:2021);
+%LET year = (2014:2022);
 %LET MOUD_leniency = 7;
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
@@ -44,6 +61,27 @@ PROC FORMAT;
 		31-35 = '4'
 		36-45 = '5'
 		46-high = '999';
+
+/* ======= HCV TESTING CPT CODES ========  */
+%LET AB_CPT = ('G0472','86803','86804','80074');
+%LET RNA_CPT = ('87520','87521','87522');
+%LET GENO_CPT = ('87902','3266F');
+
+/* === HCV DIAGNOSIS CODES ====== */
+%LET HCV_ICD = ('7051',  '7054','707',
+		'7041',  '7044','7071',
+		'B1710','B182','B1920',
+		'B1711','B1921');
+
+		
+/* HCV Direct Action Antiviral Codes */
+%LET DAA_CODES = ('00003021301','00003021501','61958220101','61958180101','61958180301',
+                  '61958180401','61958180501','61958150101','61958150401','61958150501',
+                  '72626260101','00074262501','00074262528','00074262556','00074262580',
+                  '00074262584','00074260028','72626270101','00074308228','00074006301',
+                  '00074006328','00074309301','00074309328','61958240101','61958220101',
+                  '61958220301','61958220401','61958220501','00006307402','51167010001',
+                  '51167010003','59676022507','59676022528','00085031402');								
 
 /*========ICD CODES=============*/
 %LET ICD = ('30400','30401','30402','30403',
@@ -104,11 +142,13 @@ select quote(trim(ndc),"'") into :BUP_NDC separated by ','
 from bupndcf;
 quit;
             
-/*===============================*/            
-/* DATA PULL			         */
-/*===============================*/ 
+/*============================ */
+/*  Part 1: Construct OUD cohort */
+/*============================ */
 
-/*======DEMOGRAPHIC DATA=========*/
+/*====================*/
+/* 1. Demographics    */
+/*====================*/
 /* Using data from DEMO, take the cartesian coordinate of years
 (as defined above) and months 1:12 to construct a shell table */
 
@@ -119,8 +159,9 @@ PROC SQL;
 	WHERE FINAL_SEX = 2 & SELF_FUNDED = 0;
 QUIT;
 
-/*=========APCD DATA=============*/
-
+/*====================*/
+/* 2. APCD            */
+/*====================*/
 /* The APCD consists of the Medical and Pharmacy Claims datasets and, 
 along with Casemix, are the datasets where we primarily search along 
 our ICD code list. We construct a variable named `OUD_APCD` within our 
@@ -174,8 +215,9 @@ IF oud_pharm > 0 THEN year_pharm = PHARM_FILL_DATE_YEAR;
 
 RUN;
 
-/*======CASEMIX DATA==========*/
-
+/*====================*/
+/* 3. CASEMIX         */
+/*====================*/
 /* ### Emergency Department
 Casemix.ED (Emergency Department) has three smaller internally 
 linked tables: ED, ED_DIAG, and ED_PROC; all linked together by 
@@ -221,6 +263,7 @@ code lists. At the end, if the `count` variable is strictly greater
 than one then our `OUD_CM_OO` flag is set to 1. */
 
 /* ED */
+
 DATA casemix_ed (KEEP= ID oud_cm_ed year_cm ED_ID);
 	SET PHDCM.ED (KEEP= ID ED_DIAG1 ED_PRINCIPLE_ECODE ED_ADMIT_YEAR ED_AGE ED_ID ED_ADMIT_MONTH
 				  WHERE= (ED_ADMIT_YEAR IN &year));
@@ -234,6 +277,7 @@ end;
 RUN;
 
 /* ED_DIAG */
+
 DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
 	SET PHDCM.ED_DIAG (KEEP= ED_ID ED_DIAG);
 	IF ED_DIAG in &ICD THEN oud_cm_ed_diag = 1;
@@ -241,6 +285,7 @@ DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
 RUN;
 
 /* ED_PROC */
+
 DATA casemix_ed_proc (KEEP= oud_cm_ed_proc ED_ID);
 	SET PHDCM.ED_PROC (KEEP= ED_ID ED_PROC);
 	IF ED_PROC in &PROC THEN oud_cm_ed_proc = 1;
@@ -248,6 +293,7 @@ DATA casemix_ed_proc (KEEP= oud_cm_ed_proc ED_ID);
 RUN;
 
 /* CASEMIX ED MERGE */
+
 PROC SQL;
     CREATE TABLE pharm AS
     SELECT DISTINCT *
@@ -284,7 +330,10 @@ DATA casemix (KEEP= ID oud_ed year_cm);
 	IF oud_ed = 0 THEN DELETE;
 RUN;
 
-/* HD DATA */
+/*====================*/
+/* 4. HD              */
+/*====================*/
+
 DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd);
 	SET PHDCM.HD (KEEP= ID HD_DIAG1 HD_PROC1 HD_ADMIT_YEAR HD_AGE HD_ID HD_ADMIT_MONTH HD_ECODE
 					WHERE= (HD_ADMIT_YEAR IN &year));
@@ -299,6 +348,7 @@ end;
 RUN;
 
 /* HD DIAG DATA */
+
 DATA hd_diag (KEEP= HD_ID oud_hd_diag);
 	SET PHDCM.HD_DIAG (KEEP= HD_ID HD_DIAG);
 	IF HD_DIAG in &ICD THEN oud_hd_diag = 1;
@@ -306,6 +356,7 @@ DATA hd_diag (KEEP= HD_ID oud_hd_diag);
 RUN;
 
 /* HD PROC DATA */
+
 DATA hd_proc(KEEP= HD_ID oud_hd_proc);
 	SET PHDCM.HD_PROC(KEEP = HD_ID HD_PROC);
 	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
@@ -313,6 +364,7 @@ DATA hd_proc(KEEP= HD_ID oud_hd_proc);
 RUN;
 
 /* HD MERGE */
+
 PROC SQL;
     CREATE TABLE pharm AS
     SELECT DISTINCT * 
@@ -349,7 +401,10 @@ DATA hd (KEEP= ID oud_hd year_hd);
 	IF oud_hd = 0 THEN DELETE;
 RUN;
 
-/* OO */
+/*====================*/
+/* 5. OO              */
+/*====================*/
+
 DATA oo (KEEP= ID oud_oo year_oo);
     SET PHDCM.OO (KEEP= ID OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4
                         OO_ADMIT_YEAR OO_ADMIT_MONTH OO_AGE
@@ -378,7 +433,10 @@ DATA oo (KEEP= ID oud_oo year_oo);
     year_oo = OO_ADMIT_YEAR;
 RUN;
 
-/* MERGE ALL CM */
+/*====================*/
+/* 6. CM OO MERGE     */
+/*====================*/
+
 PROC SQL;
     CREATE TABLE casemix AS
     SELECT *
@@ -403,8 +461,9 @@ DATA casemix (KEEP = ID oud_cm year_cm);
    year_cm = min(year_oo, year_hd, year_cm);
 RUN;
 
-/* BSAS */
-
+/*====================*/
+/* 7. BSAS            */
+/*====================*/
 /* Like Matris, the BSAS dataset involves some PHD level encoding. 
 We tag a record with our flag, `OUD_BSAS`, if 
 `CLT_ENR_PRIMARY_DRUG`, `CLT_ENR_SECONDARY_DRUG`, 
@@ -444,8 +503,9 @@ DATA bsas (KEEP= ID oud_bsas year_bsas);
 
 RUN;
 
-/* MATRIS */
-
+/*====================*/
+/* 8. MATRIS          */
+/*====================*/
 /* The MATRIS Dataset depends on PHD level encoding of variables 
 `OPIOID_ORI_MATRIS` and `OPIOID_ORISUBCAT_MATRIS` to 
 construct our flag variable, `OUD_MATRIS`. */
@@ -467,8 +527,9 @@ SET PHDEMS.MATRIS (KEEP= ID OPIOID_ORI_MATRIS
 
 RUN;
 
-/* DEATH */
-
+/*====================*/
+/* 9. DEATH           */
+/*====================*/
 /* The Death dataset holds the official cause and manner of 
 death assigned by physicians and medical examiners. For our 
 purposes, we are only interested in the variable `OPIOID_DEATH` 
@@ -486,8 +547,9 @@ DATA death (KEEP= ID oud_death year_death);
 
 RUN;
 
-/* PMP */
-
+/*====================*/
+/* 10. PMP            */
+/*====================*/
 /* Within the PMP dataset, we only use the `BUPRENORPHINE_PMP` 
 to define the flag `OUD_PMP` - conditioned on BUP_CAT_PMP = 1. */
 
@@ -504,13 +566,12 @@ DATA pmp (KEEP= ID oud_pmp year_pmp);
 RUN;
 
 /*===========================*/
-/*      MAIN MERGE           */
+/* 11.  MAIN MERGE           */
 /*===========================*/
-
 /* As a final series of steps:
 1. APCD-Pharm, APCD-Medical, Casemix, Death, PMP, Matris, 
    BSAS are joined together on the cartesian coordinate of Months 
-   (1:12), Year (2015:2021), and SPINE (Race, Sex, ID)
+   (1:12), Year (2015:2022), and SPINE (Race, Sex, ID)
 2. The sum of the fabricated flags is taken. If the sum is strictly
    greater than zero, then the master flag is set to 1. 
    Zeros are deleted
@@ -596,10 +657,6 @@ data oud;
     IF age_grp_five  = 999 THEN DELETE;
 run;
 
-/*=========================================*/
-/*    FINAL COHORT DATASET: oud_distinct   */
-/*=========================================*/
-
 PROC SQL;
     CREATE TABLE oud_distinct AS
     SELECT DISTINCT ID, oud_age, age_grp_five as agegrp, FINAL_RE FROM oud;
@@ -613,287 +670,13 @@ QUIT;
 
 %put Number of unique IDs in oud_distinct table: &num_unique_ids;
 
-/*==============================*/
-/*         MOUD Counts          */
-/*==============================*/
-
-/* The goal of this portion of the script is to extract MOUD counts and 
-starts while treating it as a formal subset of the code defined above 
-(OUDCounts.) The table most used in this portion is the relatively-new
-SPINE.MOUD table. 
-MOUD Starts are immediately given through SPINE.MOUD's DATE_START_*_MOUD
-MOUD Counts, on the other hand, require a type of 'expansion', where we
-create a new dataset filling out the months inbetween DATE_START_*_MOUD and 
-DATE_END_*_MOUD.
-
-Restrictions: 
-1. If the lapse between a record's end date and the next record's
-   start date is < 7, we merge the two records together.
-2. After this merge, if there are any more records which are <7 they 
-   are removed from counts/starts tabulation
-3. If medication A is found to be completely encompassed by another 
-   medication B, then we remove the record of medication A. */
-
-/* Age Demography Creation */
-DATA moud;
-    SET PHDSPINE.MOUD;
-RUN;
-
-PROC SORT data=moud;
-    by ID DATE_START_MOUD;
-RUN;
-
-PROC SQL;    
-    CREATE TABLE moud_demo AS
-    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX, DEMO.YOB
-    FROM moud
-    LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
-QUIT;
-
-PROC SORT DATA=moud_demo;
-    BY ID TYPE_MOUD DATE_START_MOUD;
-RUN;
-
-/* Create `episode_id`, which forms the basis for merging when 
-two episode IDs are the same */
-
-DATA moud_demo;
-    SET moud_demo;
-    by ID TYPE_MOUD;
-    retain episode_num;
-
-    lag_date = lag(DATE_END_MOUD);
-    IF FIRST.TYPE_MOUD THEN lag_date = .;
-    IF FIRST.TYPE_MOUD THEN episode_num = 1;
-    
-    diff = DATE_START_MOUD - lag_date;
-    
-    /* If the difference is greater than MOUD leniency, assume 
-    it is another treatment episode */
-
-    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
-
-    episode_id = catx("_", ID, episode_num);
-RUN;
-
-PROC SORT data=moud_demo; 
-    BY episode_id;
-RUN;
-
-/* Filter cohort to OUD cohort above*/
-PROC SQL;
-    CREATE TABLE moud_demo AS 
-    SELECT * 
-    FROM moud_demo
-    WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
-QUIT;
-
-/* Merge where episode ID is the same, taking the 
-start_month/year of the first record, and the 
-end_month/year of the final record */
-
-DATA moud_demo; 
-    SET moud_demo;
-
-    by episode_id;
-    retain DATE_START_MOUD;
-
-    IF FIRST.episode_id THEN DO;
-        start_month = DATE_START_MONTH_MOUD;
-        start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD;
-    END;
-    IF LAST.episode_id THEN DO;
-        end_month = DATE_END_MONTH_MOUD;
-        end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
-    END;
-        
-   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-RUN;
-
-PROC SORT data=moud_demo (KEEP= start_date start_month start_year
-					  			end_date end_month end_year 
-					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
-    BY ID;
-RUN;
-
-PROC SQL;
- CREATE TABLE moud_demo 
- AS SELECT DISTINCT * FROM moud_demo;
-QUIT;
-
-DATA moud_demo;
-    SET moud_demo;
-    BY ID;
-	
-	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-
-    LAG_ED = LAG(END_DATE);
-	
-	IF FIRST.ID THEN diff = .; 
-	ELSE diff = start_date - LAG_ED;
-    IF end_date < LAG_ED THEN temp_flag = 1;
-    ELSE temp_flag = 0;
-
-    IF first.ID THEN flag_mim = 0;
-    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
-    ELSE flag_mim = 0;
-
-    IF flag_mim = 1 THEN DELETE;
-
-    age = start_year - YOB;
-    age_grp_five = put(age, age_grps_five.);
-RUN;
-
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
-    SET moud_demo;
-    treatment = TYPE_MOUD;
-
-    FORMAT year 4. month 2.;
-    
-    num_months = intck('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), 
-                       input(put(end_year, 4.) || put(end_month, z2.), yymmn6.));
-
-    DO i = 0 to num_months;
-      new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
-      year = year(new_date);
-      month = month(new_date);
-      postexp_age = year - YOB;
-      age_grp_five = put(postexp_age, age_grps_five.);      
-      OUTPUT;
-    END;
-
-RUN;
-
-DATA moud_expanded;
-	SET moud_expanded;
-	WHERE year IN &year;
-RUN;
-
-PROC SQL;                    
-    CREATE TABLE moud_starts AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD;
-
-    CREATE TABLE stratif_moud_starts_age AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_SEX, age_grp_five,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_five;
-
-    CREATE TABLE stratif_moud_starts_RE AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_SEX, FINAL_RE,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
-    
-    CREATE TABLE moud_counts AS
-    SELECT year, month, treatment,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment;
-
-    CREATE TABLE stratif_moud_counts_age AS
-    SELECT year, month, treatment, FINAL_SEX, age_grp_five,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment, age_grp_five;
-    
-    CREATE TABLE stratif_moud_counts_RE AS
-    SELECT year, month, treatment, FINAL_SEX, FINAL_RE,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE;
-QUIT;
-
-PROC EXPORT
-	DATA= moud_counts
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_counts_age
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_AgeStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_counts_RE
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_REStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= moud_starts
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_starts_age
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_AgeStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_starts_RE
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_REStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-/*==============================*/
-/* Project: Maternal Cascade    */
-/* Author:  Ben Buzzee  	    */ 
-/* Created: 12/16/2022 		    */
-/* Updated: 12/20/23 by SJM     */
-/*==============================*/
-
-/* ======= HCV TESTING CPT CODES ========  */
-%LET AB_CPT = ('G0472','86803','86804','80074');
-%LET RNA_CPT = ('87520','87521','87522');
-%LET GENO_CPT = ('87902','3266F');
-
-/* === HCV DIAGNOSIS CODES ====== */
-%LET HCV_ICD = ('7051',  '7054','707',
-		'7041',  '7044','7071',
-		'B1710','B182','B1920',
-		'B1711','B1921');
-								
-%LET DAA_CODES = ('00003021301','00003021501',
-		'61958220101','61958180101','61958180301',
-		'61958180401','61958180501','61958150101',
-		'61958150401','61958150501','72626260101',
-		'00074262501','00074262528','00074262556',
-		'00074262580','00074262584','00074260028',
-		'72626270101','00074308228','00074006301',
-		'00074006328','00074309301','00074309328',
-		'61958240101','61958220101','61958220301',
-		'61958220401','61958220501','00006307402',
-		'51167010001','51167010003','59676022507',
-		'59676022528','00085031402');
-  
-%LET bsas_drugs = (5,6,7,21,22,23,24,26);
-
-  /*============================*/
- /*   Add Pregancy Covariates  */
-/*============================*/
+/*============================ */
+/* 12. ADD PREGANANCY          */
+/*============================ */
 
 DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
 	SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH
-							WHERE= (YEAR_BIRTH IN &year));
+							WHERE= (2014 <= YEAR_BIRTH <= 2021));
 	BIRTH_INDICATOR = 1;
 run;
 
@@ -920,20 +703,21 @@ PROC SQL;
     LEFT JOIN births ON oud_distinct.ID = births.ID;
 QUIT;
 
-/* RECODE MISSING VALUES AS 0  */
-
 DATA oud_preg;
 SET oud_preg;
 	IF BIRTH_INDICATOR = . THEN BIRTH_INDICATOR = 0;
 run;
 
 /* ========================================================== */
-/*                       HCV TESTING                          */
+/* 13. Extract AB/RNA/GENOTYPE Testing Data                   */
 /* ========================================================== */
+/* Extract antibody/rna/genotype testing records (CPT codes) from the PHDAPCD.MOUD_MEDICAL dataset.
+Then, remove duplicate testing records based on unique combinations of ID and testing date and sort by ID and testing date in ascending order. 
+Transpose the testing dates for each individual into wide format to create multiple columns for testing dates. 
+Extract the year from the testing records for each ID and creates a new dataset that includes distinct IDs, testing years, and age at testing.
+Select the earliest testing year for each ID and output the frequency of tests occurring in infants under the age of 4. */
 
-/* =========== */
-/* AB TESTING */
-/* ========== */
+/* AB */
 
 DATA ab;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEAR
@@ -941,45 +725,22 @@ SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YE
 					 WHERE = (MED_PROC_CODE IN  &AB_CPT));
 run;
 
-/* Deduplicate */
 proc sql;
 create table AB1 as
 select distinct ID, MED_FROM_DATE, *
 from AB;
 quit;
 
-/* Sort the data by ID in ascending order */
 PROC SORT data=ab1;
   by ID MED_FROM_DATE;
 RUN;
 
-/* Transpose for long table */
 PROC TRANSPOSE data=ab1 out=ab_wide (KEEP = ID AB_TEST_DATE:) PREFIX=AB_TEST_DATE_;
 BY ID;
 VAR MED_FROM_DATE;
 RUN;
 
-/* ======================================= */
-/* PREP DATASET FOR AB_TESTING BY YEAR  */
-/* ==================================== */
-
-PROC SQL;
-create table AB_YEARS as
-SELECT DISTINCT ID, MED_FROM_DATE_YEAR as AB_TEST_YEAR
-FROM AB1;
-quit;
-
-/* Restrict AB testing to just those in our cohort */
-PROC SQL;
-create table AB_YEARS_COHORT as
-SELECT *
-FROM OUD_DISTINCT
-LEFT JOIN AB_YEARS on OUD_DISTINCT.ID = AB_YEARS.ID;
-quit;
-
-/* =========== */
-/* RNA TESTING */
-/* =========== */
+/* RNA */
 
 DATA rna;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
@@ -987,7 +748,6 @@ SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
 					 WHERE = (MED_PROC_CODE IN  &RNA_CPT));
 run;
 
-/* Sort the data by ID in ascending order */
 PROC SORT data=rna;
   by ID MED_FROM_DATE;
 RUN;
@@ -997,9 +757,7 @@ BY ID;
 VAR MED_FROM_DATE;
 RUN;
 
-/* ================ */
-/* GENOTYPE TESTING */
-/* ================ */
+/* GENOTYPE */
 
 DATA geno;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
@@ -1007,7 +765,6 @@ SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
 					 WHERE = (MED_PROC_CODE IN  &GENO_CPT));
 run;
 
-/* Sort the data by ID in ascending order */
 PROC SORT data=geno;
   by ID MED_FROM_DATE;
 RUN;
@@ -1017,27 +774,12 @@ BY ID;
 VAR MED_FROM_DATE;
 RUN;
 
-/* ================ */
-/* HCV CODES CHECK  */
-/* ================ */
+/* ========================================================== */
+/* 14. Join All Testing Data with OUD Cohort and Create HCV Testing Indicators */
+/* ========================================================== */
+/* This step joins antibody, RNA, and genotype testing data to the main OUD dataset based on the ID and
+creates indicators for whether ID had antibody, RNA, and any HCV testing. */
 
-PROC FREQ data = AB;
-title "AB CPT CODES";
-table MED_PROC_CODE;
-run;
-
-PROC FREQ data = RNA;
-title "RNA CPT CODES";
-table MED_PROC_CODE;
-run;
-
-PROC FREQ data = geno;
-title "GENOTYPE CPT CODES";
-table MED_PROC_CODE;
-run;
-title;
-
-/*  Join all labs to OUD PREG, which is our oud cohort with pregnancy covariates added */
 PROC SQL;
     CREATE TABLE OUD_HCV AS
     SELECT * FROM oud_preg 
@@ -1063,10 +805,11 @@ DATA OUD_HCV;
 	run;
 
 /* ========================================================== */
-/*                   HCV STATUS FROM MAVEN                    */
+/* 15. Extract HCV Status from MAVEN Database                 */
 /* ========================================================== */
+/* This section retrieves the HCV diagnosis status for each ID from the MAVEN database,
+   calculates the age at diagnosis, and creates indicators for HCV seropositivity and confirmed HCV. */
 
-/* This reduced the dataset to one row person  */
 PROC SQL;
 	CREATE TABLE HCV_STATUS AS
 	SELECT ID,
@@ -1084,7 +827,6 @@ PROC SQL;
 	GROUP BY ID;
 QUIT;
 
-/*  JOIN TO LARGER TABLE */
 PROC SQL;
     CREATE TABLE OUD_HCV_STATUS AS
     SELECT * FROM OUD_HCV 
@@ -1092,17 +834,17 @@ PROC SQL;
 QUIT;
 
 /* ========================================================== */
-/*                      LINKAGE TO CARE                       */
+/* 16. Linkage to HCV Care                                    */
 /* ========================================================== */
+/* This section retrieves medical records related to HCV care from the MOUD_MEDICAL dataset,
+   filters based on relevant ICD codes, and creates a dataset for infants linked to HCV care. */
 
-/* FILTER WHOLE DATASET */
 DATA HCV_LINKED_SAS;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
 					 
 					 WHERE = (MED_ICD1 IN &HCV_ICD));
 RUN;
 
-/* FINAL LINKAGE TO CARE DATASET */
 PROC SQL;
 CREATE TABLE HCV_LINKED AS 
 SELECT ID,
@@ -1112,28 +854,27 @@ from HCV_LINKED_SAS
 GROUP BY ID;
 QUIT;
 
-/*  JOIN LINKAGE TO MAIN DATASET */
 PROC SQL;
     CREATE TABLE OUD_HCV_LINKED AS
     SELECT * FROM OUD_HCV_STATUS 
     LEFT JOIN HCV_LINKED ON HCV_LINKED.ID = OUD_HCV_STATUS.ID;
 QUIT;
   
-/* Add 0's to those without linkage indicator */
 DATA OUD_HCV_LINKED; SET OUD_HCV_LINKED;
 IF HCV_PRIMARY_DIAG = . THEN HCV_PRIMARY_DIAG = 0;
 IF HCV_SEROPOSITIVE_INDICATOR = . THEN HCV_SEROPOSITIVE_INDICATOR = 0;
 run;
 
 /* ========================================================== */
-/*                       DAA STARTS                           */
+/* 17. DAA (Direct-Acting Antiviral) Treatment Starts         */
 /* ========================================================== */
+/* This section identifies IDs who started DAA treatment, retains the first DAA start, calculates the age at DAA start,
+   and creates indicators for DAA initiation. */
 
 DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
 								WHERE = (PHARM_NDC IN &DAA_CODES));
 RUN;
 
-/* Reduce to one row per person */
 PROC SQL;
 CREATE TABLE DAA_STARTS as
 SELECT ID,
@@ -1144,7 +885,6 @@ SELECT ID,
 GROUP BY ID;
 QUIT;
 
-/* Join to main dataset */
 PROC SQL;
     CREATE TABLE OUD_HCV_DAA AS
     SELECT * FROM OUD_HCV_LINKED 
@@ -1159,8 +899,16 @@ DATA OUD_HCV_DAA;
   SET OUD_HCV_DAA;
   IF agegrp ne ' ' THEN
     num_agegrp = INPUT(agegrp, best12.);
-  DROP agegrp; /* Drop the original character variable */
+  DROP agegrp;
 RUN;
+
+/*====================*/
+/* 18. Final OUD cohort */
+/*====================*/
+
+PROC CONTENTS data=OUD_HCV_DAA;
+title "Contents of Final Dataset";
+run;
 
 PROC SQL;
     SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
@@ -1170,340 +918,21 @@ QUIT;
 
 %put Number of unique IDs in OUD_HCV_DAA table: &num_unique_ids;
 
-PROC CONTENTS data=OUD_HCV_DAA;
-title "Contents of Final Dataset";
-run;
-
-DATA TESTING; 
-SET OUD_HCV_DAA;
-	EOT_RNA_TEST = 0;
-	SVR12_RNA_TEST = 0;
-	IF RNA_TEST_DATE_1 = .  THEN DELETE;
-	IF FIRST_DAA_DATE = .  THEN DELETE;
-
-	/* Determine the number of variables dynamically */
-    array test_date_array (*) RNA_TEST_DATE_:;
-    num_tests = dim(test_date_array);
-
-    /* Loop through the determined number of variables */
-    do i = 1 to num_tests;
-        if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
-            time_since = test_date_array{i} - FIRST_DAA_DATE;
-
-            if time_since > 84 then EOT_RNA_TEST = 1;
-            if time_since >= 140 then SVR12_RNA_TEST = 1;
-        end;
-    end;
-
-    DROP i time_since;
-RUN;
-
-/*====================*/
-/*  FREQUENCY TABLES */
-/*==================*/
-
-/* Recode Formats */
-
-PROC FORMAT;
-   VALUE agefmt_all
-		1 = "15-18"
-		2 = "19-25"
-		3 = "26-30"
-		4 = "31-35"
-		5 = "36-45";
-RUN;
-
-PROC FORMAT;
-   VALUE agefmt_comb
-		1 = "15-25"
-		2 = "15-25"
-		3 = "26-30"
-		4 = "31-35"
-		5 = "36-45";
-RUN;
-
-PROC FORMAT;
-   VALUE birthfmt
-		0 = "No Births"
-		1 = "Had Birth";
-RUN;
-
-PROC FORMAT;
-   VALUE injectfmt
-		0 = "Never Injected"
-		1 = "Has Injected"
-		9 = "Unknown Injection Status";
-RUN;
-
-PROC FORMAT;
-   VALUE hcvfmt
-		0 = "No HCV"
-		1 = "HCV Confirmed or Probable";
-run;
-
-PROC FORMAT;
-   VALUE momhcvfmt
-		1 = "Confirmed"
-		2 = "Probable";
-run;
-
-/* Race/Ethnicity coding https://www.mass.gov/doc/phd-20-analytic-data-dictionaries-part1-v6-122022/download */
-PROC FORMAT;
-   VALUE racefmt_all
-		1 = "White"
-		2 = "Black"
-		3 = "Asian/PI"
-		4 = "Hispanic"
-		5 = "AmerInd/OtherNonHisp."
-		9 = "Unknown"
-		99 = "Not MA Res.";
-RUN;
-
-PROC FORMAT;
-   VALUE racefmt_comb
-		1 = "White"
-		2 = "Black"
-		3 = "Asian/PI/AmerInd/Other/Unkn"
-		4 = "Hispanic"
-		5 = "Asian/PI/AmerInd/Other/Unkn"
-		9 = "Asian/PI/AmerInd/Other/Unkn"
-		99 = "Not MA Res.";
-RUN;
-
-/*  NONSTRATIFIED CARE CASCADE TABLES */
-/* Sorting the dataset by CONFIRMED_HCV_INDICATOR */
-proc sort data=OUD_HCV_DAA;
-    by CONFIRMED_HCV_INDICATOR;
-run;
-
-title "HCV Care Cascade, OUD Cohort, Overall";
-proc freq data=OUD_HCV_DAA;
-    tables ANY_HCV_TESTING_INDICATOR
-           AB_TEST_INDICATOR
-           RNA_TEST_INDICATOR
-           HCV_SEROPOSITIVE_INDICATOR
-           CONFIRMED_HCV_INDICATOR
-           HCV_PRIMARY_DIAG
-           DAA_START_INDICATOR
-           BIRTH_INDICATOR
-           EVENT_YEAR_HCV
-           FIRST_DAA_START_YEAR / missing norow nocol nopercent;
-run;
-
-proc freq data=OUD_HCV_DAA;
-    by CONFIRMED_HCV_INDICATOR;
-    tables HCV_PRIMARY_DIAG
-           GENO_TEST_INDICATOR
-           DAA_START_INDICATOR
-           BIRTH_INDICATOR / missing norow nocol nopercent;
-run;
-
-proc sort data=OUD_HCV_DAA;
-    by HCV_PRIMARY_DIAG;
-run;
-
-proc freq data=OUD_HCV_DAA;
-    by HCV_PRIMARY_DIAG;
-    tables HCV_SEROPOSITIVE_INDICATOR / missing norow nocol nopercent;
-run;
-
-title "AB Tests Per Year, In Cohort";
-PROC FREQ data = AB_YEARS_COHORT;
-table  AB_TEST_YEAR / missing norow nocol nopercent;
-run;
-
-title "AB Tests Per Year, All MA Res.";
-PROC FREQ data = AB_YEARS;
-table  AB_TEST_YEAR / missing norow nocol nopercent;
-run;
-
-title   "Testing Among Confirmed HCV";
-proc freq data=Testing;
-where   CONFIRMED_HCV_INDICATOR = 1;
-tables  BIRTH_INDICATOR
-        EOT_RNA_TEST
-		SVR12_RNA_TEST
-		FIRST_DAA_START_YEAR / missing norow nopercent nocol;
-run;
-
-%macro CascadeTestFreq(strata, mytitle, ageformat, raceformat);
-    TITLE &mytitle;
-    PROC FREQ DATA = OUD_HCV_DAA;
-        BY &strata;
-        TABLES ANY_HCV_TESTING_INDICATOR
-               AB_TEST_INDICATOR
-               RNA_TEST_INDICATOR
-               HCV_SEROPOSITIVE_INDICATOR
-               CONFIRMED_HCV_INDICATOR / missing norow nocol nopercent;
-        FORMAT num_agegrp &ageformat 
-               final_re &raceformat
-               BIRTH_INDICATOR birthfmt.;
-%mend CascadeTestFreq;
-
-%macro CascadeCareFreq(strata, mytitle, ageformat, raceformat);
-    TITLE "&mytitle";
-    PROC FREQ DATA=OUD_HCV_DAA;
-    BY &strata;
-    TABLES GENO_TEST_INDICATOR
-           HCV_PRIMARY_DIAG
-           DAA_START_INDICATOR / missing norow nocol nopercent;
-    WHERE CONFIRMED_HCV_INDICATOR=1;
-    FORMAT num_agegrp &ageformat 
-           final_re &raceformat
-           BIRTH_INDICATOR birthfmt.;
-%mend CascadeCareFreq;
-
-%macro EndofTrtFreq(strata, mytitle, ageformat, raceformat);
-    TITLE &mytitle;
-    PROC FREQ DATA = TESTING;
-        BY &strata;
-        TABLES DAA_START_INDICATOR
-               HCV_PRIMARY_DIAG
-               EOT_RNA_TEST
-               SVR12_RNA_TEST / missing norow nocol nopercent;
-        WHERE CONFIRMED_HCV_INDICATOR = 1;
-        FORMAT num_agegrp &ageformat 
-               final_re &raceformat
-               BIRTH_INDICATOR birthfmt.;
-%mend EndofTrtFreq;
-
-%macro YearFreq(var, strata, confirm_status, mytitle, ageformat, raceformat);
-    TITLE &mytitle;
-    PROC FREQ DATA = OUD_HCV_DAA;
-        BY &strata;
-        TABLE &var / missing norow nocol nopercent;
-        WHERE CONFIRMED_HCV_INDICATOR = &confirm_status;
-        FORMAT num_agegrp &ageformat
-               final_re &raceformat
-               BIRTH_INDICATOR birthfmt.;
-%mend YearFreq;
-
-/*  Age stratification */
-proc sort data=OUD_HCV_DAA;
-    by num_agegrp;
-run;
-
-proc sort data=TESTING;
-    by num_agegrp;
-run;
-
-%CascadeTestFreq(num_agegrp, "HCV Testing: Stratified by Age", agefmt_all., racefmt_all.);   
-%CascadeCareFreq(num_agegrp, "HCV Care: Stratified by Age", agefmt_all., racefmt_all.);
-%EndofTrtFreq(num_agegrp, "HCV EOT/SVR Testing Among Confirmed HCV by Age", agefmt_all., racefmt_comb.)
-%YearFreq(EVENT_YEAR_HCV, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
-%YearFreq(EVENT_YEAR_HCV, num_agegrp, 0, "Counts per year among probable, by Age", agefmt_comb., racefmt_all.)
-%YearFreq(FIRST_DAA_START_YEAR, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
-
-/*  Race Stratification */
-proc sort data=OUD_HCV_DAA;
-    by final_re;
-run;
-
-proc sort data=TESTING;
-    by final_re;
-run;
-
-%CascadeTestFreq(final_re, "HCV Testing: Stratified by Race", agefmt_all., racefmt_all.);   
-%CascadeCareFreq(final_re, "HCV Care: Stratified by Race", agefmt_all., racefmt_all.);
-%EndofTrtFreq(final_re, "HCV EOT/SVR Testing Among Confirmed HCV by Race - all", agefmt_all., racefmt_all.)
-%EndofTrtFreq(final_re, "HCV EOT/SVR Testing Among Confirmed HCV by Race -combined", agefmt_all., racefmt_comb.)
-%YearFreq(EVENT_YEAR_HCV, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
-%YearFreq(EVENT_YEAR_HCV, final_re, 0, "Counts per year among probable, by Race", agefmt_comb., racefmt_all.)
-%YearFreq(FIRST_DAA_START_YEAR, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
-
-/*  Birth Stratification */
-proc sort data=OUD_HCV_DAA;
-    by birth_indicator;
-run;
-
-proc sort data=TESTING;
-    by birth_indicator;
-run;
-
-%CascadeTestFreq(birth_indicator, "HCV Testing: Stratified by Birth", agefmt_all., racefmt_all.);   
-%CascadeCareFreq(birth_indicator, "HCV Care: Stratified by Birth", agefmt_all., racefmt_comb.);
-%EndofTrtFreq(birth_indicator, "HCV EOT/SVR Testing Among Confirmed HCV by Birth", agefmt_all., racefmt_comb.)
-%YearFreq(EVENT_YEAR_HCV, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
-%YearFreq(EVENT_YEAR_HCV, birth_indicator, 0, "Counts per year among probable, by Birth", agefmt_comb., racefmt_all.)
-%YearFreq(FIRST_DAA_START_YEAR, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
-
-/* Rename to merge with infant cascade for OUD_Capture */
 data OUD_HCV_DAA;
     set OUD_HCV_DAA(rename=(ID=MOM_ID));
 run;
 
-/*==============================================*/
-/* Project: Infant Cascade      				*/
-/* Author:  BB / RE / SM 		                */ 
-/* Created: 12/16/2022 							*/
-/* Updated: 04/04/2024 by SM           			*/
-/*==============================================*/
-
-/*===== SUPRESSION CODE =========*/
-ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
-proc format;                                                                                               
-   value supp010_ 1-10=' * ';                                                                           
-run ;
-proc template;
-%include "/sas/data/DPH/OPH/PHD/template.sas";
-run;
-/*==============================*/
-
-/*	Project Goal:
-	Characterize the HCV care cascade of infants born to mothers seropositive for HCV 
-	
-	DATASETS: 
-	PHDHEPC.HCV 	   		- ID, EVENT_DATE_HCV, DISEASE_STATUS_HCV
-	PHDBIRTH.BIRTH_MOM 		- ID, BIRTH_LINK_ID, YEAR_BIRTH, MONTH_BIRTH, INFANT_DOB
-	PHDBIRTH.BIRTH_INFANT	- ID. BIRTH_LINK_ID, YEAR_BIRTH, MONTH_BIRTH, DOB
-
-    Part 1: Collect Cohort of Infants
-    Part 2: Perform HCV Care Cascade
-
-	Cleaning notes: Multiple INFANT_IDS matched to more than one BIRTH_LINK_ID
-					Multiple BIRTH_LINK_IDs matched to more than one mom
-
-	Detailed documentation of all datasets and variables:
-	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation */
-
 /*============================ */
-/*     Global Variables        */
-/*============================ */
-		
-/* ======= HCV TESTING CPT CODES ========  */
-%LET AB_CPT = ('G0472', '86803',
-			   '86804', '80074');
-			   
-%LET RNA_CPT = ('87520', '87521',
-			    '87522');
-			    
-%LET GENO_CPT = ('87902', '3266F');
-
-/* === HCV TESTING DIAGNOSIS CODES ====== */
-%LET HCV_ICD = ('7051', '7054', '707',
-				'7041', '7044', '7071',
-				'B1710','B182', 'B1920',
-				'B1711','B1921');
-				
-/* HCV Direct Action Antiviral Codes */
-%LET DAA_CODES = ('00003021301','00003021501','61958220101','61958180101','61958180301',
-                  '61958180401','61958180501','61958150101','61958150401','61958150501',
-                  '72626260101','00074262501','00074262528','00074262556','00074262580',
-                  '00074262584','00074260028','72626270101','00074308228','00074006301',
-                  '00074006328','00074309301','00074309328','61958240101','61958220101',
-                  '61958220301','61958220401','61958220501','00006307402','51167010001',
-                  '51167010003','59676022507','59676022528','00085031402');
-
-/*============================ */
-/*  Cohort Identification      */
+/*  Part 2: HCV Care Cascade for Infants */
 /*============================ */
 
-/*  Collect All HCV Seropositive Patients */
-/*  Output: HCV dataset, one row per mom with HCV
-	Notes:  EVENT_DATE_HCV is the date of diagnosis/first symptom
-		    DISEASE_STATUS_HCV = 1 for confirmed, 2 if probable 
-		    MIN function is used to remove possible duplicates within one ID */
-
+/*====================*/
+/* 1. HCV Diagnosis and Serostatus Information */
+/*====================*/
+/* This step collects all HCV seropositive patients, ensuring only the first HCV event for each (ID) is retained: 
+   It aggregates by ID (renamed MOM_ID) and removes duplicates using the MIN function to select the earliest 
+   EVENT_DATE_HCV (the date of diagnosis/first symptom) and DISEASE_STATUS_HCV (1 for confirmed, 2 if probable ). */
+   
 PROC SQL;
 CREATE TABLE HCV
 AS SELECT ID as MOM_ID,
@@ -1513,7 +942,14 @@ FROM PHDHEPC.HCV
 GROUP BY MOM_ID;
 run;
 
-/*  Collect All Moms: Output has one row per BIRTH_LINK_ID (Multiple rows per MOM_ID) */
+/*====================*/
+/* 2. Collect Birth Records for Mothers */
+/*====================*/
+/* This step collects all birth records for mothers, aggregating birth data by BIRTH_LINK_ID. 
+   For each mother, we calculate the earliest infant birth date (DOB_MOM_TBL) and count the number of mothers associated with each birth.
+   We then filter the birth records to keep only cases where a single MOM_ID is associated with each BIRTH_LINK_ID, ensuring one mother per birth.
+   Notes: DOB_MOM_TBL must be defined separately from DOB_INFANT_TBL because the anchor proxy date is unique to each individual. */
+
 PROC SQL;
 CREATE TABLE MOMS
 AS SELECT ID as MOM_ID,
@@ -1525,11 +961,17 @@ FROM PHDBIRTH.BIRTH_MOM
 GROUP BY BIRTH_LINK_ID;
 quit;
 
-/* Remove observations where the same BIRTH_LINK_ID had multiple MOM_IDs to ensure that each birth is associated with only one mother */
 DATA MOMS; SET MOMS (WHERE = (num_moms = 1));
 run;
 
-/*  Collect All Infants: Output has one row per BIRTH_LINK_ID (Multiple INFANT_IDs per BIRTH_LINK_ID, potentially) */
+
+/*====================*/
+/* 3. Collect Birth Records for Infants */
+/*====================*/
+/* This step collects infant birth records, aggregating by INFANT_ID and BIRTH_LINK_ID. 
+   It retains the earliest birth date for each infant (DOB_INFANT_TBL) and counts the number of births associated with each BIRTH_LINK_ID.
+   Then, we filter the infant records to ensure that each INFANT_ID is associated with only one BIRTH_LINK_ID. */
+
 PROC SQL;
 CREATE TABLE INFANTS
 AS SELECT ID as INFANT_ID,
@@ -1542,15 +984,16 @@ FROM PHDBIRTH.BIRTH_INFANT
 GROUP BY INFANT_ID;
 quit;
 
-/*  Remove observations where the same INFANT_ID had multiple BIRTH_LINK_IDs to ensure that each infant is associated with only one birth */
 DATA INFANTS; SET INFANTS (WHERE = (num_births = 1));
 run;
 
-/* Join cohort table without demographics */
-/* HCV:    MOM_ID - EVENT_DATE_HCV - DISEASE_STATUS - one row per MOM_ID
-   MOMS:   MOM_ID - BIRTH_LINK_ID - DOB_MOM_TBL  - one row per BIRTH_LINK ID
-   INFANT: INFANT_ID - BIRTH_LINK_ID - DOB_INFANT_TBL  - one row per INFANT_ID
-   BIRTH_LINK_ID is not in the HCV table, but we can still use MOMS.BIRTH_LINK_ID as the key to INFANTS */
+/*====================*/
+/* 4. Combine HCV, Mother, and Infant Data */
+/*====================*/
+/* Here, we merge the HCV data with mother and infant data using MOM_ID and BIRTH_LINK_ID as keys. 
+   This results in a dataset that links HCV diagnosis data for mothers to their corresponding births and infants.
+   We then count how many BIRTH_LINK_IDs are associated with each infant to track multiple births per infant and
+   delete all non-mothers by restricting the dataset to mothers with only one associated BIRTH_LINK_ID. */
 
 PROC SQL; 
  CREATE TABLE HCV_MOMS 
@@ -1559,26 +1002,30 @@ PROC SQL;
  LEFT JOIN INFANTS on MOMS.BIRTH_LINK_ID = INFANTS.BIRTH_LINK_ID; 
  quit; 
 
-/* HCV_MOMS is the entire HCV table (Men and Women with and without children) with mother/infant data left joined to it */
 PROC SQL;
 CREATE TABLE HCV_MOMS
 AS SELECT DISTINCT *, COUNT(DISTINCT BIRTH_LINK_ID) as num_infant_birth_ids FROM HCV_MOMS
 GROUP BY INFANT_ID;
 quit;
 
-/* Restrict our HCV_MOMS dataset to infants with exactly one birth ID, deleting all non-mothers. */
 DATA HCV_MOMS; SET HCV_MOMS (WHERE = (num_infant_birth_ids = 1)); 
 run;
 
-/* Filter for women who were seropositive prior to birth */
+/*====================*/
+/* 5. Filter for women who were seropositive prior to birth */
+/*====================*/
+/* This step removes observations if the HCV case report occured after delivery. */
+
 DATA HCV_MOMS; SET HCV_MOMS;
 	IF  BIRTH_INDICATOR = . THEN DELETE;
 	IF  DOB_MOM_TBL < MOM_EVENT_DATE_HCV THEN DELETE;
 run;
 
-/* Pull Covariates */
+/*====================*/
+/* 6. Add MOUD Data and Flag MOUD Episodes */
+/*====================*/
+/* This step adds MOUD varaibles to calculate whether the MOUD occurred during pregnancy or at delivery. */
 
-/* MOUD */
 proc sql;
     create table HCV_MOMS as
     select HCV_MOMS.*,
@@ -1589,61 +1036,59 @@ proc sql;
     on moud.ID = HCV_MOMS.MOM_ID;
 quit;
 
+/* This step checks the time difference between the mother's date of birth (DOB_MOM_TBL) and the start/end dates of MOUD (DATE_START_MOUD, DATE_END_MOUD). 
+Flags are created for MOUD during pregnancy (MOUD_DURING_PREG) and MOUD at delivery (MOUD_AT_DELIVERY). */
+
 data HCV_MOMS;
     set HCV_MOMS;
 
-    /* Check if DOB_MOM_TBL is missing */
     if missing(DOB_MOM_TBL) then do;
         MOUD_DURING_PREG = .;
         MOUD_AT_DELIVERY = .;
     end;
     else do;
-        /* Calculate the difference in days for DATE_START_MOUD */
-        days_difference_start = DATE_START_MOUD - DOB_MOM_TBL ;
 
-        /* Calculate the difference in days for DATE_END_MOUD */
+    days_difference_start = DATE_START_MOUD - DOB_MOM_TBL ;
+
         days_difference_end = DATE_END_MOUD - DOB_MOM_TBL ;
 
-        /* Check if any of the conditions are met for MOUD_DURING_PREG (40 weeks*7 days per week) */
         MOUD_DURING_PREG = (days_difference_start >= -280 AND days_difference_start <= 0) OR
                                  (days_difference_end >= -280 AND days_difference_end <= 0) OR
                                  (days_difference_start <= -280 AND DATE_END_MOUD > DOB_MOM_TBL);
 
-        /* Check if any of the conditions met for MOUD_AT_DELIVERY (2 months prior to delivery) */
         MOUD_AT_DELIVERY = 	(days_difference_start >= -60 AND days_difference_start <= 0) OR
                             (days_difference_end >= -60 AND days_difference_end <= 0) OR
                             (days_difference_start <= -60 AND DATE_END_MOUD > DOB_MOM_TBL);
 
-        /* Drop temporary variables */
         drop days_difference_start days_difference_end;
     end;
 run;
+
+/* Group multiple records by the same BIRTH_LINK_ID for deduplication. */
 
 proc sort data=HCV_MOMS;
     by BIRTH_LINK_ID;
 run;
 
-/* This will check all MOUD episodes associated with each BIRTH_LINK_ID. If any episode flags for MOUD within the group,
-flag all observations in the group for any_MOUD. Then pull last.ID to deduplciate from multiple episodes back to unqiue BIRTH_LINK_ID 
-NOTE: We hypothesize that multiples (twins, triplets) share a BIRTH_LINK_ID because this data step decreases the number of observations
-in HCV_MOMS suggesting that the same BIRTH_LINK_ID has multiple INFANT_IDs for a small proportion (~1.6%) of deliveries.
+/* This step processes each group of MOUD episodes related to the same BIRTH_LINK_ID. 
+For each group, it sets flags (`any_MOUD_DURING_PREG`, `any_MOUD_AT_DELIVERY`) to 1 if any episode in the group meets the conditions for MOUD during pregnancy or at delivery. 
+It then retains these flags for each group and outputs only the final observation for each group to deduplicate the dataset, accounting for multiple births (twins, triplets).
 We only want to count one infant per BIRTH because we would be overrepresenting covaraites in the regressions */
 
 data HCV_MOMS;
     set HCV_MOMS;
     by BIRTH_LINK_ID;
     
-    retain any_MOUD_DURING_PREG any_MOUD_AT_DELIVERY 0; /* Initialize flags to 0 */
+    retain any_MOUD_DURING_PREG any_MOUD_AT_DELIVERY 0;
     
     if first.BIRTH_LINK_ID then do;
-        any_MOUD_DURING_PREG = 0; /* Reset flag for each group */
-        any_MOUD_AT_DELIVERY = 0; /* Reset flag for each group */
+        any_MOUD_DURING_PREG = 0;
+        any_MOUD_AT_DELIVERY = 0;
     end;
     
     if MOUD_DURING_PREG = 1 then any_MOUD_DURING_PREG = 1;
     if MOUD_AT_DELIVERY = 1 then any_MOUD_AT_DELIVERY = 1;
     
-    /* Store flags for each group in a temporary dataset */
     if last.BIRTH_LINK_ID then do;
         output;
     end;
@@ -1657,16 +1102,23 @@ data HCV_MOMS;
            any_MOUD_AT_DELIVERY = MOUD_AT_DELIVERY;
 run;
 
-/* HCV Duration */
+/*====================*/
+/* 7. Calculate HCV Duration */
+/*====================*/
+/* This step calculates the duration of time between HCV diagnosis and birth for each mother. */
+
 data HCV_MOMS;
     set HCV_MOMS;
 
-    /* Calculate the difference in days */
     hcv_duration_count = MOM_EVENT_DATE_HCV - DOB_MOM_TBL ;
 
 run;
 
-/* HIV */
+/*====================*/
+/* 8. Add HIV Diagnosis Data */
+/*====================*/
+/* This step adds HIV diagnosis data for each mother and flags whether HIV was diagnosed before the infant's birth. */
+
 proc sql;
     create table HCV_MOMS as
     select HCV_MOMS.*,
@@ -1679,7 +1131,6 @@ quit;
 data HCV_MOMS;
     set HCV_MOMS;
 
-    /* Check if diagnosis date was before birth */
     if DIAGNOSIS_DATE_HIV < DOB_MOM_TBL and DIAGNOSIS_DATE_HIV ne . then
         HIV_DIAGNOSIS = 1;
     else
@@ -1691,20 +1142,20 @@ proc sort data=HCV_MOMS;
     by BIRTH_LINK_ID;
 run;
 
-/* There are mutliple HIV diagnosis dates. This will check all diagnoses asociated with each BIRTH_LINK_ID. 
-If any episode flags for HIV within the group, flag all observations in the group for any_HIV. 
-Then pull last.ID to deduplciate from multiple diagnoses back to unqiue BIRTH_LINK_ID */
+/* This step processes each HIV diagnosis related to the same BIRTH_LINK_ID. 
+For each BIRTH_LINK_ID, it flags (any_HIV_DIAGNOSIS) to 1 if any observation flags for diagnsosis within the BIRTH_LINK_ID.
+It then retains these flags for each group and outputs only the final observation for each group to deduplicate multiple diagnoses back to a unqiue BIRTH_LINK_ID. */
+
 data HCV_MOMS;
     set HCV_MOMS;
     by BIRTH_LINK_ID;
     
-    retain any_HIV_DIAGNOSIS 0; /* Initialize flags to 0 */
+    retain any_HIV_DIAGNOSIS 0;
     
-    if first.BIRTH_LINK_ID then any_HIV_DIAGNOSIS = 0; /* Reset flag for each group */
+    if first.BIRTH_LINK_ID then any_HIV_DIAGNOSIS = 0;
     
     if HIV_DIAGNOSIS = 1 then any_HIV_DIAGNOSIS = 1;
     
-    /* Store flags for each group in a temporary dataset */
     if last.BIRTH_LINK_ID then do;
         output;
     end;
@@ -1718,8 +1169,9 @@ data HCV_MOMS;
 run;
 
 /*====================*/
-/* Final COHORT TABLE */
+/* 9. Add Demographic Data */
 /*====================*/
+/* This step merges demographic information, such as race, sex, and insurance status, for each mother-infant pair. */
 
 PROC SQL;
 	CREATE TABLE demographics AS
@@ -1728,7 +1180,7 @@ PROC SQL;
 	QUIT;
 
 PROC SQL;
-CREATE TABLE MERGED_COHORT AS
+CREATE TABLE TOTAL_APCD_INFANT_COHORT AS
 SELECT DISTINCT 
     M.MOM_ID,
     M.INFANT_ID,
@@ -1751,71 +1203,32 @@ LEFT JOIN demographics AS D
     ON M.INFANT_ID = D.ID;
 QUIT;
 
-/* Going to look at all exposed infants, but filter of APCD_anyclaim for testing and treatment cascades */
-DATA INFANT_COHORT;
-    SET MERGED_COHORT;
-    IF APCD_anyclaim = 1 AND SELF_FUNDED = 0 THEN OUTPUT;
-RUN;
-
-/*====================================*/
-/* COHORT 2: Any Child <=15 in MAVEN */ 
-/*====================================*/
-
-PROC SQL;
-    CREATE TABLE COHORT15 AS
-    SELECT DISTINCT 
-        ID, 
-        min(AGE_HCV) as AGE_HCV, 
-        min(DISEASE_STATUS_HCV) as DISEASE_STATUS_HCV, 
-        min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
-        CASE 
-            WHEN SUM(CASE WHEN EVER_IDU_HCV = 1 THEN 1 ELSE 0 END) > 0 THEN 1
-            WHEN SUM(CASE WHEN EVER_IDU_HCV = 0 THEN 1 ELSE 0 END) > 0 THEN 0
-            WHEN SUM(CASE WHEN EVER_IDU_HCV = 9 THEN 1 ELSE 0 END) > 0 THEN 9
-            ELSE .
-        END AS EVER_IDU_HCV
-    FROM PHDHEPC.HCV
-    WHERE AGE_HCV <= 15 AND AGE_HCV NE .
-    GROUP BY ID;
-QUIT;
-
-PROC SQL;
-    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM COHORT15;
-QUIT;
-
-%put Number of unique IDs in COHORT15 table: &num_unique_ids;
-
-/*============================ */
-/*        HCV CASCADE          */
-/*============================ */
-
 /* ========================================================== */
-/*                       HCV TESTING                          */
+/* 10. Extract AB/RNA/GENOTYPE Testing Data                    */
 /* ========================================================== */
+/* Extract antibody/rna/genotype testing records (CPT codes) from the PHDAPCD.MOUD_MEDICAL dataset.
+Then, remove duplicate testing records based on unique combinations of ID and testing date and sort by ID and testing date in ascending order. 
+Transpose the testing dates for each individual into wide format to create multiple columns for testing dates. 
+Extract the year from the testing records for each ID and creates a new dataset that includes distinct IDs, testing years, and age at testing.
+Select the earliest testing year for each ID and output the frequency of tests occurring in infants under the age of 4. */
 
-/* =========== */
-/* AB TESTING */
-/* ========== */
+/* AB */
+
 DATA ab;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEAR MED_AGE					 
 					 WHERE = (MED_PROC_CODE IN  &AB_CPT));
 run;
 
-/* Deduplicate */
 proc sql;
 create table AB1 as
 select distinct ID, MED_FROM_DATE, *
 from AB;
 quit;
 
-/* Sort the data by ID MED_FROM_DATE in ascending order */
 PROC SORT data=ab1;
   by ID MED_FROM_DATE;
 RUN;
 
-/* Transpose for long table */
 PROC TRANSPOSE data=ab1 out=ab_wide (KEEP = ID AB_TEST_DATE:) PREFIX=AB_TEST_DATE_;
 BY ID;
 VAR MED_FROM_DATE;
@@ -1839,9 +1252,7 @@ proc freq data=AB_YEARS_FIRST;
     where MED_AGE < 4; 
 run;
 
-/* =========== */
-/* RNA TESTING */
-/* =========== */
+/* RNA */
 
 DATA rna;
 SET PHDAPCD.MOUD_MEDICAL(KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEAR MED_AGE
@@ -1849,14 +1260,12 @@ SET PHDAPCD.MOUD_MEDICAL(KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEA
 					 WHERE = (MED_PROC_CODE IN  &RNA_CPT));
 run;
 
-/* Deduplicate */
 proc sql;
 create table rna1 as
 select distinct ID, MED_FROM_DATE, *
 from rna;
 quit;
 
-/* Sort the data by ID MED_FROM_DATE in ascending order */
 PROC SORT data=rna;
   by ID MED_FROM_DATE;
 RUN;
@@ -1884,9 +1293,7 @@ proc freq data=RNA_YEARS_FIRST;
     where MED_AGE < 4; 
 run;
 
-/* ================ */
-/* GENOTYPE TESTING */
-/* ================ */
+/* GENOTYPE */
 
 DATA geno;
 SET PHDAPCD.MOUD_MEDICAL(KEEP = ID MED_FROM_DATE MED_PROC_CODE
@@ -1894,7 +1301,6 @@ SET PHDAPCD.MOUD_MEDICAL(KEEP = ID MED_FROM_DATE MED_PROC_CODE
 					 WHERE = (MED_PROC_CODE IN  &GENO_CPT));
 run;
 
-/* Sort the data by ID MED_FROM_DATE in ascending order */
 PROC SORT data=geno;
   by ID MED_FROM_DATE;
 RUN;
@@ -1904,13 +1310,18 @@ BY ID;
 VAR MED_FROM_DATE;
 RUN;
 
-/*  Join all labs to INFANT_COHORT */
+/* ========================================================== */
+/* 11. Join All Testing Data with Infant Cohort and Create HCV Testing Indicators */
+/* ========================================================== */
+/* This step joins antibody, RNA, and genotype testing data to the main TOTAL_APCD_INFANT_COHORT dataset based on the ID and
+creates indicators for whether infants had antibody, RNA, and any HCV testing. */
+
 PROC SQL;
     CREATE TABLE INFANT_TESTING AS
-    SELECT * FROM INFANT_COHORT 
-    LEFT JOIN ab_wide ON ab_wide.ID = INFANT_COHORT.INFANT_ID
-    LEFT JOIN rna_wide ON rna_wide.ID = INFANT_COHORT.INFANT_ID
-    LEFT JOIN geno_wide ON geno_wide.ID = INFANT_COHORT.INFANT_ID;
+    SELECT * FROM TOTAL_APCD_INFANT_COHORT 
+    LEFT JOIN ab_wide ON ab_wide.ID = TOTAL_APCD_INFANT_COHORT.INFANT_ID
+    LEFT JOIN rna_wide ON rna_wide.ID = TOTAL_APCD_INFANT_COHORT.INFANT_ID
+    LEFT JOIN geno_wide ON geno_wide.ID = TOTAL_APCD_INFANT_COHORT.INFANT_ID;
 QUIT;
 
 DATA INFANT_TESTING;
@@ -1927,47 +1338,46 @@ DATA INFANT_TESTING;
 
 Proc sort data=INFANT_TESTING; by INFANT_ID; run;
 
+/* ========================================================== */
+/* 12. Create HCV Testing Indicators and Appropriate Testing Flags */
+/* ========================================================== */
+/* This step processes the joined infant cohort data to create indicators for appropriate HCV testing, 
+calculates age at first HCV test, and determines if testing meets specific timing criteria. */
+
 DATA INFANT_TESTING;
     SET INFANT_TESTING;
     by INFANT_ID;
 
-    /* Determine the number of variables dynamically */
     array RNA_TESTS (*) RNA_TEST_DATE_:;
     array AB_TESTS (*) AB_TEST_DATE_:;
     num_rna_tests = dim(RNA_TESTS);
     num_ab_tests = dim(AB_TESTS);
 
-    /* Retain statement */
     retain APPROPRIATE_AB_Testing APPROPRIATE_RNA_Testing APPROPRIATE_Testing 
            AGE_AT_FIRST_TEST AGE_AT_FIRST_AB_TEST AGE_AT_FIRST_RNA_TEST;
 
-    /* Initialize variables at the start of each group */
     IF first.INFANT_ID THEN DO;
         APPROPRIATE_AB_Testing = 0; APPROPRIATE_RNA_Testing = 0;
         APPROPRIATE_Testing = 0; AGE_AT_FIRST_TEST = .; AGE_AT_FIRST_AB_TEST = .; AGE_AT_FIRST_RNA_TEST = .;
     END;
 
-    /* Loop through the determined number of variables for RNA tests */
     DO i=1 TO num_rna_tests;
         IF AGE_AT_FIRST_RNA_TEST = . AND RNA_TESTS(i) NE . THEN
             AGE_AT_FIRST_RNA_TEST = FLOOR((RNA_TESTS(i) - DOB_INFANT_TBL)/30.4);
         IF (RNA_TESTS(i) - DOB_INFANT_TBL) > 60 THEN
-            APPROPRIATE_RNA_Testing = 1; /* Had an RNA test at >=2mo of age; */
+            APPROPRIATE_RNA_Testing = 1;
     END;
 
-    /* Loop through the determined number of variables for AB tests */
     DO i=1 TO num_ab_tests;
         IF AGE_AT_FIRST_AB_TEST = . AND AB_TESTS(i) NE . THEN
             AGE_AT_FIRST_AB_TEST = FLOOR((AB_TESTS(i) - DOB_INFANT_TBL)/30.4);
         IF (AB_TESTS(i) - DOB_INFANT_TBL) > 547 THEN
-            APPROPRIATE_AB_Testing = 1; /* Had an Ab test at >=18mo of age; */
+            APPROPRIATE_AB_Testing = 1;
     END;
 
-    /* Determine if any appropriate testing occurred */
     IF APPROPRIATE_AB_Testing = 1 OR APPROPRIATE_RNA_Testing = 1 THEN
         APPROPRIATE_Testing = 1;
 
-    /* Determine the minimum age at first test */
     IF AGE_AT_FIRST_AB_TEST NE . AND AGE_AT_FIRST_RNA_TEST NE . THEN
         AGE_AT_FIRST_TEST = MIN(AGE_AT_FIRST_AB_TEST, AGE_AT_FIRST_RNA_TEST);
     ELSE IF AGE_AT_FIRST_AB_TEST NE . THEN
@@ -1975,19 +1385,19 @@ DATA INFANT_TESTING;
     ELSE IF AGE_AT_FIRST_RNA_TEST NE . THEN
         AGE_AT_FIRST_TEST = AGE_AT_FIRST_RNA_TEST;
 
-    /* Format the ages at first tests to reduce suppression */
     IF AGE_AT_FIRST_AB_TEST > 30 THEN AGE_YRS_AT_FIRST_AB_TEST = FLOOR(AGE_AT_FIRST_AB_TEST/12);
     IF AGE_AT_FIRST_RNA_TEST > 18 THEN AGE_YRS_AT_FIRST_RNA_TEST = FLOOR(AGE_AT_FIRST_RNA_TEST/12);
     IF AGE_AT_FIRST_TEST > 30 THEN AGE_YRS_AT_FIRST_TEST = FLOOR(AGE_AT_FIRST_TEST/12);
 
-    /* Drop the variable i */
     DROP i;
 
 RUN;
 
 /* ========================================================== */
-/*                   HCV STATUS FROM MAVEN                    */
+/* 13. Extract HCV Status from MAVEN Database                  */
 /* ========================================================== */
+/* This section retrieves the HCV diagnosis status for each infant from the MAVEN database,
+   calculates the age at diagnosis, and creates indicators for HCV seropositivity and confirmed HCV. */
 
 PROC SQL;
     CREATE TABLE HCV_STATUS AS
@@ -2007,8 +1417,6 @@ PROC SQL;
         ID;
 QUIT;
 
-/*  JOIN TO LARGER TABLE */
-
 PROC SQL;
     CREATE TABLE INFANT_HCV_STATUS AS
     SELECT * FROM INFANT_TESTING 
@@ -2016,16 +1424,16 @@ PROC SQL;
 QUIT;
 
 /* ========================================================== */
-/*                      LINKAGE TO CARE                       */
+/* 14. Linkage to HCV Care                                     */
 /* ========================================================== */
+/* This section retrieves medical records related to HCV care from the MOUD_MEDICAL dataset,
+   filters based on relevant ICD codes, and creates a dataset for infants linked to HCV care. */
 
 DATA HCV_LINKED_SAS;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
 					 
 					 WHERE = (MED_ICD1 IN &HCV_ICD));
 RUN;
-
-/* FINAL LINKAGE TO CARE DATASET */
 
 PROC SQL;
 CREATE TABLE HCV_LINKED AS 
@@ -2035,8 +1443,6 @@ SELECT ID,
 from HCV_LINKED_SAS
 GROUP BY ID;
 QUIT;
-
-/*  JOIN LINKAGE TO MAIN DATASET */
 
 PROC SQL;
     CREATE TABLE INFANT_LINKED AS
@@ -2050,15 +1456,15 @@ IF HCV_SEROPOSITIVE_INDICATOR = . THEN HCV_SEROPOSITIVE_INDICATOR = 0;
 run;
 
 /* ========================================================== */
-/*                       DAA STARTS                           */
+/* 15. DAA (Direct-Acting Antiviral) Treatment Starts          */
 /* ========================================================== */
+/* This section identifies infants who started DAA treatment, reatins the first DAA start, calculates the age at DAA start,
+   and creates indicators for DAA initiation. */
 
-/* Extract all relevant data */
 DATA DAA; SET PHDAPCD.MOUD_PHARM(KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
 								WHERE = (PHARM_NDC IN &DAA_CODES));
 RUN;
 
-/* Reduce to one row per person */
 PROC SQL;
 CREATE TABLE DAA_STARTS as
 SELECT distinct ID,
@@ -2070,7 +1476,6 @@ SELECT distinct ID,
 GROUP BY ID;
 QUIT;
 
-/* Join to main dataset */
 PROC SQL;
     CREATE TABLE INFANT_DAA AS
     SELECT * FROM INFANT_LINKED 
@@ -2081,28 +1486,19 @@ DATA INFANT_DAA; SET INFANT_DAA;
 IF DAA_START_INDICATOR = . THEN DAA_START_INDICATOR = 0;
 run;
 
-PROC SQL;
-    SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
-    INTO :num_unique_ids
-    FROM INFANT_DAA;
-QUIT;
-
-%put Number of unique BIRTH_LINK_IDs in INFANT_DAA table: &num_unique_ids;
-
-PROC CONTENTS data=INFANT_DAA;
-title "Contents of Final Dataset";
-run;
+/* ========================================================== */
+/* 16. End of Treatment (EOT) and Sustained Virologic Response (SVR12) RNA Testing */
+/* ========================================================== */
+/* This section processes the RNA test dates to determine if infants received an EOT or SVR12 RNA test after starting DAA treatment. */
 
 DATA TESTING;
     SET INFANT_DAA;
     EOT_RNA_TEST = 0;
     SVR12_RNA_TEST = 0;
 
-    /* Determine the number of variables dynamically */
     array test_date_array (*) RNA_TEST_DATE_:;
     num_tests = dim(test_date_array);
 
-    /* Loop through the determined number of variables */
     do i = 1 to num_tests;
         if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
             time_since = test_date_array{i} - FIRST_DAA_DATE;
@@ -2115,8 +1511,58 @@ DATA TESTING;
     DROP i time_since;
 RUN;
 
+/*====================*/
+/* 17. Filter final TESTING cohort */
+/*====================*/
+/* NOTE: The HCV dataset is only updated through 2021, so our inclusion criteria remains :
+HCV case report data between 2011-2021 (inherently from HEPC dataset) and a delivery of a liveborn between 2014-2021;
+Testing cohort includes infants born 2014 (first year APCD in dataset) through 2020 (at least 18mo old by study end);
+Linkage to care and treatment cohorts inlcudes children born January 2014 - June 2019 (at least 3 yo by study end); */
+
+/* So, in this step, we create two different cohorts: (1) TOTAL_APCD_INFANT_COHORT including all exposed infants (delivery of a liveborn) born 2014-2021, and
+(2) FILTERED_INFANT_COHORT that retains only infants with insurance claims (APCD_anyclaim) born 2014-2021, excluding those who died before reaching 18 months of age.
+We also filter the FILTERED_INFANT_COHORT dataset to exlcude infants whose mothers had a DAA prescription prior to the time of birth.
+We can then restrict linkage to care and treatment cohorts further to children born January 2014 - June 2019. Then, Count Unique Infants in Final Dataset. */
+
+data TOTAL_APCD_INFANT_COHORT;
+    set TOTAL_APCD_INFANT_COHORT;
+    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2021;
+run;
+
+DATA FILTERED_INFANT_COHORT;
+    SET TESTING;
+    IF APCD_anyclaim = 1 AND SELF_FUNDED = 0 THEN OUTPUT;
+RUN;
+
+DATA FILTERED_INFANT_COHORT;
+    SET FILTERED_INFANT_COHORT;
+    IF  DOB_MOM_TBL > FIRST_DAA_DATE THEN DELETE;
+RUN;
+
+PROC SQL;
+    CREATE TABLE FILTERED_INFANT_COHORT AS
+    SELECT cohort.*
+    FROM FILTERED_INFANT_COHORT AS cohort
+    LEFT JOIN PHDDEATH.DEATH AS death
+    ON cohort.INFANT_ID = death.ID
+    WHERE (death.DOD - cohort.DOB_INFANT_TBL) >= 30 * 18
+       OR death.DOD IS NULL;
+QUIT;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM FILTERED_INFANT_COHORT;
+QUIT;
+
+%put Number of unique BIRTH_LINK_IDs in FILTERED_INFANT_COHORT table: &num_unique_ids;
+
+PROC CONTENTS data=FILTERED_INFANT_COHORT;
+title "Contents of Final FILTERED_INFANT_COHORT Dataset";
+run;
+
 /* ========================================================== */
-/*                       CASCADE TABLES                           */
+/* 18. FOMRAT CASCADE TABLES                                   */
 /* ========================================================== */
 
 PROC FORMAT;
@@ -2151,124 +1597,135 @@ proc format;
 run;
 
 /* ========================================================== */
-/*  HCV-EXPOSED INFANT TESTING CARE CASCADE TABLES */
+/* 19. OUTPUT: HCV-EXPOSED INFANT TESTING CARE CASCADE TABLES */
 /* ========================================================== */
 
-/* For measuring testing for HCV, we want infants born 2014 (first year APCD in dataset) through 2019 
-because we want Infants who were at least 18mo old by study end, because the testing recommendations,
-at least through summer 2023, have been largely to wait until 18mo to test for HCV Ab - once maternal
-Ab is lost. Therefore cohort for testing = born 2014-2019 */
-
-/*Exposed infants inlcude APCD_anyclaim = 0 */
-title "EXPOSED Infants born to moms with HCV born 2014-2022";
-proc freq data=MERGED_COHORT;
+title "Total Exposed Cohort: Infants born to moms with HCV born 2014-2021";
+proc freq data=TOTAL_APCD_INFANT_COHORT;
     tables INFANT_YEAR_BIRTH / missing norow nopercent nocol; 
-    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2022;
 run;
 
-title "Infants born to moms with HCV, Testing and Diagnosis, Overall, born 2014-2019";
-proc freq data=TESTING;
+title "Filtered Cohort: Infants born to moms with HCV, Testing and Diagnosis, Overall, born 2014-2020";
+proc freq data=FILTERED_INFANT_COHORT;
     tables ANY_HCV_TESTING_INDICATOR
            APPROPRIATE_Testing
            CONFIRMED_HCV_INDICATOR
            DAA_START_INDICATOR / missing norow nopercent nocol;
-    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
 run;
 
-proc sort data=TESTING;
+proc sort data=FILTERED_INFANT_COHORT;
 	by APPROPRIATE_RNA_Testing;
 run;
 
-proc freq data=TESTING;
+proc freq data=FILTERED_INFANT_COHORT;
     by APPROPRIATE_RNA_Testing;
     tables APPROPRIATE_AB_Testing
     		CONFIRMED_HCV_INDICATOR / missing norow nopercent nocol;
-    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
 run;
 
-proc sort data=TESTING;
+proc sort data=FILTERED_INFANT_COHORT;
     by INFANT_YEAR_BIRTH APPROPRIATE_AB_TESTING;
 run;
 
-proc freq data=TESTING;
+proc freq data=FILTERED_INFANT_COHORT;
     by INFANT_YEAR_BIRTH APPROPRIATE_AB_TESTING;
     tables APPROPRIATE_RNA_Testing / missing norow nopercent nocol;
-    where INFANT_YEAR_BIRTH >= 2014 and INFANT_YEAR_BIRTH <= 2019;
 run;
 
-title "Infants with confirmed perinatal HCV only, unstratified, born 2014-2019 - ie age at dx <3";
-proc freq data=TESTING;
+title "Filtered Cohort: Infants with confirmed perinatal HCV only, unstratified, born 2014-2020 - ie age at dx <3";
+proc freq data=FILTERED_INFANT_COHORT;
     tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
-    Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3;
+    Where CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3;
 run;
 
-title "Infants with confirmed perinatal HCV only, unstratified, born 1/2014-6/2018, Confirmed HCV";
-proc freq data=TESTING;
+title "Filtered Cohort: Infants with confirmed perinatal HCV only, unstratified, born 1/2014-6/2019, Confirmed HCV";
+proc freq data=FILTERED_INFANT_COHORT;
     tables ANY_HCV_TESTING_INDICATOR GENO_TEST_INDICATOR HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
-    Where (INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <=2017 OR (INFANT_YEAR_BIRTH=2018 AND MONTH_BIRTH<=6))
+    Where (INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <=2017 OR (INFANT_YEAR_BIRTH=2019 AND MONTH_BIRTH<=6))
     AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
 run;
 
-title "Infants with confirmed perinatal HCV only, unstratified, born 2011-2021";
-proc freq data=TESTING;
+title "Filtered Cohort: Infants with confirmed perinatal HCV only, unstratified, born 2011-2021";
+proc freq data=FILTERED_INFANT_COHORT;
     tables HCV_PRIMARY_DIAG DAA_START_INDICATOR EOT_RNA_TEST SVR12_RNA_TEST / missing norow nopercent nocol;
-    Where INFANT_YEAR_BIRTH >= 2011 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
+    Where (INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <=2017 OR (INFANT_YEAR_BIRTH=2019 AND MONTH_BIRTH<=6))
+    AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
 run;
 
-/*Exposed infants inlcude APCD_anyclaim = 0 */
-title "Total Number of EXPOSED Infants in Cohort, By Race, born 2014-2021";
-proc freq data=MERGED_COHORT;
+title "Total Exposed Cohort: Total Number of EXPOSED Infants in Cohort, By Race, born 2014-2021";
+proc freq data=TOTAL_APCD_INFANT_COHORT;
 	table final_re / missing norow nopercent nocol;
-	WHERE INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2021;
 	FORMAT final_re racefmt_all.;
 run;
 
-title "Infants born to moms with HCV, TESTING/DIAGNOSIS Care Cascade, By Race, 2014-2019";
-proc sort data=INFANT_DAA;
+title "Filtered Cohort: Infants born to moms with HCV, TESTING/DIAGNOSIS Care Cascade, By Race, 2014-2020";
+proc sort data=FILTERED_INFANT_COHORT;
     by final_re;
 run;
 
-proc freq data=INFANT_DAA;
+proc freq data=FILTERED_INFANT_COHORT;
     by final_re;
     tables ANY_HCV_TESTING_INDICATOR
            APPROPRIATE_Testing
            CONFIRMED_HCV_INDICATOR / missing norow nopercent nocol;
-    Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019;
 run;
 
-title "Infants born to moms with HCV, Care Cascade, By Race/Hispanic Ethnicity, born 2014-2019, Confirmed Perinatal HCV";
-proc freq data=INFANT_DAA;
+title "Filtered Cohort: Infants born to moms with HCV, Care Cascade, By Race/Hispanic Ethnicity, born 2014-2020, Confirmed Perinatal HCV";
+proc freq data=FILTERED_INFANT_COHORT;
     by final_re;
     tables CONFIRMED_HCV_INDICATOR
            HCV_PRIMARY_DIAG
            GENO_TEST_INDICATOR / missing norow nopercent nocol;
-    Where INFANT_YEAR_BIRTH >= 2014 AND INFANT_YEAR_BIRTH <= 2019 AND CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
+    Where CONFIRMED_HCV_INDICATOR=1 AND AGE_AT_DX < 3 AND AGE_AT_DX GE 0;
 run;
 
-title "Number of Infants Born by YEAR & Age at first appropriate Ab, RNA testing, 2014-2021";
-proc freq data=INFANT_DAA;
+title "Filtered Cohort: Number of Infants Born by YEAR & Age at first appropriate Ab, RNA testing, 2014-2020";
+proc freq data=FILTERED_INFANT_COHORT;
     TABLES INFANT_YEAR_BIRTH AGE_AT_FIRST_AB_TEST AGE_YRS_AT_FIRST_AB_TEST AGE_AT_FIRST_RNA_TEST AGE_YRS_AT_FIRST_RNA_TEST AGE_AT_FIRST_TEST AGE_YRS_AT_FIRST_TEST / missing norow nopercent nocol;
-    Where INFANT_YEAR_BIRTH >= 2014; /*to exclude those born 2011-13 whose first test occurred pre-APCD start;*/
 run;
 
-title "Total Number of Infants Born by YEAR, 2014-2021";
+title "Total Number of Birht Records by Year";
 proc freq data=PHDBIRTH.BIRTH_INFANT;
     TABLE YEAR_BIRTH / missing norow nopercent nocol;
 run;
 
-title "Number of appropriately tested infants by infant year of birth ie in each year how many infants born that year were ultimately appropriately tested bt 2014-2021";
-proc freq data=INFANT_DAA;
+title "Filtered Cohort: Total Number of Appropriately Tested Infants by YEAR";
+proc freq data=FILTERED_INFANT_COHORT;
     TABLES INFANT_YEAR_BIRTH / missing norow nopercent nocol;
     where APPROPRIATE_Testing = 1;
 run;
 
-/*===============================================================================*/
-/*  Apply HCV cascade to the 372 kids <15 in MAVEN HEPC
-/*===============================================================================*/
+/* ========================================================== */
+/* Part 3: HCV Care Cascade for Children <= 15 years of age   */
+/* ========================================================== */
+/* This section creates a dataset (COHORT15) that includes unique IDs of children aged 15 or younger 
+   diagnosed with HCV. It computes the minimum age, disease status, and event year for each ID and 
+   assesses their history of injection drug use (IDU) based on the EVER_IDU_HCV variable. */
 
-/* Join all relevant tables */
+PROC SQL;
+    CREATE TABLE COHORT15 AS
+    SELECT DISTINCT 
+        ID, 
+        min(AGE_HCV) as AGE_HCV, 
+        min(DISEASE_STATUS_HCV) as DISEASE_STATUS_HCV, 
+        min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
+        CASE 
+            WHEN SUM(CASE WHEN EVER_IDU_HCV = 1 THEN 1 ELSE 0 END) > 0 THEN 1
+            WHEN SUM(CASE WHEN EVER_IDU_HCV = 0 THEN 1 ELSE 0 END) > 0 THEN 0
+            WHEN SUM(CASE WHEN EVER_IDU_HCV = 9 THEN 1 ELSE 0 END) > 0 THEN 9
+            ELSE .
+        END AS EVER_IDU_HCV
+    FROM PHDHEPC.HCV
+    WHERE AGE_HCV <= 15 AND AGE_HCV NE .
+    GROUP BY ID;
+QUIT;
 
-/*  Testing */
+/* ========================================================== */
+/* 2. Testing for HCV Testing Indicators                       */
+/* ========================================================== */
+/* This section merges the COHORT15 dataset with additional testing datasets (ab_wide, rna_wide, geno_wide)
+   to identify HCV testing indicators for antibody, RNA, and genotype tests. */
+
 PROC SQL;
     CREATE TABLE TESTING15 AS
     SELECT * FROM COHORT15 
@@ -2276,6 +1733,12 @@ PROC SQL;
     LEFT JOIN rna_wide ON rna_wide.ID = COHORT15.ID
     LEFT JOIN geno_wide ON geno_wide.ID = COHORT15.ID;
 QUIT;
+
+/* ========================================================== */
+/* 3. Create HCV Testing Indicators                            */
+/* ========================================================== */
+/* This section initializes testing indicators for AB, RNA, and genotype tests, and 
+creates a general indicator for any HCV testing performed. */
 
 DATA TESTING15;
 	SET TESTING15;
@@ -2293,21 +1756,30 @@ DATA TESTING15;
 		IF AB_TEST_INDICATOR = 1 OR RNA_TEST_INDICATOR = 1 THEN ANY_HCV_TESTING_INDICATOR = 1;
 run;
 
-/* Linkage to Care  */
-PROC SQL;
+/* ========================================================== */
+/* 4. Linkage to Care                                        */
+/* ========================================================== */
+/* This section links the testing data with HCV linkage data 
+   to create a comprehensive dataset on HCV status for children. */
+
+   PROC SQL;
     CREATE TABLE HCV_STATUS15 AS
     SELECT * FROM TESTING15 
     LEFT JOIN HCV_LINKED ON HCV_LINKED.ID = TESTING15.ID;
 QUIT;
 
-/* DAA STARTS */
+/* ========================================================== */
+/* 5. DAA (Direct-Acting Antiviral) Treatment Starts         */
+/* ========================================================== */
+/* This section merges DAA treatment data with the HCV status dataset, 
+   retaining information about when DAA treatment starts for each child and categorizing age at DAA start into groups. */
+
 PROC SQL;
     CREATE TABLE DAA15 AS
     SELECT * FROM HCV_STATUS15 
     LEFT JOIN DAA_STARTS ON DAA_STARTS.ID = HCV_STATUS15.ID;
 QUIT;
 
-/* Final Dataset for the under 15 cohort */
 DATA DAA15; SET DAA15;
 IF DAA_START_INDICATOR = . THEN DAA_START_INDICATOR = 0;
 if AGE_DAA_START ne . then do;
@@ -2319,24 +1791,33 @@ if AGE_DAA_START ne . then do;
 end;
 run;
 
+/* ========================================================== */
+/* 6. Merge with Demographic Data                             */
+/* ========================================================== */
+/* This section adds demographic information to the DAA dataset 
+   to provide context for treatment and health outcomes. */
+
 PROC SQL;
     CREATE TABLE DAA15 AS
     SELECT * FROM DAA15 
     LEFT JOIN demographics ON demographics.ID = DAA15.ID;
 QUIT;
 
+/* ========================================================== */
+/* 7. Calculate EOT and SVR12 RNA Test Indicators           */
+/* ========================================================== */
+/* This section assesses the time since the first DAA treatment 
+   and sets indicators for end-of-treatment (EOT) and sustained virologic response 
+   at 12 weeks (SVR12) based on RNA test dates. */
+
 DATA TRT_TESTING15;
     SET DAA15;
     EOT_RNA_TEST = 0;
     SVR12_RNA_TEST = 0;
-    *IF RNA_TEST_DATE_1 = . THEN DELETE;
-    *IF FIRST_DAA_DATE = . THEN DELETE;
 
-    /* Determine the number of variables dynamically */
     array test_date_array (*) RNA_TEST_DATE_:;
     num_tests = dim(test_date_array);
 
-    /* Loop through the determined number of variables */
     do i = 1 to num_tests;
             if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
                 time_since = test_date_array{i} - FIRST_DAA_DATE;
@@ -2344,25 +1825,25 @@ DATA TRT_TESTING15;
                 if time_since > 84 then EOT_RNA_TEST = 1;
                 if time_since >= 140 then SVR12_RNA_TEST = 1;
             end;
-            else time_since = .; /* Added this else back in 8/1/23 RE */
+            else time_since = .;
         end;
 
     DROP i time_since;
 RUN;
 
-/*=================================	*/
-/*       <=15 Year Old TABLES       */
-/*=================================	*/
+/* ========================================================== */
+/* 8. OUTPUT: Frequency Tables for HCV Care Cascade          */
+/* ========================================================== */
 
 title "HCV Care Cascade for children diagnosed with HCV at age <=15 years between 2011-2021, Overall";
 proc freq data=DAA15;
     tables DISEASE_STATUS_HCV DAA_START_INDICATOR FIRST_DAA_START_YEAR / missing norow nopercent nocol;
 run;
 
-title "<=15 HCV Care Cascade, DAA starts pre 2020";
+title "<=15 HCV Care Cascade, DAA starts pre 2021";
 proc freq data=DAA15;
     tables DAA_START_INDICATOR / missing norow nopercent nocol;
-    Where FIRST_DAA_START_YEAR < 2020;
+    Where FIRST_DAA_START_YEAR < 2021;
 run;
 
 title "<=15 HCV Care Cascade, Among Confirmed";
@@ -2430,14 +1911,22 @@ proc freq data=TRT_TESTING15;
 run;
 title;
 
+data TRT_TESTING15;
+    set TRT_TESTING15;
+    if DISEASE_STATUS_HCV = 1 and YOB <= 2018;
+run;
+
 /* ========================================================== */
-/*                       Pull Covariates                      */
+/* Part 4: Cohort Tables for manuscript                       */
 /* ========================================================== */
+/* Aggregate Covariates: HOMELESS_EVER, DISCH_WITH_MOM, FACILITY_ID_BIRTH, GESTATIONAL_AGE, INF_VAC_HBIG, NAS_BC, NAS_BC_NEW, RES_ZIP_BIRTH, Res_Code_Birth,
+NAS_BC_TOTAL, county, MOMS_FINAL_RE, EVER_INCARCERATED, MOMS_HOMELESS_HISTORY, FOREIGN_BORN, AGE_BIRTH, LD_PAY, KOTELCHUCK, PRENAT_SITE, LANGUAGE_SPOKEN, MATINF_HEPC, MATINF_HEPB,
+MOTHER_EDU, MENTAL_HEALTH_DIAG, IJI_DIAG, OTHER_SUBSTANCE_USE, WELL_CHILD, MED_PROV_CITY, MED_PROV_ZIP, HCV_DIAG, OUD_CAPTURE, EVER_IDU_HCV_MAT */
 
 proc sql noprint;
 select cats('WORK.',memname) into :to_delete separated by ' '
 from dictionary.tables
-where libname = 'WORK' and memname not in ('INFANT_DAA', 'OUD_HCV_DAA', 'TRT_TESTING15');
+where libname = 'WORK' and memname not in ('FILTERED_INFANT_COHORT', 'OUD_HCV_DAA', 'TRT_TESTING15');
 quit;
 
 proc delete data=&to_delete.;
@@ -2445,8 +1934,8 @@ run;
 
 proc sql;
     create table FINAL_INFANT_COHORT as
-    select INFANT_DAA.*,
-           demographics.HOMELESS_HISTORY,
+    select FILTERED_INFANT_COHORT.*,
+           demographics.HOMELESS_EVER,
            birthsinfants.DISCH_WITH_MOM,
            birthsinfants.FACILITY_ID_BIRTH,
            birthsinfants.GESTATIONAL_AGE,
@@ -2462,13 +1951,12 @@ proc sql;
            when birthsinfants.NAS_BC = . or birthsinfants.NAS_BC_NEW = . then .
            else .
            end as NAS_BC_TOTAL
-    from INFANT_DAA
+    from FILTERED_INFANT_COHORT
     left join PHDSPINE.DEMO as demographics
-    on INFANT_DAA.INFANT_ID = demographics.ID
+    on FILTERED_INFANT_COHORT.INFANT_ID = demographics.ID
     left join PHDBIRTH.BIRTH_INFANT as birthsinfants
-    on INFANT_DAA.INFANT_ID = birthsinfants.ID;
+    on FILTERED_INFANT_COHORT.INFANT_ID = birthsinfants.ID;
 
-    /* Create county from res_code */
     data FINAL_INFANT_COHORT;
         set FINAL_INFANT_COHORT;
         if res_code = 999 then county = "Missing/Unknown/Invalid";
@@ -2503,7 +1991,7 @@ proc sql;
     select FINAL_INFANT_COHORT.*,
            demographics.FINAL_RE as MOMS_FINAL_RE, 
            demographics.EVER_INCARCERATED,
-           demographics.HOMELESS_HISTORY as MOMS_HOMELESS_HISTORY,
+           demographics.HOMELESS_EVER as MOMS_HOMELESS_HISTORY,
            demographics.FOREIGN_BORN,
            birthsmoms.AGE_BIRTH,
            birthsmoms.LD_PAY,
@@ -2748,7 +2236,6 @@ quit;
 
 %let well_child = ('99381', '99391', '99381', '99391', '99381', '99391', '99382', '99392');
 
-/* Step 1: Create ALL_WELL_CHILD_COHORT table */
 proc sql;
 create table ALL_WELL_CHILD_COHORT(where=(WELL_CHILD=1)) as
 select distinct FINAL_INFANT_COHORT.INFANT_ID,
@@ -2763,7 +2250,6 @@ left join PHDAPCD.MOUD_MEDICAL as apcd
 on FINAL_INFANT_COHORT.INFANT_ID = apcd.ID;
 quit;
 
-/* Step 2: Create ALL_WELL_CHILD_COHORT table */
 proc sql;
 create table ALL_WELL_CHILD_COHORT as
 select distinct a.INFANT_ID,
@@ -2775,10 +2261,9 @@ on a.INFANT_ID = b.ID
 where b.MED_FROM_DATE is not missing
     and (b.MED_FROM_DATE - (select DOB_INFANT_TBL from FINAL_INFANT_COHORT where INFANT_ID = a.INFANT_ID)) >= 18*30
     and (b.MED_FROM_DATE - (select DOB_INFANT_TBL from FINAL_INFANT_COHORT where INFANT_ID = a.INFANT_ID)) <= 36*30
-order by a.INFANT_ID, b.MED_FROM_DATE; /* Sorting by INFANT_ID and MED_FROM_DATE */
+order by a.INFANT_ID, b.MED_FROM_DATE;
 quit;
 
-/* Additional step to pull only the first instance */
 data DEDUP_WELL_CHILD_COHORT;
 set ALL_WELL_CHILD_COHORT;
 by INFANT_ID;
@@ -2825,6 +2310,12 @@ data FINAL_INFANT_COHORT_COV;
                              138,140,147,151,153,162,179,185,186,188,202,212,215,216,222,226,228,234,235,241,255,257,
                              271,277,278,280,282,287,290,294,303,304,311,316,321,323,328,332,343,348) then MED_PROV_COUNTY='WORCESTER';
 run;
+
+proc sql;
+    update FINAL_INFANT_COHORT_COV 
+    set MED_PROV_COUNTY = county
+    where MED_PROV_COUNTY is missing;
+ quit;
 
 %LET HCV_ICD = ('7051', '7054', '707',
 				'7041', '7044', '7071',
@@ -2891,13 +2382,6 @@ proc sql;
     on A.MOM_ID = B.MOM_ID;
 quit;
 
-proc sql;
-    create table FINAL_INFANT_COHORT_COV as
-    select *
-    from FINAL_INFANT_COHORT_COV
-    where INFANT_YEAR_BIRTH between 2014 and 2019;
-quit;
-
 PROC SQL;
     SELECT COUNT(DISTINCT INFANT_ID) AS Number_of_Unique_IDs
     INTO :num_unique_ids
@@ -2906,18 +2390,16 @@ QUIT;
 
 %put Number of unique Infant IDs in FINAL_INFANT_COHORT_COV table: &num_unique_ids;
 
-/* ========================================================== */
-/*                       Table 1 and Regressions              */
-/* ========================================================== */
+/* ================================= */
+/* 2. FORMATS                        */
+/* ================================= */
 
-/* Define format for single integer flags*/
 proc format;
     value flagf
     0 = 'No'
     1 = 'Yes'
     9 = 'Unknown';
 
-/* Define format for FINAL_SEX */
 proc format;
     value sexf
     1 = 'Male'
@@ -2925,7 +2407,6 @@ proc format;
     9 = 'Missing'
     99 = 'Not an MA resident';
 
-/* Define format for FINAL_RE */
 proc format;
     value raceef
     1 = 'White Non-Hispanic'
@@ -2936,7 +2417,6 @@ proc format;
     9 = 'Missing'
     99 = 'Not an MA resident';
 
-/* Define format for FOREIGN_BORN */
 proc format;
 value fbornf
     0 = 'No'
@@ -2944,7 +2424,6 @@ value fbornf
     8 = 'Missing in dataset'
     9 = 'Not collected';
 
-/* Define format for LANGUAGE */
 proc format;
 value langf
 	0 = 'Not Provided' | 'Unknown/missing'
@@ -2952,14 +2431,12 @@ value langf
     2 = 'English and Another Language'
     3 = 'Another Language';
 
-/* Define format for LD_PAY */
 proc format;
 value ld_pay_fmt
     1 = 'Public'
     2 = 'Private'
     9 = 'Unknown';
 
-/* Define format for KOTELCHUCK */
 proc format;
 value kotel_fmt
     0 = 'Missing/Unknown'
@@ -2968,7 +2445,6 @@ value kotel_fmt
     3 = 'Adequate'
     4 = 'Intensive';
 
-/* Define format for PRENAT_SITE */
 proc format;
 value prenat_site_fmt
     1 = 'Private Physicians Office'
@@ -2977,6 +2453,21 @@ value prenat_site_fmt
     4 = 'Hospital Clinic'
     5 = 'Other'
     9 = 'Unknown';
+
+proc format;
+    value homelessness
+        0 = "No"
+        1 = "Yes"
+        2 = "Yes, living in emergency shelter"
+        3 = "Suspected based on address or ICD diagnostic code"
+        4 = "Reported unstable housing or ICD code for housing instability"
+        5 = "Not homeless but had been in the past"
+        9 = "Unknown/missing";
+run;
+
+/* ================================= */
+/* 3. RECATEGORIZE                   */
+/* ================================= */
 
 data FINAL_INFANT_COHORT_COV;
     length LANGUAGE_SPOKEN_GROUP $30;
@@ -2988,7 +2479,6 @@ data FINAL_INFANT_COHORT_COV;
     else LANGUAGE_SPOKEN_GROUP = 'N/A (MF Record)';
 run;
 
-/* Modify mother_edu into a categorical variable */
 data FINAL_INFANT_COHORT_COV;
     length MOTHER_EDU_GROUP $30;
     set FINAL_INFANT_COHORT_COV;
@@ -2999,7 +2489,6 @@ data FINAL_INFANT_COHORT_COV;
     else MOTHER_EDU_GROUP = 'Other or Unknown';
 run;
 
-/* Modify age_birth into a categorical variable */
 data FINAL_INFANT_COHORT_COV;
     set FINAL_INFANT_COHORT_COV;
     if AGE_BIRTH = 9999 then AGE_BIRTH_GROUP = 'Unknown';
@@ -3008,7 +2497,6 @@ data FINAL_INFANT_COHORT_COV;
     else if AGE_BIRTH <= 35 then AGE_BIRTH_GROUP = '26-35';
     else AGE_BIRTH_GROUP = '>35';
 
-/* Make gestational_age categorical */
 data FINAL_INFANT_COHORT_COV;
     set FINAL_INFANT_COHORT_COV;
     if GESTATIONAL_AGE = 99 then GESTATIONAL_AGE_CAT = 'Unknown';
@@ -3020,6 +2508,10 @@ run;
 proc sort data=FINAL_INFANT_COHORT_COV;
     by MOM_DISEASE_STATUS_HCV;
 run;
+
+/* ================================= */
+/* 4. EXPLORATORY TABLES AND SUM STATS  */
+/* ================================= */
 
 title "HCV Diagnosis by ICD Code/Birth Certificate by MOM_DISEASE_STATUS_HCV";
 proc freq data=FINAL_INFANT_COHORT_COV;
@@ -3037,14 +2529,12 @@ proc freq data=FINAL_INFANT_COHORT_COV;
 tables HCV_DIAG / missing norow nocol nopercent;
 run;
 
-/* Calculate mean age stratified by appropriate testing */
 proc means data=FINAL_INFANT_COHORT_COV;
     var AGE_BIRTH;
     where AGE_BIRTH ne 9999;
     output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
 run;
 
-/* Sort the dataset by APPROPRIATE_Testing */
 proc sort data=FINAL_INFANT_COHORT_COV;
     by APPROPRIATE_Testing;
 run;
@@ -3066,17 +2556,13 @@ data want(keep=MOM_ID cnt_deliveries);
 
   retain cnt_deliveries 0;
 
-  /* Reset count for each new MOM_ID */
   if first.MOM_ID then cnt_deliveries = 0;
 
-  /* Increment count for each delivery within the MOM_ID group */
   if not missing(INFANT_ID) then cnt_deliveries = cnt_deliveries + 1;
 
-  /* Output count for each MOM_ID */
   if last.MOM_ID then output;
 run;
 
-/* Use PROC UNIVARIATE to calculate mean, median, and range of cnt_deliveries */
 proc univariate data=want noprint;
   var cnt_deliveries;
   output out=summary_stats mean=mean_cnt_deliveries median=median_cnt_deliveries range=range_cnt_deliveries;
@@ -3100,10 +2586,9 @@ data UNIQUE_MOMS(keep= MOM_ID MOMS_FINAL_RE FOREIGN_BORN OUD_CAPTURE APPROPRIATE
     if first.MOM_ID;
 run;
 
-data TRT_TESTING15;
-    set TRT_TESTING15;
-    if DISEASE_STATUS_HCV = 1 and YOB <= 2018;
-run;
+/* ================================= */
+/* 5. TABLES                         */
+/* ================================= */
 
 %macro Table1Freqs_UniqueMoms(var, format);
     title "Table 1, Unstratified, Unique Moms";
@@ -3144,8 +2629,8 @@ run;
 %Table1freqs (MOUD_AT_DELIVERY, flagf.);
 %Table1freqs (AGE_BIRTH_GROUP);
 %Table1freqs (EVER_INCARCERATED, flagf.);
-%Table1freqs (HOMELESS_HISTORY, flagf.);
-%Table1freqs (MOMS_HOMELESS_HISTORY, flagf.);
+%Table1freqs (HOMELESS_EVER, homelessness.);
+%Table1freqs (MOMS_HOMELESS_HISTORY, homelessness.);
 %Table1freqs (LANGUAGE_SPOKEN_GROUP);
 %Table1freqs (MOTHER_EDU_GROUP);
 %Table1freqs (LD_PAY, ld_pay_fmt.);
@@ -3208,8 +2693,8 @@ run;
 %Table1Stratafreqs (AGE_BIRTH_GROUP);
 %Table1Stratafreqs (EVER_INCARCERATED, flagf.);
 %Table1Stratafreqs (FOREIGN_BORN, fbornf.);
-%Table1Stratafreqs (HOMELESS_HISTORY, flagf.);
-%Table1Stratafreqs (MOMS_HOMELESS_HISTORY, flagf.);
+%Table1Stratafreqs (HOMELESS_EVER, homelessness.);
+%Table1Stratafreqs (MOMS_HOMELESS_HISTORY, homelessness.);
 %Table1Stratafreqs (LANGUAGE_SPOKEN_GROUP);
 %Table1Stratafreqs (MOTHER_EDU_GROUP);
 %Table1Stratafreqs (LD_PAY, ld_pay_fmt.);
@@ -3263,7 +2748,7 @@ proc logistic data=FINAL_INFANT_COHORT_COV desc;
 %Table2Crude(INF_VAC_HBIG, ref='0');
 %Table2Crude(HIV_DIAGNOSIS, ref='0');
 %Table2Crude(FOREIGN_BORN, ref='0');
-%Table2Crude(HOMELESS_HISTORY, ref='0');
+%Table2Crude(HOMELESS_EVER, ref='0');
 %Table2Crude(MOMS_HOMELESS_HISTORY, ref='0');
 %Table2Crude(EVER_IDU_HCV_MAT, ref='0');
 %Table2Crude(MENTAL_HEALTH_DIAG, ref='0');
@@ -3316,7 +2801,7 @@ run;
 %Table2Crude_Strat(INF_VAC_HBIG, ref='0');
 %Table2Crude_Strat(HIV_DIAGNOSIS, ref='0');
 %Table2Crude_Strat(FOREIGN_BORN, ref='0');
-%Table2Crude_Strat(HOMELESS_HISTORY, ref='0');
+%Table2Crude_Strat(HOMELESS_EVER, ref='0');
 %Table2Crude_Strat(MOMS_HOMELESS_HISTORY, ref='0');
 %Table2Crude_Strat(EVER_IDU_HCV_MAT, ref='0');
 %Table2Crude_Strat(MENTAL_HEALTH_DIAG, ref='0');
@@ -3351,9 +2836,8 @@ proc logistic data=TRT_TESTING15 desc;
 %Table2Crude0_15 (FOREIGN_BORN, ref='0');
 
 /* ========================================================== */
-/*                    Collinearity and MV Regressions         */
+/* Part 5: Collinearity and MV Regressions                    */
 /* ========================================================== */
-
 /* Step 1: Assess collinearity among selected variables using chi-square tests */
 
 %macro ChiSquareTest(var1, var2);
@@ -3486,259 +2970,10 @@ title;
 
 /* Step 3: Run multivariable analysis with selected variables */
 
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM w/ cluster SE by MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC MED_PROV_COUNTY DISCH_WITH_MOM w/ cluster SE by MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC MED_PROV_COUNTY DISCH_WITH_MOM / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM w/ cluster SE by MOM_ID and FACILITY_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM / solution ddfm=kr;
-    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM w/ cluster SE by MOM_ID and MED_PROV_COUNTY';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM / solution ddfm=kr;
-    random intercept / subject=MED_PROV_COUNTY(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-proc sort data=FINAL_INFANT_COHORT_COV;
-    by DISCH_WITH_MOM;
-run;
-
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC w/ cluster SE by FACILITY_ID_BIRTH and MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC / solution ddfm=kr;
-    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC w/ cluster SE by MED_PROV_COUNTY and MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC / solution ddfm=kr;
-    random intercept / subject=MED_PROV_COUNTY(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH w/ cluster SE by MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC MED_PROV_COUNTY w/ cluster SE by MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC MED_PROV_COUNTY / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG MATINF_HEPC MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
 /* ========================================================== */
-/*      REPLACE MATINF_HEPC WITH HCV_DIAG                     */
+/* FACILITY_ID_BIRTH                                          */
 /* ========================================================== */
-
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM w/ cluster SE by MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM w/ cluster SE by MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM w/ cluster SE by MOM_ID and FACILITY_ID';
+title 'Logisitic: Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM w/ cluster SE by MOM_ID and FACILITY_ID_BIRTH';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
@@ -3762,7 +2997,92 @@ proc print data=OddsRatios;
     var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
 run;
 
-title 'Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM w/ cluster SE by MOM_ID and MED_PROV_COUNTY';
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by DISCH_WITH_MOM;
+run;
+
+title 'Logisitic: Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by FACILITY_ID_BIRTH and MOM_ID';
+ods select none;
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    by DISCH_WITH_MOM;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG / solution ddfm=kr;
+    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
+	ods output ParameterEstimates=ParameterEstimates;
+run;
+ods select all;
+
+data OddsRatios;
+    set ParameterEstimates;
+    where Effect not in ('Intercept');
+    OddsRatio = exp(Estimate);
+    LowerCL = exp(Estimate - 1.96 * StdErr);
+    UpperCL = exp(Estimate + 1.96 * StdErr);
+    PValue = Probt;
+run;
+
+proc print data=OddsRatios;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
+run;
+
+title 'Log-Binomial: Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM w/ cluster SE by MOM_ID and FACILITY_ID_BIRTH';
+ods select none;
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') DISCH_WITH_MOM (ref='Yes') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM / solution dist=binomial link=log ddfm=kr;
+    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
+	ods output ParameterEstimates=ParameterEstimates;
+run;
+ods select all;
+
+data OddsRatios;
+    set ParameterEstimates;
+    where Effect not in ('Intercept');
+    OddsRatio = exp(Estimate);
+    LowerCL = exp(Estimate - 1.96 * StdErr);
+    UpperCL = exp(Estimate + 1.96 * StdErr);
+    PValue = Probt;
+run;
+
+proc print data=OddsRatios;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
+run;
+
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by DISCH_WITH_MOM;
+run;
+
+title 'Log-Binomial: Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by FACILITY_ID_BIRTH and MOM_ID';
+ods select none;
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    by DISCH_WITH_MOM;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG / solution dist=binomial link=log ddfm=kr;
+    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
+    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
+	ods output ParameterEstimates=ParameterEstimates;
+run;
+ods select all;
+
+data OddsRatios;
+    set ParameterEstimates;
+    where Effect not in ('Intercept');
+    OddsRatio = exp(Estimate);
+    LowerCL = exp(Estimate - 1.96 * StdErr);
+    UpperCL = exp(Estimate + 1.96 * StdErr);
+    PValue = Probt;
+run;
+
+proc print data=OddsRatios;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
+run;
+
+/* ========================================================== */
+/* MED_PROV_COUNTY, complete case                             */
+/* ========================================================== */
+title 'Logisitic: Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM w/ cluster SE by MOM_ID and MED_PROV_COUNTY';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
@@ -3790,32 +3110,7 @@ proc sort data=FINAL_INFANT_COHORT_COV;
     by DISCH_WITH_MOM;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by FACILITY_ID_BIRTH and MOM_ID';
-ods select none;
-proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG / solution ddfm=kr;
-    random intercept / subject=FACILITY_ID_BIRTH(MOM_ID);
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
-	ods output ParameterEstimates=ParameterEstimates;
-run;
-ods select all;
-
-data OddsRatios;
-    set ParameterEstimates;
-    where Effect not in ('Intercept');
-    OddsRatio = exp(Estimate);
-    LowerCL = exp(Estimate - 1.96 * StdErr);
-    UpperCL = exp(Estimate + 1.96 * StdErr);
-    PValue = Probt;
-run;
-
-proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
-run;
-
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by MED_PROV_COUNTY and MOM_ID';
+title 'Logisitic: Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by MED_PROV_COUNTY and MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
@@ -3840,13 +3135,12 @@ proc print data=OddsRatios;
     var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH w/ cluster SE by MOM_ID';
+title 'Log-Binomial: Unstratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM w/ cluster SE by MOM_ID and MED_PROV_COUNTY';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    by DISCH_WITH_MOM;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') FACILITY_ID_BIRTH (ref='2010') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
+    class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') DISCH_WITH_MOM (ref='Yes') MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM / solution dist=binomial link=log ddfm=kr;
+    random intercept / subject=MED_PROV_COUNTY(MOM_ID);
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
@@ -3862,16 +3156,20 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG FACILITY_ID_BIRTH DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
 run;
 
-title 'Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY w/ cluster SE by MOM_ID';
+proc sort data=FINAL_INFANT_COHORT_COV;
+    by DISCH_WITH_MOM;
+run;
+
+title 'Log-Binomial: Stratified MV; adjusted for MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG w/ cluster SE by MED_PROV_COUNTY and MOM_ID';
 ods select none;
 proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
     class MOMS_FINAL_RE (ref='White Non-Hispanic') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') MED_PROV_COUNTY (ref='MIDDLESEX') MOM_ID;
-    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY / solution ddfm=kr;
-    random intercept / subject=MOM_ID;
+    model APPROPRIATE_Testing = MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG / solution dist=binomial link=log ddfm=kr;
+    random intercept / subject=MED_PROV_COUNTY(MOM_ID);
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
 	ods output ParameterEstimates=ParameterEstimates;
 run;
@@ -3887,5 +3185,5 @@ data OddsRatios;
 run;
 
 proc print data=OddsRatios;
-    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG MED_PROV_COUNTY DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
+    var Effect MOMS_FINAL_RE FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM Estimate StdErr OddsRatio LowerCL UpperCL PValue;
 run;
