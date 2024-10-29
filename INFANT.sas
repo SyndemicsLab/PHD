@@ -1479,7 +1479,7 @@ QUIT;
 PROC SQL;
     CREATE TABLE INFANT_DAA AS
     SELECT * FROM INFANT_LINKED 
-    LEFT JOIN DAA_STARTS ON DAA_STARTS.ID = INFANT_LINKED.ID;
+    LEFT JOIN DAA_STARTS ON DAA_STARTS.ID = INFANT_LINKED.INFANT_ID;
 QUIT;
 
 DATA INFANT_DAA; SET INFANT_DAA;
@@ -1534,11 +1534,6 @@ DATA FILTERED_INFANT_COHORT;
     IF APCD_anyclaim = 1 AND SELF_FUNDED = 0 THEN OUTPUT;
 RUN;
 
-DATA FILTERED_INFANT_COHORT;
-    SET FILTERED_INFANT_COHORT;
-    IF  DOB_MOM_TBL > FIRST_DAA_DATE THEN DELETE;
-RUN;
-
 PROC SQL;
     CREATE TABLE FILTERED_INFANT_COHORT AS
     SELECT cohort.*
@@ -1548,6 +1543,26 @@ PROC SQL;
     WHERE (death.DOD - cohort.DOB_INFANT_TBL) >= 30 * 18
        OR death.DOD IS NULL;
 QUIT;
+
+data delivery_counts_by_daa;
+    set FILTERED_INFANT_COHORT;
+
+    if missing(FIRST_DAA_DATE) then Treatment_Status = "Untreated";
+    else if FIRST_DAA_DATE <= DOB_MOM_TBL then Treatment_Status = "Tx Before Birth";
+    else if FIRST_DAA_DATE > DOB_MOM_TBL then Treatment_Status = "Tx After Birth";
+run;
+
+proc freq data=delivery_counts_by_daa;
+    tables Treatment_Status / nocum;
+    title "Counts of Infants Born to Untreated vs. Treated Mothers";
+run;
+
+DATA FILTERED_INFANT_COHORT;
+    SET FILTERED_INFANT_COHORT;
+    IF FIRST_DAA_DATE NE . THEN DO;
+        IF DOB_MOM_TBL > FIRST_DAA_DATE THEN DELETE;
+    END;
+RUN;
 
 PROC SQL;
     SELECT COUNT(DISTINCT BIRTH_LINK_ID) AS Number_of_Unique_IDs
