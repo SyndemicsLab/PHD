@@ -29,7 +29,7 @@ PROC FORMAT;
 /*======DEMOGRAPHIC DATA=========*/
 
 DATA demographics;
-    SET PHDSPINE.DEMO (KEEP= ID FINAL_RE FINAL_SEX YOB);
+    SET PHDSPINE.DEMO (KEEP= ID FINAL_RE FINAL_SEX);
     IF FINAL_RE = 9 THEN DELETE;
     IF FINAL_RE = 99 THEN DELETE;
 
@@ -54,7 +54,7 @@ PROC SQL;
 QUIT;
 
 /*======BSAS DATA=========*/
-DATA bsas_detox(KEEP = ID year_bsas month_bsas);
+DATA bsas_detox(KEEP = ID year_bsas month_bsas age_bsas);
     SET PHDBSAS.BSAS;
     IF PDM_PRV_SERV_TYPE IN (5, 52) AND CLT_ENR_SECTION35_BSAS NE 1 THEN detox_flag = 1;
     ELSE detox_flag = 0;
@@ -88,16 +88,13 @@ QUIT;
 
 DATA detox_admits_monthly;
     SET detox_admits_monthly;
-
-    age = year_bsas - YOB;
-    age_grp_twenty = put(age, age_grps_twenty.);
+    age_grp_twenty = put(age_bsas, age_grps_twenty.);
 RUN;
 
 DATA detox_admits_yearly;
     SET detox_admits_yearly;
-
-    age = year_bsas - YOB;
-    age_grp_twenty = put(age, age_grps_twenty.);
+    age_grp_twenty = put(age_bsas, age_grps_twenty.);
+RUN;
 
 PROC SQL;
     CREATE TABLE detox_out_yearly AS
