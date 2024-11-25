@@ -1,7 +1,7 @@
 /*==============================*/
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
-/* Created: 11/19/2024 			*/
+/* Created: 11/25/2024 			*/
 /* Updated:                		*/
 /*==============================*/
 /* 
@@ -74,14 +74,14 @@ PROC SQL;
     FROM bsas_detox;
 
     CREATE TABLE detox_admits_monthly AS
-    SELECT * FROM bsas_detox
-    LEFT JOIN demographics_monthly on bsas_detox.ID = demographics_monthly.ID
+    SELECT * FROM demographics_monthly
+    LEFT JOIN bsas_detox on bsas_detox.ID = demographics_monthly.ID
         AND bsas_detox.year_bsas = demographics_monthly.year
         AND bsas_detox.month_bsas = demographics_monthly.month;
     
     CREATE TABLE detox_admits_yearly AS 
-    SELECT * FROM bsas_detox
-    LEFT JOIN demographics_yearly on bsas_detox.ID = demographics_yearly.ID
+    SELECT * FROM demographics_yearly
+    LEFT JOIN bsas_detox on bsas_detox.ID = demographics_yearly.ID
         AND bsas_detox.year_bsas = demographics_yearly.year;
 QUIT;
 
@@ -113,25 +113,25 @@ PROC SQL;
     SELECT DISTINCT age_grp_twenty, year, month,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM detox_admits_monthly
-    GROUP BY age_grp_twenty, year, month;
+    GROUP BY year, month, age_grp_twenty;
 
     CREATE TABLE detox_twenty_yearly AS 
     SELECT DISTINCT age_grp_twenty, year,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM detox_admits_yearly
-    GROUP BY age_grp_twenty, year, month;
+    GROUP BY year, month, age_grp_twenty;
     
     CREATE TABLE detox_race_monthly AS
     SELECT DISTINCT year, month, FINAL_RE,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM detox_admits_monthly
-    GROUP BY FINAL_RE, year, month;
+    GROUP BY year, month, FINAL_RE;
 
     CREATE TABLE detox_race_yearly AS 
     SELECT DISTINCT year, FINAL_RE,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM detox_admits_yearly
-    GROUP BY FINAL_RE, year;
+    GROUP BY year, FINAL_RE;
 
     CREATE TABLE detox_sex_yearly AS 
     SELECT DISTINCT year, FINAL_SEX,
