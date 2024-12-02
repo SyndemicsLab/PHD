@@ -119,7 +119,7 @@ PROC SQL;
     SELECT DISTINCT age_grp_twenty, year,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM detox_admits_yearly
-    GROUP BY year, month, age_grp_twenty;
+    GROUP BY year, age_grp_twenty;
     
     CREATE TABLE detox_race_monthly AS
     SELECT DISTINCT year, month, FINAL_RE,
