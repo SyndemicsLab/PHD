@@ -54,14 +54,16 @@ PROC SQL;
 QUIT;
 
 /*======BSAS DATA=========*/
-DATA bsas_detox(KEEP = ID year_bsas month_bsas age_bsas);
-    SET PHDBSAS.BSAS;
+DATA bsas_detox(KEEP = ID year_bsas month_bsas age_bsas detox_flag);
+    SET PHDBSAS.BSAS (KEEP = PDM_PRV_SERV_TYPE ID CLT_ENR_SECTION35_BSAS 
+                             ENR_YEAR_BSAS ENR_MONTH_BSAS AGE_BSAS);
     IF PDM_PRV_SERV_TYPE IN (5, 52) AND CLT_ENR_SECTION35_BSAS NE 1 THEN detox_flag = 1;
     ELSE detox_flag = 0;
 
-    IF detox_flag = 0 THEN DELETE;
     year_bsas = ENR_YEAR_BSAS;
     month_bsas = ENR_MONTH_BSAS;
+
+    IF CMISS(of _all_) THEN DELETE;
 RUN; 
 
 /*===============================*/            
@@ -77,12 +79,14 @@ PROC SQL;
     SELECT * FROM demographics_monthly
     LEFT JOIN bsas_detox on bsas_detox.ID = demographics_monthly.ID
         AND bsas_detox.year_bsas = demographics_monthly.year
-        AND bsas_detox.month_bsas = demographics_monthly.month;
+        AND bsas_detox.month_bsas = demographics_monthly.month
+    WHERE detox_flag = 1;
     
     CREATE TABLE detox_admits_yearly AS 
     SELECT * FROM demographics_yearly
     LEFT JOIN bsas_detox on bsas_detox.ID = demographics_yearly.ID
-        AND bsas_detox.year_bsas = demographics_yearly.year;
+    	AND bsas_detox.year_bsas = demographics_yearly.year
+    WHERE detox_flag = 1;
 QUIT;
 
 
@@ -189,7 +193,7 @@ PROC EXPORT
 RUN;
 
 PROC EXPORT
-	DATA= Detox_race_yearly
+	DATA= detox_race_yearly
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Detox_Race_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
