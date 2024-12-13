@@ -693,12 +693,45 @@ PROC SQL;
 	SELECT DISTINCT doc.ID,
 					INPUT(CAT(doc.ADMIT_RECENT_YEAR_DOC, PUT(doc.ADMIT_RECENT_MONTH_DOC, Z2.)), YYMMN6.) AS admission FORMAT=YYMMN6.,
 					INPUT(CAT(doc.RELEASE_YEAR_DOC, PUT(doc.RELEASE_MONTH_DOC, Z2.)), YYMMN6.) AS release FORMAT=YYMMN6.,
-					coh.min_date, coh.FINAL_RE, coh.FINAL_SEX, coh.YOB
+					coh.min_date, coh.FINAL_RE, coh.FINAL_SEX, coh.YOB,
+					doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC AS n_days
 	FROM PHDDOC.DOC doc
 	INNER JOIN monthly_min_date coh ON doc.ID = coh.ID
 	WHERE INPUT(CAT(doc.ADMIT_RECENT_YEAR_DOC, PUT(doc.ADMIT_RECENT_MONTH_DOC, Z2.)), YYMMN6.) >= coh.min_date
 		  AND doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC >= 7;
 QUIT;
+
+DATA doc_frq_tmp;
+	SET doc_monthly;
+	age_grp_twenty = PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_twenty.);
+	age_grp_five = PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_five.);
+RUN;
+
+PROC FREQ DATA=doc_frq_tmp;
+	TABLES n_days / OUT=doc_length;
+RUN;
+
+PROC FREQ DATA=doc_frq_tmp;
+	TABLES FINAL_RE*n_days / OUT=doc_length_race;
+RUN;
+
+PROC FREQ DATA=doc_frq_tmp;
+	TABLES FINAL_SEX*n_days / OUT=doc_length_sex;
+RUN;
+
+PROC FREQ DATA=doc_frq_tmp;
+	TABLES age_grp_twenty*n_days / OUT=doc_length_twenty;
+RUN;
+
+PROC FREQ DATA=doc_frq_tmp;
+	TABLES age_grp_five*n_days / OUT=doc_length_five;
+RUN;
+
+DATA doc_length_twenty; SET doc_length_twenty; IF COUNT < 10 THEN COUNT = -1; RUN;
+DATA doc_length_five; SET doc_length_five; IF COUNT < 10 THEN COUNT = -1; RUN;
+DATA doc_length_sex; SET doc_length_sex; IF COUNT < 10 THEN COUNT = -1; RUN;
+DATA doc_length_race; SET doc_length_race; IF COUNT < 10 THEN COUNT = -1; RUN;
+DATA doc_length; SET doc_length; IF COUNT < 10 THEN COUNT = -1; RUN;
 
 DATA incar_yearly;
 	SET doc_yearly;
@@ -722,7 +755,7 @@ PROC SQL;
 	FROM incar_yearly;
 	
 	CREATE TABLE incar_monthly AS 
-	SELECT DISTINCT ID, date FINAL_RE, FINAL_SEX,
+	SELECT DISTINCT ID, date, FINAL_RE, FINAL_SEX,
 					PUT(year(date) - YOB, age_grps_twenty.) as age_grp_twenty,
 					PUT(year(date) - YOB, age_grps_five.) as age_grp_five
 	FROM incar_monthly;
@@ -845,5 +878,35 @@ RUN;
 PROC EXPORT
 	DATA= incar_monthly_five
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_Five_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= doc_length
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= doc_length_race
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_Race_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= doc_length_sex
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_Sex_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= doc_length_twenty
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_Twenty_&formatted_date..csv"
+	DBMS= csv REPLACE;
+RUN;
+
+PROC EXPORT
+	DATA= doc_length_five
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_Five_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
