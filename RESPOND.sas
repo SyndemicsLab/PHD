@@ -1303,13 +1303,13 @@ PROC SQL;
 	INNER JOIN monthly_min_date coh ON doc.ID = coh.ID
 	WHERE INPUT(CAT(doc.ADMIT_RECENT_YEAR_DOC, PUT(doc.ADMIT_RECENT_MONTH_DOC, Z2.)), YYMMN6.) >= coh.min_date
 		  AND doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC >= 7;
-QUIT;
 
-DATA doc_frq_tmp;
-	SET doc_monthly;
-	age_grp_twenty = PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_twenty.);
-	age_grp_five = PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_five.);
-RUN;
+    CREATE TABLE doc_frq_tmp AS
+    SELECT DISTINCT ID, n_days, FINAL_RE, FINAL_SEX,
+                    PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_twenty.) AS age_grp_twenty,
+                    PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_five.) AS age_grp_five
+    FROM doc_monthly;
+QUIT;
 
 PROC FREQ DATA=doc_frq_tmp;
 	TABLES n_days / OUT=doc_length;
