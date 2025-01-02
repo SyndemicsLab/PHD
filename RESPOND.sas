@@ -2,7 +2,7 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 4/27/2023 			*/
-/* Updated: 6/24/2024   		*/
+/* Updated: 12/30/2024   		*/
 /*==============================*/
 /* 
 Overall, the logic behind the known capture is fairly simple: 
@@ -1050,7 +1050,13 @@ DATA moud_expanded;
 	WHERE year IN &year;
 RUN;
 
-PROC SQL;                    
+PROC SQL;
+    CREATE TABLE moud_demo AS 
+    SELECT DISTINCT * FROM moud_demo;
+    
+    CREATE TABLE moud_expanded AS 
+    SELECT DISTINCT * FROM moud_expanded;
+
     CREATE TABLE moud_starts AS
     SELECT start_month AS month,
            start_year AS year,
