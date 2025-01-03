@@ -20,7 +20,8 @@ stratified by Year (or Year and Month), Race, Sex, and Age
 /*  	GLOBAL VARIABLES   		*/
 /*==============================*/
 %LET year = (2015:2022);
-%LET MOUD_leniency = 7;
+%LET MOUD_leniency = 30;
+%LET DOC_leniency = 30;
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
@@ -1051,9 +1052,6 @@ DATA moud_expanded;
 RUN;
 
 PROC SQL;
-    CREATE TABLE moud_demo AS 
-    SELECT DISTINCT * FROM moud_demo;
-    
     CREATE TABLE moud_expanded AS 
     SELECT DISTINCT * FROM moud_expanded;
 
@@ -1291,7 +1289,7 @@ PROC SQL;
 	FROM PHDDOC.DOC doc
 	INNER JOIN yearly_min_date coh ON doc.ID = coh.ID
 	WHERE doc.ADMIT_RECENT_YEAR_DOC >= coh.min_year
-		  AND RELEASE_DATE_DOC - ADMIT_RECENT_DATE_DOC >= 7;
+		  AND RELEASE_DATE_DOC - ADMIT_RECENT_DATE_DOC >= &DOC_leniency;
 
 	CREATE TABLE monthly_min_date AS 
 	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB,
@@ -1308,12 +1306,12 @@ PROC SQL;
 	FROM PHDDOC.DOC doc
 	INNER JOIN monthly_min_date coh ON doc.ID = coh.ID
 	WHERE INPUT(CAT(doc.ADMIT_RECENT_YEAR_DOC, PUT(doc.ADMIT_RECENT_MONTH_DOC, Z2.)), YYMMN6.) >= coh.min_date
-		  AND doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC >= 7;
+		  AND doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC >= &DOC_leniency;
 
     CREATE TABLE doc_frq_tmp AS
     SELECT DISTINCT ID, n_days, FINAL_RE, FINAL_SEX,
-                    PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_twenty.) AS age_grp_twenty,
-                    PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_five.) AS age_grp_five
+                    PUT(year(admission) - YOB, age_grps_twenty.) AS age_grp_twenty,
+                    PUT(year(admission) - YOB, age_grps_five.) AS age_grp_five
     FROM doc_monthly;
 QUIT;
 
@@ -1395,7 +1393,7 @@ PROC SQL;
 	GROUP BY year, age_grp_twenty;
 
 	CREATE TABLE incar_yearly_five AS 
-	SELECT DISTINCT ear, age_grp_five,
+	SELECT DISTINCT year, age_grp_five,
 		   IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM incar_yearly
 	GROUP BY year, age_grp_five;
