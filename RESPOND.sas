@@ -21,7 +21,7 @@ stratified by Year (or Year and Month), Race, Sex, and Age
 /*==============================*/
 %LET year = (2015:2022);
 %LET MOUD_leniency = 30;
-%LET DOC_leniency = 30;
+%LET DOC_leniency = 35;
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
@@ -1275,22 +1275,6 @@ in order to estimate how many people we may be missing from the data as the date
 to the last date of data available in the PHD
 */
 PROC SQL;
-	CREATE TABLE yearly_min_date AS
-	SELECT DISTINCT ID, min(year) AS min_year,
-					FINAL_RE, FINAL_SEX, YOB
-	FROM oud_yearly
-	GROUP BY ID;
-
-	CREATE TABLE doc_yearly AS 
-	SELECT DISTINCT doc.ID,
-					doc.ADMIT_RECENT_YEAR_DOC, doc.RELEASE_YEAR_DOC,
-					doc.RELEASE_DATE_DOC, doc.ADMIT_RECENT_DATE_DOC,
-					coh.min_year, coh.YOB, coh.FINAL_RE, coh.FINAL_SEX
-	FROM PHDDOC.DOC doc
-	INNER JOIN yearly_min_date coh ON doc.ID = coh.ID
-	WHERE doc.ADMIT_RECENT_YEAR_DOC >= coh.min_year
-		  AND RELEASE_DATE_DOC - ADMIT_RECENT_DATE_DOC >= &DOC_leniency;
-
 	CREATE TABLE monthly_min_date AS 
 	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB,
 					MIN(INPUT(CAT(year, PUT(month, Z2.)), YYMMN6.)) AS min_date FORMAT = YYMMN6.
@@ -1341,15 +1325,49 @@ DATA doc_length_sex(KEEP=n_days COUNT); SET doc_length_sex; IF COUNT < 10 THEN C
 DATA doc_length_race(KEEP=n_days COUNT); SET doc_length_race; IF COUNT < 10 THEN COUNT = -1; RUN;
 DATA doc_length(KEEP=n_days COUNT); SET doc_length; IF COUNT < 10 THEN COUNT = -1; RUN;
 
-DATA incar_yearly;
-	SET doc_yearly;
-	DO year = ADMIT_RECENT_YEAR_DOC TO RELEASE_YEAR_DOC;
-		OUTPUT;
-	END;
+PROC SORT data=doc_monthly;
+    by ID admission;
 RUN;
+
+DATA doc_monthly;
+    SET doc_monthly;
+    by ID;
+    retain episode_num;
+
+    lag_date = lag(release);
+    IF FIRST.ID THEN lag_date = .;
+    IF FIRST.ID THEN episode_num = 1;
+    
+    diff = release - lag_date;
+    
+    /* If the difference is greater than MOUD leniency, assume it is another incarceration episode */
+    IF diff >= &DOC_leniency THEN flag = 1; ELSE flag = 0;
+    IF flag = 1 THEN episode_num = episode_num + 1;
+
+    episode_id = catx("_", ID, episode_num);
+RUN;
+/* 
+Merge where episode ID is the same, taking the 
+start_month/year of the first record, and the 
+end_month/year of the final record
+*/
+DATA doc_monthly; 
+    SET doc_monthly;
+
+    by episode_id;
+    retain admission;
+
+    IF FIRST.episode_id THEN DO;
+        start = admission;
+    END;
+    IF LAST.episode_id THEN DO;
+        end = admission;
+    END;
+RUN;
+
 DATA incar_monthly;
     SET doc_monthly;
-    DO date = admission TO release BY 1;
+    DO date = start TO end BY 1;
         IF DAY(INTNX('MONTH', date, 0, 'SAME')) = 1 THEN OUTPUT;
     END;
     FORMAT date YYMMN6.;
@@ -1357,10 +1375,10 @@ RUN;
 
 PROC SQL;
 	CREATE TABLE incar_yearly AS 
-	SELECT DISTINCT ID, year, FINAL_RE, FINAL_SEX, 
-					PUT(year - YOB, age_grps_twenty.) as age_grp_twenty,
-					PUT(year - YOB, age_grps_five.) as age_grp_five
-	FROM incar_yearly;
+	SELECT DISTINCT ID, year(date) AS year, FINAL_RE, FINAL_SEX, 
+					PUT(year(date) - YOB, age_grps_twenty.) as age_grp_twenty,
+					PUT(year(date) - YOB, age_grps_five.) as age_grp_five
+	FROM incar_monthly;
 	
 	CREATE TABLE incar_monthly AS 
 	SELECT DISTINCT ID, date, FINAL_RE, FINAL_SEX,
