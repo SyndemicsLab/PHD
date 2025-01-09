@@ -1164,6 +1164,28 @@ DATA OUD_HCV_DAA;
   DROP agegrp;
 RUN;
 
+proc sql;
+    create table HCV_IDS as
+    select distinct ID
+    from PHDHEPC.HCV
+    where DISEASE_STATUS_HCV in (1, 2);
+quit;
+
+proc sql;
+    create table OUD_HCV_CROSS as
+    select a.ID,
+           (case when b.ID is not null then 1 else 0 end) as HCV_FLAG
+    from OUD_HCV_DAA as a
+    left join HCV_IDS as b
+    on a.ID = b.ID;
+quit;
+
+title "Total # of Confirmed and Probable HCV cases diagnosed with OUD";
+proc freq data=OUD_HCV_CROSS;
+    tables HCV_FLAG / missing;
+run;
+title;
+
 DATA TESTING; 
 SET OUD_HCV_DAA;
 	EOT_RNA_TEST = 0;
