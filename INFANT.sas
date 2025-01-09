@@ -681,13 +681,13 @@ SELECT  ID,
 GROUP BY ID;
 run;
 
-/* PROC SQL;
+PROC SQL;
     SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
     INTO :num_unique_ids
     FROM births;
 QUIT;
 
-%put Number of unique IDs in births table: &num_unique_ids; */
+%put Number of unique IDs in births table: &num_unique_ids;
 
 PROC SQL;
     CREATE TABLE oud_preg AS
@@ -898,17 +898,13 @@ RUN;
 /* 18. Final OUD cohort */
 /*====================*/
 
-/* PROC CONTENTS data=OUD_HCV_DAA;
-title "Contents of Final Dataset";
-run;
-
 PROC SQL;
     SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
     INTO :num_unique_ids
     FROM OUD_HCV_DAA;
 QUIT;
 
-%put Number of unique IDs in OUD_HCV_DAA table: &num_unique_ids; */
+%put Number of unique IDs in OUD_HCV_DAA table: &num_unique_ids;
 
 data OUD_HCV_DAA;
     set OUD_HCV_DAA(rename=(ID=MOM_ID));
