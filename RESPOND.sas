@@ -1,13 +1,9 @@
-/*==============================*/
-/* Project: OUD Cascade 	    */
-/* Author: Ryan O'Dea  		    */ 
-/* Created: 4/27/2023 		    */
-/* Updated: 10/02/2024 by SM	*/
-/*==============================*/
-
-/*	Project Goal:
-
-*/
+/*==============================================*/
+/* Project: PHD Maternal Analysis Cascade 	    */
+/* Author: Ryan O'Dea and Sarah Munroe          */ 
+/* Created: 4/27/2023 		                    */
+/* Updated: 01/2025 by SJM  	                */
+/*==============================================*/
 
 /*===== SUPRESSION CODE =========*/
 ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
@@ -18,17 +14,6 @@ proc template;
 %include "/sas/data/DPH/OPH/PHD/template.sas";
 run;
 /*==============================*/
-
-/* Overall, the logic behind the known capture is fairly simple: 
-search through individual databases and flag if an ICD9, ICD10, 
-CPT, NDC, or other specialized code matches our lookup table. 
-If a record has one of these codes, it is 'flagged' for OUD. 
-The utilized databases are then joined onto the SPINE demographics 
-dataset and if the sum of flags is greater than zero, then the 
-record is flagged with OUD.  
-At current iteration, data being pulled through this method is 
-stratified by Year (or Year and Month), Race, Sex, and Age 
-(where age groups are defined in the table below). */
 
 /*==============================*/
 /*  	GLOBAL VARIABLES   	    */
@@ -60,7 +45,7 @@ PROC FORMAT;
 		'B1710','B182','B1920',
 		'B1711','B1921');
 
-		
+
 /* HCV Direct Action Antiviral Codes */
 %LET DAA_CODES = ('00003021301','00003021501','61958220101','61958180101','61958180301',
                   '61958180401','61958180501','61958150101','61958150401','61958150501',
@@ -68,7 +53,7 @@ PROC FORMAT;
                   '00074262584','00074260028','72626270101','00074308228','00074006301',
                   '00074006328','00074309301','00074309328','61958240101','61958220101',
                   '61958220301','61958220401','61958220501','00006307402','51167010001',
-                  '51167010003','59676022507','59676022528','00085031402');				
+                  '51167010003','59676022507','59676022528','00085031402');			
 
 /*========ICD CODES=============*/
 %LET ICD = ('30400','30401','30402','30403',
@@ -79,8 +64,8 @@ PROC FORMAT;
     'F11150','F11151','F11159','F11181', 
     'F11182','F11188','F1119','F1120', 
     'F1121','F11220','F11221','F11222', 
-    'F11229','F1123','F1124','F11250', 
-    'F11251','F11259','F11281','F11282', 
+    'F11229','F1123','F1124','F11250',
+    'F11251','F11259','F11281','F11282',
     'F11288','F1129','F1193','F1199',  /* ICD10 */
 	'9701','96500','96501','96502',
  	'96509','E8500','E8501','E8502',
@@ -112,9 +97,6 @@ PROC FORMAT;
     'J0570','J0571','J0572','J0573', 
  	'J0574','J0575','J0592', 'J2315','Q9991','Q9992''S0109'/* Naloxone*/);
 
-/* Take NDC codes where buprenorphine has been identified,
-insert them into BUP_NDC as a macro variable */
-
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
 proc sql;
@@ -132,6 +114,16 @@ quit;
 /*============================ */
 /*  Part 1: Construct OUD cohort */
 /*============================ */
+/*	Overall, the logic behind the known capture is fairly simple: 
+search through individual databases and flag if an ICD9, ICD10, 
+CPT, NDC, or other specialized code matches our lookup table. 
+If a record has one of these codes, it is 'flagged' for OUD. 
+The utilized databases are then joined onto the SPINE demographics 
+dataset and if the sum of flags is greater than zero, then the 
+record is flagged with OUD.  
+At current iteration, data being pulled through this method is 
+stratified by Year (or Year and Month), Race, Sex, and Age 
+(where age groups are defined in the table below). */
 
 /*====================*/
 /* 1. Demographics    */
@@ -345,7 +337,7 @@ RUN;
 /* HD PROC DATA */
 
 DATA hd_proc(KEEP= HD_ID oud_hd_proc);
-	SET PHDCM.HD_PROC(KEEP = HD_ID HD_PROC);
+	SET HDCM.HD_PROC (KEEP = HD_ID HD_PROC);
 	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
 	ELSE oud_hd_proc = 0;
 RUN;
@@ -412,7 +404,7 @@ DATA oo (KEEP= ID oud_oo year_oo);
 
     DROP k;
 
-    IF cnt_oud_oo > 0 THEN oud_oo = 1;
+    IF cnt_oud_oo > 0 THEN oud_oo = 1; 
     ELSE oud_oo = 0;
 
     IF oud_oo = 0 THEN DELETE;
@@ -644,9 +636,13 @@ data oud;
     IF age_grp_five  = 999 THEN DELETE;
 run;
 
+/*=========================================*/
+/*    FINAL COHORT DATASET: oud_distinct   */
+/*=========================================*/
+
 PROC SQL;
     CREATE TABLE oud_distinct AS
-    SELECT DISTINCT ID, oud_age, age_grp_five as agegrp, FINAL_RE FROM oud;
+    SELECT DISTINCT ID, YOB, oud_age, age_grp_five as agegrp, FINAL_RE FROM oud;
 QUIT;
 
 PROC SQL;
@@ -657,261 +653,25 @@ QUIT;
 
 %put Number of unique IDs in oud_distinct table: &num_unique_ids;
 
-/*==============================*/
-/* Part 2: MOUD Counts          */
-/*==============================*/
-/* The goal of this portion of the script is to extract MOUD counts and 
-starts while treating it as a formal subset of the code defined above 
-(OUDCounts.) The table most used in this portion is the relatively-new
-SPINE.MOUD table. 
-MOUD Starts are immediately given through SPINE.MOUD's DATE_START_*_MOUD
-MOUD Counts, on the other hand, require a type of 'expansion', where we
-create a new dataset filling out the months inbetween DATE_START_*_MOUD and 
-DATE_END_*_MOUD.
-
-Restrictions: 
-1. If the lapse between a record's end date and the next record's
-   start date is < 7, we merge the two records together.
-2. After this merge, if there are any more records which are <7 they 
-   are removed from counts/starts tabulation
-3. If medication A is found to be completely encompassed by another 
-   medication B, then we remove the record of medication A. */
-
-/* Age Demography Creation */
-
-DATA moud;
-    SET PHDSPINE.MOUD;
-RUN;
-
-PROC SORT data=moud;
-    by ID DATE_START_MOUD;
-RUN;
-
-PROC SQL;    
-    CREATE TABLE moud_demo AS
-    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX, DEMO.YOB
-    FROM moud
-    LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
-QUIT;
-
-PROC SORT DATA=moud_demo;
-    BY ID TYPE_MOUD DATE_START_MOUD;
-RUN;
-
-/* Create `episode_id`, which forms the basis for merging when 
-two episode IDs are the same */
-
-DATA moud_demo;
-    SET moud_demo;
-    by ID TYPE_MOUD;
-    retain episode_num;
-
-    lag_date = lag(DATE_END_MOUD);
-    IF FIRST.TYPE_MOUD THEN lag_date = .;
-    IF FIRST.TYPE_MOUD THEN episode_num = 1;
-    
-    diff = DATE_START_MOUD - lag_date;
-    
-    /* If the difference is greater than MOUD leniency, assume 
-    it is another treatment episode */
-
-    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
-
-    episode_id = catx("_", ID, episode_num);
-RUN;
-
-PROC SORT data=moud_demo; 
-    BY episode_id;
-RUN;
-
-/* Filter cohort to OUD cohort above*/
-
-PROC SQL;
-    CREATE TABLE moud_demo AS 
-    SELECT * 
-    FROM moud_demo
-    WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
-QUIT;
-
-/* Merge where episode ID is the same, taking the 
-start_month/year of the first record, and the 
-end_month/year of the final record */
-
-DATA moud_demo; 
-    SET moud_demo;
-
-    by episode_id;
-    retain DATE_START_MOUD;
-
-    IF FIRST.episode_id THEN DO;
-        start_month = DATE_START_MONTH_MOUD;
-        start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD;
-    END;
-    IF LAST.episode_id THEN DO;
-        end_month = DATE_END_MONTH_MOUD;
-        end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
-    END;
-        
-   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-RUN;
-
-PROC SORT data=moud_demo (KEEP= start_date start_month start_year
-					  			end_date end_month end_year 
-					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
-    BY ID;
-RUN;
-
-PROC SQL;
- CREATE TABLE moud_demo 
- AS SELECT DISTINCT * FROM moud_demo;
-QUIT;
-
-DATA moud_demo;
-    SET moud_demo;
-    BY ID;
-	
-	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-
-    LAG_ED = LAG(END_DATE);
-	
-	IF FIRST.ID THEN diff = .; 
-	ELSE diff = start_date - LAG_ED;
-    IF end_date < LAG_ED THEN temp_flag = 1;
-    ELSE temp_flag = 0;
-
-    IF first.ID THEN flag_mim = 0;
-    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
-    ELSE flag_mim = 0;
-
-    IF flag_mim = 1 THEN DELETE;
-
-    age = start_year - YOB;
-    age_grp_five = put(age, age_grps_five.);
-RUN;
-
-DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five);
-    SET moud_demo;
-    treatment = TYPE_MOUD;
-
-    FORMAT year 4. month 2.;
-    
-    num_months = intck('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), 
-                       input(put(end_year, 4.) || put(end_month, z2.), yymmn6.));
-
-    DO i = 0 to num_months;
-      new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
-      year = year(new_date);
-      month = month(new_date);
-      postexp_age = year - YOB;
-      age_grp_five = put(postexp_age, age_grps_five.);      
-      OUTPUT;
-    END;
-
-RUN;
-
-DATA moud_expanded;
-	SET moud_expanded;
-	WHERE year IN &year;
-RUN;
-
-PROC SQL;                    
-    CREATE TABLE moud_starts AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD;
-
-    CREATE TABLE stratif_moud_starts_age AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_SEX, age_grp_five,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_five;
-
-    CREATE TABLE stratif_moud_starts_RE AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment,
-           FINAL_SEX, FINAL_RE,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
-    
-    CREATE TABLE moud_counts AS
-    SELECT year, month, treatment,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment;
-
-    CREATE TABLE stratif_moud_counts_age AS
-    SELECT year, month, treatment, FINAL_SEX, age_grp_five,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment, age_grp_five;
-    
-    CREATE TABLE stratif_moud_counts_RE AS
-    SELECT year, month, treatment, FINAL_SEX, FINAL_RE,
-           IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
-    FROM moud_expanded
-    GROUP BY month, year, treatment, FINAL_RE;
-QUIT;
-
-PROC EXPORT
-	DATA= moud_counts
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_counts_age
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_AgeStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_counts_RE
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDCounts_REStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= moud_starts
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_starts_age
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_AgeStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
-PROC EXPORT
-	DATA= stratif_moud_starts_RE
-	OUTFILE= "/sas/data/DPH/OPH/SAP/FOLDERS/LIZ/Epstein/Sarah/MOUDStarts_REStratif_&formatted_date..csv"
-	DBMS= csv REPLACE;
-RUN;
-
 /*============================ */
-/*  Part 3: Maternal Casacde   */
+/*  Part 2: Maternal Casacde   */
 /*============================ */
 
-/*============================*/
-/* 1. Add Pregancy Covariates  */
-/*============================*/
+/* ============================ */
+/* 1. Constructing Birth Records and Joining to OUD Dataset */
+/* ============================ */
+/* This section processes birth records by creating a dataset of all births for IDs of interest, including a birth indicator for further aggregation.  
+   The data is grouped by ID to calculate the total number of births, the year of the first birth, and to flag birth occurrence.  
+   A count of unique IDs is generated for reference. The OUD dataset is then merged with the birth records to add birth information for matching IDs,  
+   and missing birth indicators are set to zero for non-matched IDs. Finally, the first birth record for each ID is extracted,  
+   and birth-related variables (age at birth, labor and delivery payment source, Kotelchuck index, and prenatal site)  are added to the OUD dataset for subsequent analysis. 
+   In other words, all births and related covaraites are NOT represented, only the mother's first birth. */
 
-DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
-	SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH
-							WHERE= (YEAR_BIRTH IN &year));
-	BIRTH_INDICATOR = 1;
-run;
+DATA all_births (keep = ID INFANT_DOB BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH LD_PAY KOTELCHUCK prenat_site);
+   SET PHDBIRTH.BIRTH_MOM (KEEP = ID INFANT_DOB YEAR_BIRTH AGE_BIRTH LD_PAY KOTELCHUCK prenat_site
+                            WHERE= (YEAR_BIRTH IN &year));
+   BIRTH_INDICATOR = 1;
+RUN;
 
 proc SQL;
 CREATE TABLE births AS
@@ -941,8 +701,30 @@ SET oud_preg;
 	IF BIRTH_INDICATOR = . THEN BIRTH_INDICATOR = 0;
 run;
 
+proc sort data=all_births;
+    by ID INFANT_DOB;
+run;
+
+data birthsmoms_first;
+    set all_births;
+    by ID INFANT_DOB;
+    if first.ID;
+run;
+
+proc sql;
+    create table oud_preg as
+    select oud_preg.*,
+           birthsmoms_first.AGE_BIRTH,
+           birthsmoms_first.LD_PAY,
+           birthsmoms_first.KOTELCHUCK,
+           birthsmoms_first.prenat_site
+    from oud_preg
+    left join birthsmoms_first
+    on oud_preg.ID = birthsmoms_first.ID;
+quit;
+
 /* ========================================================== */
-/* 2. Extract AB/RNA/GENOTYPE Testing Data                   */
+/* 2. Extract AB/RNA/GENOTYPE Testing Data                    */
 /* ========================================================== */
 /* Extract antibody/rna/genotype testing records (CPT codes) from the PHDAPCD.MOUD_MEDICAL dataset.
 Then, remove duplicate testing records based on unique combinations of ID and testing date and sort by ID and testing date in ascending order. 
@@ -950,11 +732,8 @@ Transpose the testing dates for each individual into wide format to create multi
 Extract the year from the testing records for each ID and creates a new dataset that includes distinct IDs, testing years, and age at testing.
 Select the earliest testing year for each ID and output the frequency of tests occurring in infants under the age of 4. */
 
-/* AB */
-
 DATA ab;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEAR
-					 
 					 WHERE = (MED_PROC_CODE IN  &AB_CPT));
 run;
 
@@ -990,8 +769,7 @@ quit;
 
 DATA rna;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
-					 
-					 WHERE = (MED_PROC_CODE IN  &RNA_CPT));
+ 					 WHERE = (MED_PROC_CODE IN  &RNA_CPT)); 
 run;
 
 PROC SORT data=rna;
@@ -1007,8 +785,7 @@ RUN;
 
 DATA geno;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE
-					 
-					 WHERE = (MED_PROC_CODE IN  &GENO_CPT));
+ 					 WHERE = (MED_PROC_CODE IN  &GENO_CPT)); 
 run;
 
 PROC SORT data=geno;
@@ -1103,8 +880,7 @@ QUIT;
 
 DATA HCV_LINKED_SAS;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
-					 
-					 WHERE = (MED_ICD1 IN &HCV_ICD));
+ 					 WHERE = (MED_ICD1 IN &HCV_ICD)); 
 RUN;
 
 PROC SQL;
@@ -1134,7 +910,7 @@ run;
    and creates indicators for DAA initiation. */
 
 DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
-								WHERE = (PHARM_NDC IN &DAA_CODES));
+ 								WHERE = (PHARM_NDC IN &DAA_CODES)); 
 RUN;
 
 PROC SQL;
@@ -1164,28 +940,6 @@ DATA OUD_HCV_DAA;
   DROP agegrp;
 RUN;
 
-proc sql;
-    create table HCV_IDS as
-    select distinct ID
-    from PHDHEPC.HCV
-    where DISEASE_STATUS_HCV in (1, 2);
-quit;
-
-proc sql;
-    create table OUD_HCV_CROSS as
-    select a.ID,
-           (case when b.ID is not null then 1 else 0 end) as HCV_FLAG
-    from OUD_HCV_DAA as a
-    left join HCV_IDS as b
-    on a.ID = b.ID;
-quit;
-
-title "Total # of Confirmed and Probable HCV cases diagnosed with OUD";
-proc freq data=OUD_HCV_CROSS;
-    tables HCV_FLAG / missing;
-run;
-title;
-
 DATA TESTING; 
 SET OUD_HCV_DAA;
 	EOT_RNA_TEST = 0;
@@ -1208,13 +962,38 @@ SET OUD_HCV_DAA;
     DROP i time_since;
 RUN;
 
-/*====================*/
-/* 7. Final OUD cohort */
-/*====================*/
+/* ======================================= */
+/* 7. Identifying HCV Status for OUD Cases */
+/* ======================================= */
+/* This section creates a list of unique IDs for individuals with confirmed or probable HCV (disease status 1 or 2) from the HCV dataset.  
+   It then merges this list with the OUD_HCV_DAA dataset to flag individuals diagnosed with HCV (HCV_FLAG = 1).  
+   A frequency table is generated to display the total count of OUD cases with and without HCV diagnoses for summary statistics and reporting. */
 
-PROC CONTENTS data=TESTING;
-title "Contents of Final Dataset";
+proc sql;
+    create table HCV_IDS as
+    select distinct ID
+    from PHDHEPC.HCV
+    where DISEASE_STATUS_HCV in (1, 2);
+quit;
+
+proc sql;
+    create table OUD_HCV_CROSS as
+    select a.ID,
+           (case when b.ID is not null then 1 else 0 end) as HCV_FLAG
+    from OUD_HCV_DAA as a
+    left join HCV_IDS as b
+    on a.ID = b.ID;
+quit;
+
+title "Total # of Confirmed and Probable HCV cases diagnosed with OUD";
+proc freq data=OUD_HCV_CROSS;
+    tables HCV_FLAG / missing;
 run;
+title;
+
+/*=====================*/
+/* 8. Final OUD cohort */
+/*=====================*/
 
 PROC SQL;
     SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
@@ -1224,9 +1003,9 @@ QUIT;
 
 %put Number of unique IDs in TESTING table: &num_unique_ids;
 
-/*====================*/
-/* 8. FREQUENCY TABLES */
-/*==================*/
+/*=============================*/
+/* Part 3: HCV Cascade         */
+/*=============================*/
 
 PROC FORMAT;
    VALUE agefmt_all
@@ -1444,3 +1223,712 @@ run;
 %YearFreq(EVENT_YEAR_HCV, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
 %YearFreq(EVENT_YEAR_HCV, birth_indicator, 0, "Counts per year among probable, by Birth", agefmt_comb., racefmt_all.)
 %YearFreq(FIRST_DAA_START_YEAR, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
+
+/*=============================*/
+/* Part 4: Output and Analysis */
+/*=============================*/
+
+/*=====================*/
+/* Pull Covariates     */
+/*=====================*/
+
+proc sql;
+    create table FINAL_COHORT as
+    select OUD_HCV_DAA.*,
+           demographics.FINAL_RE, 
+           demographics.HOMELESS_HISTORY,
+           demographics.EVER_INCARCERATED,
+           demographics.FOREIGN_BORN,
+           demographics.LANGUAGE,
+           demographics.EDUCATION,
+           demographics.OCCUPATION_CODE
+    from OUD_HCV_DAA
+    left join PHDSPINE.DEMO as demographics
+    on OUD_HCV_DAA.ID = demographics.ID;
+quit;
+
+proc sql;
+create table MENTAL_HEALTH_COHORT(where=(MENTAL_HEALTH_DIAG=1)) as
+select distinct FINAL_COHORT.ID,
+       case
+           when prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ECODE) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ADM_DIAGNOSIS) > 0 or
+                prxmatch('/^V(6|20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD1) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD2) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD3) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD4) > 0 or
+                prxmatch('/^E(88|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD5) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD6) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD7) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD8) > 0 or
+                prxmatch('/^E(0|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD9) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD10) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD11) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD12) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD13) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD14) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD15) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD16) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD17) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD18) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD19) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD20) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD21) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD22) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD23) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD24) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD25) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_DIS_DIAGNOSIS) > 0 
+                or substr(apcd.MED_ECODE, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ADM_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD1, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD2, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD3, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD4, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD5, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD6, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD7, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD8, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD9, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD10, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD11, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD12, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD13, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD14, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD15, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD16, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD17, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD18, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD19, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD20, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD21, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD22, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD23, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD24, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_ICD25, 1, 3) in ('295', '296', '297', '298', '300', '311') 
+                or substr(apcd.MED_DIS_DIAGNOSIS, 1, 3) in ('295', '296', '297', '298', '300', '311') then 1
+           else 0
+       end as MENTAL_HEALTH_DIAG
+from FINAL_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd
+on FINAL_COHORT.ID = apcd.ID;
+quit;
+
+proc sql;
+create table FINAL_COHORT as select *,
+case
+when ID in (select ID from MENTAL_HEALTH_COHORT) then 1
+else 0
+end as MENTAL_HEALTH_DIAG
+from FINAL_COHORT;
+quit;
+
+%let IJI = ('3642', '9884', '11281', '11504', '11514', '11594',
+           '421', '4211', '4219', 'A382', 'B376', 'I011', 'I059',
+           'I079', 'I080', 'I083', 'I089', 'I330', 'I339', 'I358', 'I378',
+           'I38', 'T826', 'I39', '681', '6811', '6819', '682', '6821', '6822',
+           '6823', '6824', '6825', '6826', '6827', '6828', '6829', 'L030',
+           'L031', 'L032', 'L033', 'L038', 'L039', 'M000', 'M001', 'M002',
+           'M008', 'M009', '711', '7114', '7115', '7116', '7118', '7119',
+           'I800', 'I801', 'I802', 'I803', 'I808', 'I809', '451', '4512',
+           '4518', '4519');
+           
+proc sql;
+create table IJI_COHORT(where=(IJI_DIAG=1)) as
+select distinct FINAL_COHORT.ID,
+  case
+       when apcd.MED_ECODE in &IJI or
+                    apcd.MED_ADM_DIAGNOSIS like '4249%' or apcd.MED_ADM_DIAGNOSIS in &IJI or
+                    apcd.MED_ICD1 like '4249%' or apcd.MED_ICD1 in &IJI or
+                    apcd.MED_ICD2 like '4249%' or apcd.MED_ICD2 in &IJI or
+                    apcd.MED_ICD3 like '4249%' or apcd.MED_ICD3 in &IJI or
+                    apcd.MED_ICD4 like '4249%' or apcd.MED_ICD4 in &IJI or
+                    apcd.MED_ICD5 like '4249%' or apcd.MED_ICD5 in &IJI or
+                    apcd.MED_ICD6 like '4249%' or apcd.MED_ICD6 in &IJI or
+                    apcd.MED_ICD7 like '4249%' or apcd.MED_ICD7 in &IJI or
+                    apcd.MED_ICD8 like '4249%' or apcd.MED_ICD8 in &IJI or
+                    apcd.MED_ICD9 like '4249%' or apcd.MED_ICD9 in &IJI or
+                    apcd.MED_ICD10 like '4249%' or apcd.MED_ICD10 in &IJI or
+                    apcd.MED_ICD11 like '4249%' or apcd.MED_ICD11 in &IJI or
+                    apcd.MED_ICD12 like '4249%' or apcd.MED_ICD12 in &IJI or
+                    apcd.MED_ICD13 like '4249%' or apcd.MED_ICD13 in &IJI or
+                    apcd.MED_ICD14 like '4249%' or apcd.MED_ICD14 in &IJI or
+                    apcd.MED_ICD15 like '4249%' or apcd.MED_ICD15 in &IJI or
+                    apcd.MED_ICD16 like '4249%' or apcd.MED_ICD16 in &IJI or
+                    apcd.MED_ICD17 like '4249%' or apcd.MED_ICD17 in &IJI or
+                    apcd.MED_ICD18 like '4249%' or apcd.MED_ICD18 in &IJI or
+                    apcd.MED_ICD19 like '4249%' or apcd.MED_ICD19 in &IJI or
+                    apcd.MED_ICD20 like '4249%' or apcd.MED_ICD20 in &IJI or
+                    apcd.MED_ICD21 like '4249%' or apcd.MED_ICD21 in &IJI or
+                    apcd.MED_ICD22 like '4249%' or apcd.MED_ICD22 in &IJI or
+                    apcd.MED_ICD23 like '4249%' or apcd.MED_ICD23 in &IJI or
+                    apcd.MED_ICD24 like '4249%' or apcd.MED_ICD24 in &IJI or
+                    apcd.MED_ICD25 like '4249%' or apcd.MED_ICD25 in &IJI or
+                    apcd.MED_DIS_DIAGNOSIS like '4249%' or apcd.MED_DIS_DIAGNOSIS in &IJI then 1
+           else 0
+       end as IJI_DIAG
+from FINAL_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd
+on FINAL_COHORT.ID = apcd.ID;
+quit;
+
+proc sql;
+create table FINAL_COHORT as select *,
+case
+when ID in (select ID from IJI_COHORT) then 1
+else 0
+end as IJI_DIAG
+from FINAL_COHORT;
+quit;
+
+proc sql;
+    create table FINAL_COHORT as
+    select 
+        FINAL_COHORT.*, 
+        min_hiv.DIAGNOSIS_MONTH_HIV, 
+        min_hiv.DIAGNOSIS_YEAR_HIV,
+        (case when min_hiv.ID is not null then 1 else 0 end) as HIV_DIAG
+    from FINAL_COHORT
+    left join (
+        select ID, 
+               min(DIAGNOSIS_MONTH_HIV) as DIAGNOSIS_MONTH_HIV,
+               min(DIAGNOSIS_YEAR_HIV) as DIAGNOSIS_YEAR_HIV
+        from PHDHIV.HIV_INC
+        group by ID
+    ) as min_hiv
+    on FINAL_COHORT.ID = min_hiv.ID;
+quit;
+
+proc sql;
+    create table FINAL_COHORT as
+    select 
+        FINAL_COHORT.*, 
+        moud.*, 
+        (case when moud.ID is not null then 1 else 0 end) as EVER_MOUD
+    from FINAL_COHORT
+    left join PHDSPINE.MOUD as moud
+    on FINAL_COHORT.ID = moud.ID;
+quit;
+
+%LET OTHER_SUBSTANCE_USE = ('2910', '2911', '2912', '2913', '2914', '2915', '2918', '29181', '29182', '29189', '2919',
+                      '30300', '30301', '30302', '30390', '30391', '30392', '30500', '30501',
+                      '30502', '76071', '9800', '3575', '4255', '53530', '53531', '5710', '5711', '5712',
+                      '5713', 'F101', 'F1010', 'F1012', 'F10120', 'F10121', 'F10129', 'F1013',
+                      'F10130', 'F10131', 'F10132', 'F10139', 'F1014', 'F1015', 'F10150', 'F10151', 'F10159',
+                      'F1018', 'F10180', 'F10181', 'F10182', 'F10188', 'F1019', 'F102', 'F1020', 'F1022',
+                      'F10220', 'F10221', 'F10229', 'F1023', 'F10230', 'F10231', 'F10232', 'F10239', 'F1024',
+                      'F1025', 'F10250', 'F10251', 'F10259', 'F1026', 'F1027', 'F1028', 'F10280', 'F10281',
+                      'F10282', 'F10288', 'F1029', 'F109', 'F1090', 'F1092', 'F10920', 'F10921', 'F10929',
+                      'F1093', 'F10930', 'F10931', 'F10932', 'F10939', 'F1094', 'F1095', 'F10950', 'F10951',
+                      'F10959', 'F1096', 'F1097', 'F1098', 'F10980', 'F10981', 'F10982', 'F10988', 'F1099', 'T405X4A', /* AUD */
+                      '30421', '30422', '3056', '30561', '30562', '3044', '30441', '30442',
+                      '9697', '96972', '96973', '96979', 'E8542', 'F14', 'F141', 'F1410', 'F1412',
+                      'F14120', 'F14121', 'F14122', 'F14129', 'F1413', 'F1414', 'F1415', 'F14150', 'F14151',
+                      'F14159', 'F1418', 'F14180', 'F14181', 'F14182', 'F14188', 'F1419', 'F142', 'F1420', 'F1421',
+                      'F1422', 'F14220', 'F14221', 'F14222', 'F14229', 'F1423', 'F1424', 'F1425', 'F14250', 'F14251',
+                      'F14259', 'F1428', 'F14280', 'F14281', 'F14282', 'F14288', 'F1429', 'F149', 'F1490', 'F1491',
+                      'F1492', 'F14920', 'F14921', 'F14922', 'F14929', 'F1493', 'F1494', 'F1495', 'F14950', 'F14951',
+                      'F14959', 'F1498', 'F14980', 'F14981', 'F14982', 'F14988', 'F1499', 'F15', 'F151', 'F1510',
+                      'F1512', 'F15120', 'F15121', 'F15122', 'F15129', 'F1513', 'F1514', 'F1515', 'F15150',
+                      'F15151', 'F15159', 'F1518', 'F15180', 'F15181', 'F15182', 'F15188', 'F1519', 'F152',
+                      'F1520', 'F1522', 'F15220', 'F15221', 'F15222', 'F15229', 'F1523', 'F1524', 'F1525',
+                      'F15250', 'F15251', 'F15259', 'F1528', 'F15280', 'F15281', 'F15282', 'F15288', 'F1529',
+                      'F159', 'F1590', 'F1592', 'F15920', 'F15921', 'F15922', 'F15929', 'F1593', 'F1594',
+                      'F1595', 'F15950', 'F15951', 'F15959', 'F1598', 'F15980', 'F15981', 'F15982', 'F15988',
+                      'F1599', 'T405', 'T436', 'T405XIA', 'T43601A', 'T43602A', 'T43604A', 'T43611A',
+                      'T43621A', 'T43624A', 'T43631A', 'T43634A', 'T43641A', 'T43644A',
+                      '96970', '96972', '96973', '96979', '97081', '97089', 'E8542', 'E8543', 'E8552',
+                      'T43691A', 'T43694A' /* Stimulants */);
+
+proc sql;
+create table OTHER_SUBSTANCE_USE_COHORT(where=(OTHER_SUBSTANCE_USE=1)) as
+select distinct FINAL_COHORT.ID,
+  case
+       when apcd.MED_ECODE in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ADM_DIAGNOSIS in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_PROC_CODE in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC1 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC2 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC3 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC4 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC5 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC6 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD_PROC7 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD1 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD2 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD3 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD4 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD5 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD6 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD7 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD8 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD9 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD10 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD11 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD12 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD13 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD14 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD15 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD16 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD17 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD18 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD19 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD20 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD21 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD22 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD23 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD24 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_ICD25 in &OTHER_SUBSTANCE_USE or
+                        apcd.MED_DIS_DIAGNOSIS in &OTHER_SUBSTANCE_USE 
+                   or
+                  (BSAS.CLT_ENR_PRIMARY_DRUG in (1,2,3,10,11,12) or
+                   BSAS.CLT_ENR_SECONDARY_DRUG in (1,2,3,10,11,12) or
+                   BSAS.CLT_ENR_TERTIARY_DRUG in (1,2,3,10,11,12)) then 1
+           else 0
+       end as OTHER_SUBSTANCE_USE
+from FINAL_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd on FINAL_COHORT.ID = apcd.ID
+left join PHDBSAS.BSAS as bsas on FINAL_COHORT.ID = bsas.ID;
+quit;
+
+proc sql;
+create table FINAL_COHORT as select *,
+case
+when ID in (select ID from OTHER_SUBSTANCE_USE_COHORT) then 1
+else 0
+end as OTHER_SUBSTANCE_USE
+from FINAL_COHORT;
+quit;
+
+%LET HCV_ICD = ('7051', '7054', '707',
+				'7041', '7044', '7071',
+				'B1710','B182', 'B1920',
+				'B1711','B1921');
+				
+proc sql;
+create table HCV_DIAG_COHORT (where=(HCV_DIAG=1)) as
+select distinct FINAL_COHORT.ID,
+  case
+       when apcd.MED_ECODE in &HCV_ICD or
+                        apcd.MED_ADM_DIAGNOSIS in &HCV_ICD or
+                        apcd.MED_ICD1 in &HCV_ICD or
+                        apcd.MED_ICD2 in &HCV_ICD or
+                        apcd.MED_ICD3 in &HCV_ICD or
+                        apcd.MED_ICD4 in &HCV_ICD or
+                        apcd.MED_ICD5 in &HCV_ICD or
+                        apcd.MED_ICD6 in &HCV_ICD or
+                        apcd.MED_ICD7 in &HCV_ICD or
+                        apcd.MED_ICD8 in &HCV_ICD or
+                        apcd.MED_ICD9 in &HCV_ICD or
+                        apcd.MED_ICD10 in &HCV_ICD or
+                        apcd.MED_ICD11 in &HCV_ICD or
+                        apcd.MED_ICD12 in &HCV_ICD or
+                        apcd.MED_ICD13 in &HCV_ICD or
+                        apcd.MED_ICD14 in &HCV_ICD or
+                        apcd.MED_ICD15 in &HCV_ICD or
+                        apcd.MED_ICD16 in &HCV_ICD or
+                        apcd.MED_ICD17 in &HCV_ICD or
+                        apcd.MED_ICD18 in &HCV_ICD or
+                        apcd.MED_ICD19 in &HCV_ICD or
+                        apcd.MED_ICD20 in &HCV_ICD or
+                        apcd.MED_ICD21 in &HCV_ICD or
+                        apcd.MED_ICD22 in &HCV_ICD or
+                        apcd.MED_ICD23 in &HCV_ICD or
+                        apcd.MED_ICD24 in &HCV_ICD or
+                        apcd.MED_ICD25 in &HCV_ICD or
+                        apcd.MED_DIS_DIAGNOSIS in &HCV_ICD 
+                   then 1
+           else 0
+       end as HCV_DIAG
+from FINAL_COHORT
+left join PHDAPCD.MOUD_MEDICAL as apcd on FINAL_COHORT.ID = apcd.ID;
+quit;
+
+proc sql;
+create table FINAL_COHORT as select *,
+case
+when ID in (select ID from HCV_DIAG_COHORT) then 1
+else 0
+end as HCV_DIAG
+from FINAL_COHORT;
+quit;
+
+/* ================================================================ */
+/* Finding Closest Medical Event Dates for HCV Cases for HCV Cohort */
+/* ================================================================ */
+/* This section identifies the closest APCD claim relative to each HCV diagnosis date.  
+   The HCV and MOUD_MEDICAL datasets are first sorted by ID and relevant date variables to facilitate merging.  
+   In the merged dataset, past and future MOUD event dates are compared to the HCV diagnosis date for each individual.  
+   The closest event date before or after the diagnosis is retained, along with associated attributes such as insurance type and provider city.  
+   For each ID, if a past event exists, it is preferred; otherwise, the closest future event is selected.  
+   The final dataset includes ID, HCV event date, closest MOUD event date, insurance type, and provider city,  
+   which are then merged with the FINAL_COHORT dataset to add context on healthcare access. */
+
+proc sort data=PHDHEPC.HCV;
+    by ID EVENT_DATE_HCV;
+run;
+
+proc sort data=PHDAPCD.MOUD_MEDICAL;
+    by ID MED_FROM_DATE;
+run;
+
+data closest_date;
+length closest_past_type closest_future_type closest_type $2 closest_past_city closest_future_city $50;
+    merge PHDHEPC.HCV (in=a)
+          PHDAPCD.MOUD_MEDICAL (in=b);
+    by ID;
+    
+    if a;
+
+    retain closest_past_date closest_past_type min_past_diff closest_past_city;
+    retain closest_future_date closest_future_type min_future_diff closest_future_city;
+
+    if first.ID then do;
+        closest_past_date = .;
+        closest_past_type = "";
+        closest_past_city = "";
+        min_past_diff = .;
+        closest_future_date = .;
+        closest_future_type = "";
+        closest_future_city = "";
+        min_future_diff = .;
+    end;
+
+    if MED_FROM_DATE < EVENT_DATE_HCV then do;
+        past_diff = EVENT_DATE_HCV - MED_FROM_DATE;
+        if min_past_diff = . or past_diff < min_past_diff then do;
+            min_past_diff = past_diff;
+            closest_past_date = MED_FROM_DATE;
+            closest_past_type = MED_INSURANCE_TYPE;
+            closest_past_city = MED_PROV_CITY;
+        end;
+    end;
+
+    else do;
+        future_diff = MED_FROM_DATE - EVENT_DATE_HCV;
+        if min_future_diff = . or future_diff < min_future_diff then do;
+            min_future_diff = future_diff;
+            closest_future_date = MED_FROM_DATE;
+            closest_future_type = MED_INSURANCE_TYPE;
+            closest_future_city = MED_PROV_CITY;
+        end;
+    end;
+
+    if last.ID then do;
+        if min_past_diff ne . then do;
+            closest_date = closest_past_date;
+            closest_type = closest_past_type;
+            closest_city = closest_past_city;
+        end;
+        else do;
+            closest_date = closest_future_date;
+            closest_type = closest_future_type;
+            closest_city = closest_future_city;
+        end;
+        output;
+    end;
+run;
+
+data final_output;
+    set closest_date;
+    keep ID EVENT_DATE_HCV closest_date closest_type closest_city;
+run;
+
+proc sort data=FINAL_COHORT;
+    by ID;
+run;
+
+proc sort data=final_output;
+    by ID;
+run;
+
+data FINAL_COHORT;
+    merge FINAL_COHORT (in=a)
+          final_output (keep=ID closest_type closest_city rename=(closest_type=INSURANCE) rename=(closest_city=MED_PROV_CITY));
+    by ID;
+    if a;
+run;
+
+/* ====================================================================== */
+/* Finding Closest Medical Event Dates for OUD Diagnosis (Non-HCV Cohort) */
+/* ====================================================================== */
+/* This section identifies the closest APCD claim relative to the OUD diagnosis year for individuals without HCV diagnoses.
+   The `missing_hcv` dataset is created by selecting individuals from the FINAL_COHORT who do not have a match in the HCV dataset.  
+   Using the sorted APCD_MEDICAL dataset, the closest MOUD event year before or after the OUD diagnosis year is retained for each individual.  
+   The closest event's attributes (insurance type and provider city) are captured, with preference given to past events if available.  
+   Finally, the enriched data with closest MOUD event details is merged back into the FINAL_COHORT dataset for a comprehensive view of healthcare access. */
+
+proc sql;
+    create table missing_hcv as
+    select f.ID, f.YOB, f.OUD_AGE,
+           (f.YOB + f.OUD_AGE) as OUD_DIAGNOSIS_YEAR
+    from FINAL_COHORT as f
+    left join PHDHEPC.HCV as h on f.ID = h.ID
+    where h.ID is null;
+quit;
+
+proc sort data=PHDAPCD.MOUD_MEDICAL;
+    by ID MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH;
+run;
+
+data closest_date;
+length closest_past_type closest_future_type closest_type $2 closest_past_city closest_future_city $50;
+    merge missing_hcv (in=a)
+          PHDAPCD.MOUD_MEDICAL (in=b);
+    by ID;
+    
+    if a;
+
+    retain closest_past_date closest_past_type min_past_diff closest_past_city;
+    retain closest_future_date closest_future_type min_future_diff closest_future_city;
+
+    if first.ID then do;
+        closest_past_date = .;
+        closest_past_type = "";
+        closest_past_city = "";
+        min_past_diff = .;
+        closest_future_date = .;
+        closest_future_type = "";
+        closest_future_city = "";
+        min_future_diff = .;
+    end;
+
+    if MED_FROM_DATE_YEAR < OUD_DIAGNOSIS_YEAR then do;
+        past_diff = OUD_DIAGNOSIS_YEAR - MED_FROM_DATE_YEAR;
+        if min_past_diff = . or past_diff < min_past_diff then do;
+            min_past_diff = past_diff;
+            closest_past_date = MED_FROM_DATE_YEAR;
+            closest_past_type = MED_INSURANCE_TYPE;
+            closest_past_city = MED_PROV_CITY;
+        end;
+    end;
+
+    else do;
+        future_diff = MED_FROM_DATE_YEAR - OUD_DIAGNOSIS_YEAR;
+        if min_future_diff = . or future_diff < min_future_diff then do;
+            min_future_diff = future_diff;
+            closest_future_date = MED_FROM_DATE_YEAR;
+            closest_future_type = MED_INSURANCE_TYPE;
+            closest_future_city = MED_PROV_CITY;
+        end;
+    end;
+
+    if last.ID then do;
+        if min_past_diff ne . then do;
+            closest_date = closest_past_date;
+            closest_type = closest_past_type;
+            closest_city = closest_past_city;
+        end;
+        else do;
+            closest_date = closest_future_date;
+            closest_type = closest_future_type;
+            closest_city = closest_future_city;
+        end;
+        output;
+    end;
+run;
+
+data final_output;
+    set closest_date;
+    keep ID closest_type closest_city;
+run;
+
+proc sort data=FINAL_COHORT;
+    by ID;
+run;
+
+proc sort data=final_output;
+    by ID;
+run;
+
+data FINAL_COHORT;
+    merge FINAL_COHORT (in=a)
+          final_output (keep=ID closest_type closest_city rename=(closest_type=INSURANCE) rename=(closest_city=MED_PROV_CITY));
+    by ID;
+    if a;
+run;
+
+/*====================*/
+/*  TABLE 1			  */
+/*====================*/
+
+proc format;
+    value flagf
+        0 = 'No'
+        1 = 'Yes'
+        9 = 'Unknown';
+
+    value raceef
+        1 = 'White Non-Hispanic'
+        2 = 'Black non-Hispanic'
+        3 = 'Asian/PI non-Hispanic'
+        4 = 'Hispanic'
+        5 = 'American Indian or Other non-Hispanic'
+        9 = 'Missing'
+        99 = 'Not an MA resident';
+
+    value fbornf
+        0 = 'No'
+        1 = 'Yes'
+        8 = 'Missing in dataset'
+        9 = 'Not collected';
+
+    value langfsecondary
+        0 = 'Not Provided' 
+        1 = 'English Only'
+        2 = 'English and Another Language'
+        3 = 'Another Language';
+
+    value edu_fmt
+        1 = 'HS or less'
+        2 = '13+ years'
+        3 = 'Not of School Age'
+        8 = 'Missing in dataset'
+        9 = 'Not collected'
+        10 = 'Special Education';
+run;
+
+data FINAL_COHORT;
+   set FINAL_COHORT;
+   length INSURANCE_CAT $10.;
+   if INSURANCE in ('12', '13', '14', '15', 'CE', 'CI', 'HM') then INSURANCE_CAT = 'Private';
+   else if INSURANCE in ('16', '20, 21', '30', 'HN', 'IC', 'MA', 'MB', 'MC', 'MD', 'MO', 'MP', 'MS', 'QM', 'SC') then INSURANCE_CAT = 'Public';
+   else INSURANCE_CAT = 'Other';
+run;
+
+data FINAL_COHORT;
+   set FINAL_COHORT;
+	if MED_PROV_CITY in (1,2,3,5,7,8,9,10,14,16,17,18,20,23,25,26,30,31,
+	32,35,36,40,42,44,46,48,49,50,52,56,57,61,65,67,71,72,73,75,79,
+	80,82,83,85,87,88,93,94,95,96,97,99,100,101,103,105,107,110,115,
+	116,119,122,123,126,128,131,133,134,136,137,138,139,141,142,144,
+	145,146,149,151,153,155,158,159,160,161,162,163,164,165,166,167,
+	168,170,171,172,174,175,176,177,178,180,181,182,184,185,186,187,
+	188,189,196,198,199,201,206,207,208,210,211,213,214,215,216,218,
+	219,220,226,229,231,232,236,238,239,243,244,245,246,248,251,252,
+	258,259,261,262,264,265,266,271,273,274,275,277,278,280,281,284,
+	285,288,291,292,293,295,298,301,304,305,307,308,310,314,315,316,
+	317,320,321,325,328,329,330,333,334,335,336,338,339,342,344,
+	346,347,348,350,351) then rural=0;
+	
+	else if MED_PROV_CITY in (4,11,12,13,19,21,22,24,27,28,33,34,37,38,39,
+	41,43,45,51,54,55,58,59,60,64,68,69,70,74,76,77,78,81,84,86,92,
+	102,108,111,112,117,118,120,125,127,132,135,140,143,147,148,154,
+	157,169,173,179,183,191,194,200,205,212,222,224,227,228,230,240,
+	241,247,249,250,254,255,256,257,263,269,270,272,276,279,282,286,
+	287,289,290,294,297,299,303,306,309,311,313,322,323,324,331,332,
+	337,340, 343,345,349) then rural =1;
+	
+	else if MED_PROV_CITY in (6,104,15,29,47,53,62,63,66,89,90,91,98,106,
+	109,113,114,121,124,129,130,150,152,156,190,192,193,195,197,202,
+	203,204,209,217,221,223,225,233,234,235,237,242,253,260,267,268,
+	283,296,300,302,312,318,319,326,327,341) then rural =2;
+run;
+
+%macro Table1Freqs(var, format);
+    title "Table 1, Unstratified";
+    proc freq data=FINAL_COHORT;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+proc means data=FINAL_COHORT;
+    var oud_age;
+    where oud_age ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+proc means data=FINAL_COHORT;
+    var AGE_HCV;
+    where AGE_HCV ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+proc means data=FINAL_COHORT;
+    var AGE_BIRTH;
+    where AGE_BIRTH ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+%Table1Freqs(FINAL_RE, raceef.);
+%Table1Freqs(EVER_INCARCERATED, flagf.);
+%Table1Freqs(HOMELESS_HISTORY, flagf.);
+%Table1Freqs(LANGUAGE, langfsecondary.);
+%Table1Freqs(EDUCATION, edu_fmt.);
+%Table1Freqs(FOREIGN_BORN, fbornf.);
+%Table1Freqs(HIV_DIAG, flagf.);
+%Table1Freqs(HCV_DIAG, flagf.);
+%Table1Freqs(EVER_IDU_HCV_MAT, flagf.);
+%Table1Freqs(mental_health_diag, flagf.);
+%Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
+%Table1Freqs(iji_diag, flagf.);
+%Table1Freqs(OCCUPATION_CODE);
+%Table1Freqs(EVER_MOUD, flagf.);
+%Table1Freqs(INSURANCE_CAT);
+%Table1Freqs(LD_PAY);
+%Table1Freqs(KOTELCHUCK);
+%Table1Freqs(prenat_site);
+%Table1Freqs(rural);
+
+/*====================*/
+/*  TABLE 2			  */
+/*====================*/
+
+%macro Table2Linkage(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model HCV_PRIMARY_DIAG(event='1') = &var / dist=binary link=logit solution oddsratio;
+    		random intercept;
+	run;
+%mend;
+
+%Table2Linkage(FINAL_RE, ref ='1');
+%Table2Linkage(EVER_INCARCERATED, ref ='0');
+%Table2Linkage(HOMELESS_HISTORY, ref ='0');
+%Table2Linkage(LANGUAGE, ref ='1');
+%Table2Linkage(EDUCATION, ref ='1');
+%Table2Linkage(FOREIGN_BORN, ref ='0');
+%Table2Linkage(HIV_DIAG, ref ='0');
+%Table2Linkage(HCV_DIAG, ref ='0');
+%Table2Linkage(EVER_IDU_HCV_MAT, ref ='0');
+%Table2Linkage(mental_health_diag, ref ='0');
+%Table2Linkage(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2Linkage(iji_diag, ref ='0');
+%Table2Linkage(OCCUPATION_CODE, ref ='0');
+%Table2Linkage(EVER_MOUD, ref ='0');
+%Table2Linkage(INSURANCE_CAT, ref ='Public');
+%Table2Linkage(LD_PAY, ref ='1');
+%Table2Linkage(KOTELCHUCK, ref ='3');
+%Table2Linkage(prenat_site, ref ='1');
+%Table2Linkage(rural, ref ='1');
+
+%macro Table2Treatment(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model DAA_START_INDICATOR(event='1') = &var / dist=binary link=logit solution oddsratio;
+    		random intercept;
+	run;
+%mend;
+
+%Table2Treatment(FINAL_RE, ref ='1');
+%Table2Treatment(EVER_INCARCERATED, ref ='0');
+%Table2Treatment(HOMELESS_HISTORY, ref ='0');
+%Table2Treatment(LANGUAGE, ref ='1');
+%Table2Treatment(EDUCATION, ref ='1');
+%Table2Treatment(FOREIGN_BORN, ref ='0');
+%Table2Treatment(HIV_DIAG, ref ='0');
+%Table2Treatment(HCV_DIAG, ref ='0');
+%Table2Treatment(EVER_IDU_HCV_MAT, ref ='0');
+%Table2Treatment(mental_health_diag, ref ='0');
+%Table2Treatment(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2Treatment(iji_diag, ref ='0');
+%Table2Treatment(OCCUPATION_CODE, ref ='0');
+%Table2Treatment(EVER_MOUD, ref ='0');
+%Table2Treatment(INSURANCE_CAT, ref ='Public');
+%Table2Treatment(LD_PAY, ref ='1');
+%Table2Treatment(KOTELCHUCK, ref ='3');
+%Table2Treatment(prenat_site, ref ='1');
+%Table2Treatment(rural, ref ='1');

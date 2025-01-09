@@ -30,7 +30,7 @@ quit;
 /*  PART 1: GLOBAL VARIABLES	*/
 /*==============================*/
 
-%LET years = (2014:2021);
+%LET years = (2014:2022);
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
