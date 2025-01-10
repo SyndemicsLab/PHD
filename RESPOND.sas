@@ -924,79 +924,56 @@ RUN;
 
 PROC SQL;    
     CREATE TABLE moud_demo AS
-    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX, DEMO.YOB
+    SELECT moud.DATE_START_MOUD as start_date, moud.DATE_END_MOUD as end_date,
+    	   moud.DATE_START_YEAR_MOUD as start_year, moud.DATE_END_YEAR_MOUD as end_year,
+    	   moud.DATE_START_MONTH_MOUD as start_month, moud.DATE_END_MONTH_MOUD as end_month,
+    	   moud.TYPE_MOUD, DEMO.FINAL_RE, MOUD.ID, DEMO.FINAL_SEX
     FROM moud
     LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
 QUIT;
 
 PROC SORT DATA=moud_demo;
-    by ID TYPE_MOUD DATE_START_MOUD;
+    by ID TYPE_MOUD start_date;
 RUN;
 
-/* 
-Create `episode_id`, which forms the basis for merging when 
-two episode IDs are the same 
-*/
 DATA moud_demo;
     SET moud_demo;
-    by ID TYPE_MOUD;
-    retain episode_num;
+    BY ID TYPE_MOUD;
+    RETAIN new_start_date new_end_date new_start_month new_start_year 
+           new_end_month new_end_year YOB FINAL_RE FINAL_SEX;
 
-    lag_date = lag(DATE_END_MOUD);
-    IF FIRST.TYPE_MOUD THEN lag_date = .;
-    IF FIRST.TYPE_MOUD THEN episode_num = 1;
-    
-    diff = DATE_START_MOUD - lag_date;
-    
-    /* If the difference is greater than MOUD leniency, assume 
-    it is another treatment episode */
-    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
+    IF FIRST.ID OR FIRST.TYPE_MOUD THEN DO;
+        new_start_date = start_date;
+        new_start_month = start_month;
+        new_start_year = start_year;
 
-    episode_id = catx("_", ID, episode_num);
-RUN;
-
-PROC SORT data=moud_demo; 
-    BY episode_id;
-RUN;
-
-/* Filter cohort to OUD cohort above*/
-PROC SQL;
-    CREATE TABLE moud_demo AS 
-    SELECT * 
-    FROM moud_demo
-    WHERE ID IN (SELECT DISTINCT ID FROM oud_yearly);
-QUIT;
-
-/* 
-Merge where episode ID is the same, taking the 
-start_month/year of the first record, and the 
-end_month/year of the final record
-*/
-DATA moud_demo; 
-    SET moud_demo;
-
-    by episode_id;
-    retain DATE_START_MOUD;
-
-    IF FIRST.episode_id THEN DO;
-        start_month = DATE_START_MONTH_MOUD;
-        start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD;
+        new_end_date = end_date;
+        new_end_month = end_month;
+        new_end_year = end_year;
     END;
-    IF LAST.episode_id THEN DO;
-        end_month = DATE_END_MONTH_MOUD;
-        end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
-    END;
-        
-   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-RUN;
+    ELSE DO;
+        diff_days = start_date - new_end_date;
 
-PROC SORT data=moud_demo (KEEP= start_date start_month start_year
-					  			end_date end_month end_year 
-					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
-    BY ID;
+        IF diff_days <= &MOUD_leniency THEN DO;
+            new_end_date = end_date;
+            new_end_month = end_month;
+            new_end_year = end_year;
+        END;
+        ELSE DO;
+            OUTPUT;
+            new_start_date = start_date;
+            new_start_month = start_month;
+            new_start_year = start_year;
+
+            new_end_date = end_date;
+            new_end_month = end_month;
+            new_end_year = end_year;
+        END;
+    END;
+    IF LAST.ID OR LAST.TYPE_MOUD THEN OUTPUT;
+
+
+    DROP diff_days start_date end_date start_month end_month start_year end_year;
 RUN;
 
 PROC SQL;
@@ -1004,15 +981,21 @@ PROC SQL;
  AS SELECT DISTINCT * FROM moud_demo;
 QUIT;
 
+PROC SORT data=moud_demo (KEEP= new_start_date new_start_month new_start_year
+					  			new_end_date new_end_month new_end_year 
+					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
+    BY ID new_start_date;
+RUN;
+
 DATA moud_demo;
     SET moud_demo;
     BY ID;
 	
-	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+	IF new_end_date - new_start_date < &MOUD_leniency THEN DELETE;
 	
 	IF FIRST.ID THEN diff = .; 
-	ELSE diff = start_date - lag(end_date);
-    IF end_date < lag(end_date) THEN temp_flag = 1;
+	ELSE diff = new_start_date - lag(new_end_date);
+    IF new_end_date < lag(new_end_date) THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF first.ID THEN flag_mim = 0;
@@ -1021,7 +1004,7 @@ DATA moud_demo;
 
     IF flag_mim = 1 THEN DELETE;
 
-    age = start_year - YOB;
+    age = new_start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
     age_grp_twenty = put(age, age_grps_twenty.);
 RUN;
@@ -1032,11 +1015,11 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
 
     FORMAT year 4. month 2.;
     
-    num_months = intck('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), 
-                       input(put(end_year, 4.) || put(end_month, z2.), yymmn6.));
+    num_months = intck('month', input(put(new_start_year, 4.) || put(new_start_month, z2.), yymmn6.), 
+                       input(put(new_end_year, 4.) || put(new_end_month, z2.), yymmn6.));
 
     DO i = 0 to num_months;
-      new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
+      new_date = intnx('month', input(put(new_start_year, 4.) || put(new_start_month, z2.), yymmn6.), i);
       year = year(new_date);
       month = month(new_date);
       postexp_age = year - YOB;
@@ -1331,43 +1314,35 @@ RUN;
 
 DATA doc_monthly;
     SET doc_monthly;
-    by ID;
-    retain episode_num;
+    BY ID;
+    RETAIN new_admission new_release YOB FINAL_RE FINAL_SEX;
 
-    lag_date = lag(release);
-    IF FIRST.ID THEN lag_date = .;
-    IF FIRST.ID THEN episode_num = 1;
-    
-    diff = release - lag_date;
-    
-    /* If the difference is greater than MOUD leniency, assume it is another incarceration episode */
-    IF diff >= &DOC_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
-
-    episode_id = catx("_", ID, episode_num);
-RUN;
-/* 
-Merge where episode ID is the same, taking the 
-start_month/year of the first record, and the 
-end_month/year of the final record
-*/
-DATA doc_monthly; 
-    SET doc_monthly;
-
-    by episode_id;
-    retain admission;
-
-    IF FIRST.episode_id THEN DO;
-        start = admission;
+    IF FIRST.ID THEN DO;
+        new_admission = admission;
+        new_release = release;
     END;
-    IF LAST.episode_id THEN DO;
-        end = admission;
+    ELSE DO;
+        diff = admission - new_release;
+
+        IF diff < &DOC_leniency THEN DO;
+            new_release = release;
+        END;
+        ELSE DO;
+            OUTPUT;
+            new_admission = admission;
+            new_release = release;
+        END;
     END;
+    IF LAST.ID THEN OUTPUT;
+    new_admission = admission;
+    new_release = release;
+
+    DROP diff admission release;
 RUN;
 
 DATA incar_monthly;
     SET doc_monthly;
-    DO date = start TO end BY 1;
+    DO date = new_admission TO new_release BY 1;
         IF DAY(INTNX('MONTH', date, 0, 'SAME')) = 1 THEN OUTPUT;
     END;
     FORMAT date YYMMN6.;
