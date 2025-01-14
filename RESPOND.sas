@@ -927,7 +927,7 @@ PROC SQL;
     SELECT moud.DATE_START_MOUD as start_date, moud.DATE_END_MOUD as end_date,
     	   moud.DATE_START_YEAR_MOUD as start_year, moud.DATE_END_YEAR_MOUD as end_year,
     	   moud.DATE_START_MONTH_MOUD as start_month, moud.DATE_END_MONTH_MOUD as end_month,
-    	   moud.TYPE_MOUD, DEMO.FINAL_RE, MOUD.ID, DEMO.FINAL_SEX
+    	   moud.TYPE_MOUD, DEMO.FINAL_RE, MOUD.ID, DEMO.FINAL_SEX, DEMO.YOB
     FROM moud
     LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
 QUIT;
