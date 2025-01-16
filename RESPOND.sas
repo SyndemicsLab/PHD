@@ -1037,7 +1037,9 @@ RUN;
 PROC SQL;
     CREATE TABLE moud_expanded AS 
     SELECT DISTINCT * FROM moud_expanded;
+QUIT;
 
+PROC SQL;
     CREATE TABLE moud_starts AS
     SELECT new_start_month AS month,
            new_start_year AS year,
@@ -1125,7 +1127,8 @@ PROC SQL;
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
     GROUP BY new_end_month, new_end_year, TYPE_MOUD, FINAL_RE;
-
+QUIT;
+PROC SQL;
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
