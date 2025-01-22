@@ -2977,6 +2977,14 @@ proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
 	 random intercept / subject=MOM_ID;
 run;
 
+data TRT_TESTING15;
+    set TRT_TESTING15;
+    
+    if AGE_HCV in (0, 1, 2) then AGE_HCV_CAT = 1;
+    else if AGE_HCV in (3, 4, 5, 6, 7, 8, 9, 10) then AGE_HCV_CAT = 2;
+    else if AGE_HCV in (11, 12, 13, 14, 15) then AGE_HCV_CAT = 3;
+run;
+
 %macro Table2Crude0_15(var, ref=);
 	title "Table 2, 0-15 Cohort, Crude";
 	proc glimmix data=TRT_TESTING15 noclprint noitprint;
@@ -2990,12 +2998,7 @@ run;
 %Table2Crude0_15 (LANGUAGE, ref='1');
 %Table2Crude0_15 (FOREIGN_BORN, ref='0');
 %Table2Crude0_15 (EVER_IDU_HCV, ref='0');
-
-title "Table 2, 0-15 Cohort, Crude";
-proc glimmix data=TRT_TESTING15 noclprint noitprint;
-     class AGE_HCV;
-	 model DAA_START_INDICATOR(event='1') = AGE_HCV / dist=binary link=logit solution oddsratio;
-run;
+%Table2Crude0_15 (AGE_HCV_CAT, ref='1');
 
 /* ========================================================== */
 /* Part 5: Collinearity and MV Regressions                    */
@@ -3127,21 +3130,21 @@ run;
 %ChiSquareTest0_15(FINAL_RE, LANGUAGE);
 %ChiSquareTest0_15(FINAL_RE, FINAL_SEX);
 %ChiSquareTest0_15(FINAL_RE, EVER_IDU_HCV);
-%ChiSquareTest0_15(FINAL_RE, AGE_HCV);
+%ChiSquareTest0_15(FINAL_RE, AGE_HCV_CAT);
 
 %ChiSquareTest0_15(FOREIGN_BORN, LANGUAGE);
 %ChiSquareTest0_15(FOREIGN_BORN, FINAL_SEX);
 %ChiSquareTest0_15(FOREIGN_BORN, EVER_IDU_HCV);
-%ChiSquareTest0_15(FOREIGN_BORN, AGE_HCV);
+%ChiSquareTest0_15(FOREIGN_BORN, AGE_HCV_CAT);
 
 %ChiSquareTest0_15(LANGUAGE, FINAL_SEX);
 %ChiSquareTest0_15(LANGUAGE, EVER_IDU_HCV);
-%ChiSquareTest0_15(LANGUAGE, AGE_HCV);
+%ChiSquareTest0_15(LANGUAGE, AGE_HCV_CAT);
 
 %ChiSquareTest0_15(FINAL_SEX, EVER_IDU_HCV);
-%ChiSquareTest0_15(FINAL_SEX, AGE_HCV);
+%ChiSquareTest0_15(FINAL_SEX, AGE_HCV_CAT);
 
-%ChiSquareTest0_15(EVER_IDU_HCV, AGE_HCV);
+%ChiSquareTest0_15(EVER_IDU_HCV, AGE_HCV_CAT);
 
 /* title 'Crosstabulation of Variables by FACILITY_ID_BIRTH';
 proc freq data=FINAL_INFANT_COHORT_COV;
@@ -3195,13 +3198,13 @@ title 'GliMMIX Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FORE
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf. WELL_CHILD flagf.;
 run;
 
-title 'GENMOD Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH with GEE by MOM_ID';
+/* title 'GENMOD Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH with GEE by MOM_ID';
 proc genmod data=FINAL_INFANT_COHORT_COV;
     class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') DISCH_WITH_MOM (ref='No') WELL_CHILD (ref='No') MOM_ID;
     model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH / dist=binomial link=logit;
     repeated subject=MOM_ID / type=cs;
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf. WELL_CHILD flagf.;
-run;
+run; */
 
 proc sort data=FINAL_INFANT_COHORT_COV;
     by WELL_CHILD;
@@ -3217,7 +3220,7 @@ title 'GLIMMIX Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FORE
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf. WELL_CHILD flagf.;
 run;
 
-title 'GENMOD Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH with GEE by MOM_ID where WELL_CHILD=1';
+/* title 'GENMOD Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH with GEE by MOM_ID where WELL_CHILD=1';
 proc genmod data=FINAL_INFANT_COHORT_COV;
     by WELL_CHILD;
     where WELL_CHILD = 1;
@@ -3225,7 +3228,7 @@ proc genmod data=FINAL_INFANT_COHORT_COV;
     model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH / dist=binomial link=logit;
     repeated subject=MOM_ID / type=cs;
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
-run;
+run; */
 
 proc sort data=FINAL_INFANT_COHORT_COV;
     by DISCH_WITH_MOM;
@@ -3241,7 +3244,7 @@ title 'GLIMMIX Logistic: Stratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIG
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
 run;
 
-title 'GENMOD Logistic: Stratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH with GEE by MOM_ID where DISCH_WITH_MOM=1';
+/* title 'GENMOD Logistic: Stratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH with GEE by MOM_ID where DISCH_WITH_MOM=1';
 proc genmod data=FINAL_INFANT_COHORT_COV;
     by DISCH_WITH_MOM;
     where DISCH_WITH_MOM = 1;
@@ -3250,6 +3253,16 @@ proc genmod data=FINAL_INFANT_COHORT_COV;
     repeated subject=MOM_ID / type=cs;
     format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
 run;
+
+title 'GENMOD Logistic: Stratified MV; adjusted for FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD with GEE by MOM_ID where DISCH_WITH_MOM=0';
+proc genmod data=FINAL_INFANT_COHORT_COV;
+    by DISCH_WITH_MOM;
+    where DISCH_WITH_MOM = 0;
+    class FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') GESTATIONAL_AGE_CAT (ref='Term') WELL_CHILD (ref='No') MOM_ID;
+    model APPROPRIATE_Testing(event='1') = FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD / dist=binomial link=logit;
+    repeated subject=MOM_ID / type=cs;
+    format FINAL_RE raceef. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
+run; */
 
 data FINAL_INFANT_COHORT_COV;
     length INFANT_FINAL_RE $30;
@@ -3278,16 +3291,6 @@ title 'GLIMMIX Logistic: Stratified MV; adjusted for INFANT_FINAL_RE COUNTY MOUD
     class INFANT_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') GESTATIONAL_AGE_CAT (ref='Term') WELL_CHILD (ref='No') MOM_ID;
     model APPROPRIATE_Testing(event='1') = INFANT_FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD / dist=binary link=logit solution oddsratio;
     random intercept / subject=MOM_ID;
-    format MOUD_DURING_PREG flagf. MATINF_HEPC flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
-run;
-
-title 'GENMOD Logistic: Stratified MV; adjusted for INFANT_FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD with GEE by MOM_ID where DISCH_WITH_MOM=0';
-proc genmod data=FINAL_INFANT_COHORT_COV;
-    by DISCH_WITH_MOM;
-    where DISCH_WITH_MOM = 0;
-    class INFANT_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') GESTATIONAL_AGE_CAT (ref='Term') WELL_CHILD (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = INFANT_FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD / dist=binomial link=logit;
-    repeated subject=MOM_ID / type=cs;
     format MOUD_DURING_PREG flagf. MATINF_HEPC flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
 run;
 
