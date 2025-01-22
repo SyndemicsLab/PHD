@@ -2,7 +2,7 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 4/27/2023 			*/
-/* Updated: 6/24/2024   		*/
+/* Updated: 12/30/2024   		*/
 /*==============================*/
 /* 
 Overall, the logic behind the known capture is fairly simple: 
@@ -20,7 +20,8 @@ stratified by Year (or Year and Month), Race, Sex, and Age
 /*  	GLOBAL VARIABLES   		*/
 /*==============================*/
 %LET year = (2015:2022);
-%LET MOUD_leniency = 7;
+%LET MOUD_leniency = 30;
+%LET DOC_leniency = 35;
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
@@ -923,79 +924,56 @@ RUN;
 
 PROC SQL;    
     CREATE TABLE moud_demo AS
-    SELECT *, DEMO.FINAL_RE, DEMO.FINAL_SEX, DEMO.YOB
+    SELECT moud.DATE_START_MOUD as start_date, moud.DATE_END_MOUD as end_date,
+    	   moud.DATE_START_YEAR_MOUD as start_year, moud.DATE_END_YEAR_MOUD as end_year,
+    	   moud.DATE_START_MONTH_MOUD as start_month, moud.DATE_END_MONTH_MOUD as end_month,
+    	   moud.TYPE_MOUD, DEMO.FINAL_RE, MOUD.ID, DEMO.FINAL_SEX, DEMO.YOB
     FROM moud
     LEFT JOIN PHDSPINE.DEMO ON moud.ID = DEMO.ID;
 QUIT;
 
 PROC SORT DATA=moud_demo;
-    by ID TYPE_MOUD DATE_START_MOUD;
+    by ID TYPE_MOUD start_date;
 RUN;
 
-/* 
-Create `episode_id`, which forms the basis for merging when 
-two episode IDs are the same 
-*/
 DATA moud_demo;
     SET moud_demo;
-    by ID TYPE_MOUD;
-    retain episode_num;
+    BY ID TYPE_MOUD;
+    RETAIN new_start_date new_end_date new_start_month new_start_year 
+           new_end_month new_end_year YOB FINAL_RE FINAL_SEX;
 
-    lag_date = lag(DATE_END_MOUD);
-    IF FIRST.TYPE_MOUD THEN lag_date = .;
-    IF FIRST.TYPE_MOUD THEN episode_num = 1;
-    
-    diff = DATE_START_MOUD - lag_date;
-    
-    /* If the difference is greater than MOUD leniency, assume 
-    it is another treatment episode */
-    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
+    IF FIRST.ID OR FIRST.TYPE_MOUD THEN DO;
+        new_start_date = start_date;
+        new_start_month = start_month;
+        new_start_year = start_year;
 
-    episode_id = catx("_", ID, episode_num);
-RUN;
-
-PROC SORT data=moud_demo; 
-    BY episode_id;
-RUN;
-
-/* Filter cohort to OUD cohort above*/
-PROC SQL;
-    CREATE TABLE moud_demo AS 
-    SELECT * 
-    FROM moud_demo
-    WHERE ID IN (SELECT DISTINCT ID FROM oud_yearly);
-QUIT;
-
-/* 
-Merge where episode ID is the same, taking the 
-start_month/year of the first record, and the 
-end_month/year of the final record
-*/
-DATA moud_demo; 
-    SET moud_demo;
-
-    by episode_id;
-    retain DATE_START_MOUD;
-
-    IF FIRST.episode_id THEN DO;
-        start_month = DATE_START_MONTH_MOUD;
-        start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD;
+        new_end_date = end_date;
+        new_end_month = end_month;
+        new_end_year = end_year;
     END;
-    IF LAST.episode_id THEN DO;
-        end_month = DATE_END_MONTH_MOUD;
-        end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
-    END;
-        
-   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-RUN;
+    ELSE DO;
+        diff_days = start_date - new_end_date;
 
-PROC SORT data=moud_demo (KEEP= start_date start_month start_year
-					  			end_date end_month end_year 
-					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
-    BY ID;
+        IF diff_days <= &MOUD_leniency THEN DO;
+            new_end_date = end_date;
+            new_end_month = end_month;
+            new_end_year = end_year;
+        END;
+        ELSE DO;
+            OUTPUT;
+            new_start_date = start_date;
+            new_start_month = start_month;
+            new_start_year = start_year;
+
+            new_end_date = end_date;
+            new_end_month = end_month;
+            new_end_year = end_year;
+        END;
+    END;
+    IF LAST.ID OR LAST.TYPE_MOUD THEN OUTPUT;
+
+
+    DROP diff_days start_date end_date start_month end_month start_year end_year;
 RUN;
 
 PROC SQL;
@@ -1003,15 +981,21 @@ PROC SQL;
  AS SELECT DISTINCT * FROM moud_demo;
 QUIT;
 
+PROC SORT data=moud_demo (KEEP= new_start_date new_start_month new_start_year
+					  			new_end_date new_end_month new_end_year 
+					  			ID FINAL_RE FINAL_SEX TYPE_MOUD YOB);
+    BY ID new_start_date;
+RUN;
+
 DATA moud_demo;
     SET moud_demo;
     BY ID;
 	
-	IF end_date - start_date < &MOUD_leniency THEN DELETE;
+	IF new_end_date - new_start_date < &MOUD_leniency THEN DELETE;
 	
 	IF FIRST.ID THEN diff = .; 
-	ELSE diff = start_date - lag(end_date);
-    IF end_date < lag(end_date) THEN temp_flag = 1;
+	ELSE diff = new_start_date - lag(new_end_date);
+    IF new_end_date < lag(new_end_date) THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF first.ID THEN flag_mim = 0;
@@ -1020,7 +1004,7 @@ DATA moud_demo;
 
     IF flag_mim = 1 THEN DELETE;
 
-    age = start_year - YOB;
+    age = new_start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
     age_grp_twenty = put(age, age_grps_twenty.);
 RUN;
@@ -1031,11 +1015,11 @@ DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five
 
     FORMAT year 4. month 2.;
     
-    num_months = intck('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), 
-                       input(put(end_year, 4.) || put(end_month, z2.), yymmn6.));
+    num_months = intck('month', input(put(new_start_year, 4.) || put(new_start_month, z2.), yymmn6.), 
+                       input(put(new_end_year, 4.) || put(new_end_month, z2.), yymmn6.));
 
     DO i = 0 to num_months;
-      new_date = intnx('month', input(put(start_year, 4.) || put(start_month, z2.), yymmn6.), i);
+      new_date = intnx('month', input(put(new_start_year, 4.) || put(new_start_month, z2.), yymmn6.), i);
       year = year(new_date);
       month = month(new_date);
       postexp_age = year - YOB;
@@ -1050,90 +1034,101 @@ DATA moud_expanded;
 	WHERE year IN &year;
 RUN;
 
-PROC SQL;                    
+PROC SQL;
+    CREATE TABLE moud_expanded AS 
+    SELECT DISTINCT * FROM moud_expanded;
+QUIT;
+
+PROC SQL;
     CREATE TABLE moud_starts AS
-    SELECT start_month AS month,
-           start_year AS year,
+    SELECT new_start_month AS month,
+           new_start_year AS year,
            TYPE_MOUD AS treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD;
+    GROUP BY new_start_month, new_start_year, TYPE_MOUD;
 
     CREATE TABLE moud_starts_five AS
-    SELECT start_month AS month,
-           start_year AS year,
+    SELECT new_start_month AS month,
+           new_start_year AS year,
            TYPE_MOUD AS treatment,
            age_grp_five,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_five;
+    GROUP BY new_start_month, new_start_year, TYPE_MOUD, age_grp_five;
 
     CREATE TABLE moud_starts_twenty AS
-    SELECT start_month AS month,
-           start_year AS year,
-           TYPE_MOUD AS treatment
-           , age_grp_twenty,
+    SELECT new_start_month AS month,
+           new_start_year AS year,
+           TYPE_MOUD AS treatment,
+           age_grp_twenty,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, age_grp_twenty;
+    GROUP BY new_start_month, new_start_year, TYPE_MOUD, age_grp_twenty;
 
     CREATE TABLE moud_starts_sex AS
-    SELECT start_month AS month,
-           start_year AS year,
+    SELECT new_start_month AS month,
+           new_start_year AS year,
            TYPE_MOUD AS treatment,
            FINAL_SEX,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_SEX;
+    GROUP BY new_start_month, new_start_year, TYPE_MOUD, FINAL_SEX;
 
     CREATE TABLE moud_starts_race AS
-    SELECT start_month AS month,
-           start_year AS year,
+    SELECT new_start_month AS month,
+           new_start_year AS year,
            TYPE_MOUD AS treatment,
            FINAL_RE,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY start_month, start_year, TYPE_MOUD, FINAL_RE;
+    GROUP BY new_start_month, new_start_year, TYPE_MOUD, FINAL_RE;
 
     CREATE TABLE moud_ends AS
-    SELECT end_month, end_year, 
-    TYPE_moud AS treatment,
+    SELECT new_end_month AS end_month, 
+           new_end_year AS end_year, 
+           TYPE_moud AS treatment,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY end_month, end_year, TYPE_MOUD;
+    GROUP BY new_end_month, new_end_year, TYPE_MOUD;
 
     CREATE TABLE moud_ends_five AS
-    SELECT end_month, end_year, 
-    TYPE_moud AS treatment,
-    age_grp_five,
+    SELECT new_end_month AS end_month, 
+           new_end_year AS end_year, 
+           TYPE_moud AS treatment,
+           age_grp_five,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY end_month, end_year, TYPE_MOUD, age_grp_five;
+    GROUP BY new_end_month, new_end_year, TYPE_MOUD, age_grp_five;
 
     CREATE TABLE moud_ends_twenty AS
-    SELECT end_month, end_year, 
-    TYPE_moud AS treatment,
-    age_grp_twenty,
+    SELECT new_end_month AS end_month, 
+           new_end_year AS end_year, 
+           TYPE_moud AS treatment,
+           age_grp_twenty,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY end_month, end_year, TYPE_MOUD, age_grp_twenty;
+    GROUP BY new_end_month, new_end_year, TYPE_MOUD, age_grp_twenty;
 
     CREATE TABLE moud_ends_sex AS
-    SELECT end_month, end_year, 
-    TYPE_moud AS treatment,
-    FINAL_SEX,
+    SELECT new_end_month AS end_month, 
+           new_end_year AS end_year, 
+           TYPE_moud AS treatment,
+           FINAL_SEX,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY end_month, end_year, TYPE_MOUD, FINAL_SEX;
+    GROUP BY new_end_month, new_end_year, TYPE_MOUD, FINAL_SEX;
 
     CREATE TABLE moud_ends_race AS
-    SELECT end_month, end_year, 
-    TYPE_moud AS treatment,
-    FINAL_RE,
+    SELECT new_end_month AS end_month, 
+           new_end_year AS end_year, 
+           TYPE_moud AS treatment,
+           FINAL_RE,
     IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
     FROM moud_demo
-    GROUP BY end_month, end_year, TYPE_MOUD, FINAL_RE;
-
+    GROUP BY new_end_month, new_end_year, TYPE_MOUD, FINAL_RE;
+QUIT;
+PROC SQL;
     CREATE TABLE moud_counts AS
     SELECT year, month, treatment,
            IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
@@ -1168,31 +1163,31 @@ QUIT;
 
 PROC EXPORT
 	DATA= moud_counts
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCount_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= moud_counts_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Five_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCount_Five_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= moud_counts_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Twenty_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCount_Twenty_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= moud_counts_sex
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Sex_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCount_Sex_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= moud_counts_race
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCounts_Race_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/MOUDCount_Race_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
@@ -1271,22 +1266,6 @@ in order to estimate how many people we may be missing from the data as the date
 to the last date of data available in the PHD
 */
 PROC SQL;
-	CREATE TABLE yearly_min_date AS
-	SELECT DISTINCT ID, min(year) AS min_year,
-					FINAL_RE, FINAL_SEX, YOB
-	FROM oud_yearly
-	GROUP BY ID;
-
-	CREATE TABLE doc_yearly AS 
-	SELECT DISTINCT doc.ID,
-					doc.ADMIT_RECENT_YEAR_DOC, doc.RELEASE_YEAR_DOC,
-					doc.RELEASE_DATE_DOC, doc.ADMIT_RECENT_DATE_DOC,
-					coh.min_year, coh.YOB, coh.FINAL_RE, coh.FINAL_SEX
-	FROM PHDDOC.DOC doc
-	INNER JOIN yearly_min_date coh ON doc.ID = coh.ID
-	WHERE doc.ADMIT_RECENT_YEAR_DOC >= coh.min_year
-		  AND RELEASE_DATE_DOC - ADMIT_RECENT_DATE_DOC >= 7;
-
 	CREATE TABLE monthly_min_date AS 
 	SELECT DISTINCT ID, FINAL_RE, FINAL_SEX, YOB,
 					MIN(INPUT(CAT(year, PUT(month, Z2.)), YYMMN6.)) AS min_date FORMAT = YYMMN6.
@@ -1302,12 +1281,12 @@ PROC SQL;
 	FROM PHDDOC.DOC doc
 	INNER JOIN monthly_min_date coh ON doc.ID = coh.ID
 	WHERE INPUT(CAT(doc.ADMIT_RECENT_YEAR_DOC, PUT(doc.ADMIT_RECENT_MONTH_DOC, Z2.)), YYMMN6.) >= coh.min_date
-		  AND doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC >= 7;
+		  AND doc.RELEASE_DATE_DOC - doc.ADMIT_RECENT_DATE_DOC >= &DOC_leniency;
 
     CREATE TABLE doc_frq_tmp AS
     SELECT DISTINCT ID, n_days, FINAL_RE, FINAL_SEX,
-                    PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_twenty.) AS age_grp_twenty,
-                    PUT(ADMIT_RECENT_YEAR_DOC - YOB, age_grps_five.) AS age_grp_five
+                    PUT(year(admission) - YOB, age_grps_twenty.) AS age_grp_twenty,
+                    PUT(year(admission) - YOB, age_grps_five.) AS age_grp_five
     FROM doc_monthly;
 QUIT;
 
@@ -1337,15 +1316,41 @@ DATA doc_length_sex(KEEP=n_days COUNT); SET doc_length_sex; IF COUNT < 10 THEN C
 DATA doc_length_race(KEEP=n_days COUNT); SET doc_length_race; IF COUNT < 10 THEN COUNT = -1; RUN;
 DATA doc_length(KEEP=n_days COUNT); SET doc_length; IF COUNT < 10 THEN COUNT = -1; RUN;
 
-DATA incar_yearly;
-	SET doc_yearly;
-	DO year = ADMIT_RECENT_YEAR_DOC TO RELEASE_YEAR_DOC;
-		OUTPUT;
-	END;
+PROC SORT data=doc_monthly;
+    by ID admission;
 RUN;
+
+DATA doc_monthly;
+    SET doc_monthly;
+    BY ID;
+    RETAIN new_admission new_release YOB FINAL_RE FINAL_SEX;
+
+    IF FIRST.ID THEN DO;
+        new_admission = admission;
+        new_release = release;
+    END;
+    ELSE DO;
+        diff = admission - new_release;
+
+        IF diff < &DOC_leniency THEN DO;
+            new_release = release;
+        END;
+        ELSE DO;
+            OUTPUT;
+            new_admission = admission;
+            new_release = release;
+        END;
+    END;
+    IF LAST.ID THEN OUTPUT;
+    new_admission = admission;
+    new_release = release;
+
+    DROP diff admission release;
+RUN;
+
 DATA incar_monthly;
     SET doc_monthly;
-    DO date = admission TO release BY 1;
+    DO date = new_admission TO new_release BY 1;
         IF DAY(INTNX('MONTH', date, 0, 'SAME')) = 1 THEN OUTPUT;
     END;
     FORMAT date YYMMN6.;
@@ -1353,10 +1358,10 @@ RUN;
 
 PROC SQL;
 	CREATE TABLE incar_yearly AS 
-	SELECT DISTINCT ID, year, FINAL_RE, FINAL_SEX, 
-					PUT(year - YOB, age_grps_twenty.) as age_grp_twenty,
-					PUT(year - YOB, age_grps_five.) as age_grp_five
-	FROM incar_yearly;
+	SELECT DISTINCT ID, year(date) AS year, FINAL_RE, FINAL_SEX, 
+					PUT(year(date) - YOB, age_grps_twenty.) as age_grp_twenty,
+					PUT(year(date) - YOB, age_grps_five.) as age_grp_five
+	FROM incar_monthly;
 	
 	CREATE TABLE incar_monthly AS 
 	SELECT DISTINCT ID, date, FINAL_RE, FINAL_SEX,
@@ -1389,7 +1394,7 @@ PROC SQL;
 	GROUP BY year, age_grp_twenty;
 
 	CREATE TABLE incar_yearly_five AS 
-	SELECT DISTINCT ear, age_grp_five,
+	SELECT DISTINCT year, age_grp_five,
 		   IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM incar_yearly
 	GROUP BY year, age_grp_five;
@@ -1427,61 +1432,61 @@ QUIT;
 
 PROC EXPORT
 	DATA= incar_yearly_out
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsYearly_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_yearly_race
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsYearly_Race_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Race_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_yearly_sex
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsYearly_Sex_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Sex_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_yearly_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsYearly_Twenty_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Twenty_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_yearly_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsYearly_Five_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Five_Yearly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_monthly_out
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_monthly_race
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_Race_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Race_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_monthly_sex
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_Sex_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Sex_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_monthly_twenty
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_Twenty_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Twenty_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
 PROC EXPORT
 	DATA= incar_monthly_five
-	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsMonthly_Five_&formatted_date..csv"
+	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/Incarcerations_Five_Monthly_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
 
