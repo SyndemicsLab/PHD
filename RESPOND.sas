@@ -1,9 +1,22 @@
 /*==============================================*/
-/* Project: PHD Maternal Analysis Cascade 	    */
+/* Project: PHD Maternal Analysis HEPC Cascade 	*/
 /* Author: Ryan O'Dea and Sarah Munroe          */ 
 /* Created: 4/27/2023 		                    */
-/* Updated: 01/2025 by SJM  	                */
+/* Updated: 02/2025 by SJM  	                */
 /*==============================================*/
+
+/*	Project Goal:
+	Characterize the HCV care cascade in women of reproductive age with OUD and Hepatitis C
+    Describe charateristics of the cohort and related Hepatitis C outcomes: linkage to care, loss-to-follow-up, relinkage to care, and DAA treatment initiation
+    Calculate rates of Hepatitis C outcomes: linkage to care, loss-to-follow-up, relinkage to care, and DAA treatment initiation
+
+    Part 1: Construct OUD cohort
+    Part 2: HCV Care Cascade
+    Part 3: Tables1 and 2 - Crude Analysis 
+    Part 4: Calculate Rates
+
+	Detailed documentation of all datasets and variables:
+	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation */
 
 /*===== SUPRESSION CODE =========*/
 ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
@@ -14,6 +27,17 @@ proc template;
 %include "/sas/data/DPH/OPH/PHD/template.sas";
 run;
 /*==============================*/
+
+/* Overall, the logic behind the known capture is fairly simple: 
+search through individual databases and flag if an ICD9, ICD10, 
+CPT, NDC, or other specialized code matches our lookup table. 
+If a record has one of these codes, it is 'flagged' for OUD. 
+The utilized databases are then joined onto the SPINE demographics 
+dataset and if the sum of flags is greater than zero, then the 
+record is flagged with OUD.  
+At current iteration, data being pulled through this method is 
+stratified by Year (or Year and Month), Race, Sex, and Age 
+(where age groups are defined in the table below). */
 
 /*==============================*/
 /*  	GLOBAL VARIABLES   	    */
@@ -97,6 +121,9 @@ PROC FORMAT;
     'J0570','J0571','J0572','J0573', 
  	'J0574','J0575','J0592', 'J2315','Q9991','Q9992''S0109'/* Naloxone*/);
 
+/* Take NDC codes where buprenorphine has been identified,
+insert them into BUP_NDC as a macro variable */
+
 %LET bsas_drugs = (5,6,7,21,22,23,24,26);
 
 proc sql;
@@ -114,16 +141,6 @@ quit;
 /*============================ */
 /*  Part 1: Construct OUD cohort */
 /*============================ */
-/*	Overall, the logic behind the known capture is fairly simple: 
-search through individual databases and flag if an ICD9, ICD10, 
-CPT, NDC, or other specialized code matches our lookup table. 
-If a record has one of these codes, it is 'flagged' for OUD. 
-The utilized databases are then joined onto the SPINE demographics 
-dataset and if the sum of flags is greater than zero, then the 
-record is flagged with OUD.  
-At current iteration, data being pulled through this method is 
-stratified by Year (or Year and Month), Race, Sex, and Age 
-(where age groups are defined in the table below). */
 
 /*====================*/
 /* 1. Demographics    */
@@ -337,7 +354,7 @@ RUN;
 /* HD PROC DATA */
 
 DATA hd_proc(KEEP= HD_ID oud_hd_proc);
-	SET HDCM.HD_PROC (KEEP = HD_ID HD_PROC);
+	SET PHDCM.HD_PROC (KEEP = HD_ID HD_PROC);
 	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
 	ELSE oud_hd_proc = 0;
 RUN;
@@ -636,10 +653,6 @@ data oud;
     IF age_grp_five  = 999 THEN DELETE;
 run;
 
-/*=========================================*/
-/*    FINAL COHORT DATASET: oud_distinct   */
-/*=========================================*/
-
 PROC SQL;
     CREATE TABLE oud_distinct AS
     SELECT DISTINCT ID, YOB, oud_age, age_grp_five as agegrp, FINAL_RE FROM oud;
@@ -654,18 +667,8 @@ QUIT;
 %put Number of unique IDs in oud_distinct table: &num_unique_ids;
 
 /*============================ */
-/*  Part 2: Maternal Casacde   */
+/* 12. ADD PREGANANCY          */
 /*============================ */
-
-/* ============================ */
-/* 1. Constructing Birth Records and Joining to OUD Dataset */
-/* ============================ */
-/* This section processes birth records by creating a dataset of all births for IDs of interest, including a birth indicator for further aggregation.  
-   The data is grouped by ID to calculate the total number of births, the year of the first birth, and to flag birth occurrence.  
-   A count of unique IDs is generated for reference. The OUD dataset is then merged with the birth records to add birth information for matching IDs,  
-   and missing birth indicators are set to zero for non-matched IDs. Finally, the first birth record for each ID is extracted,  
-   and birth-related variables (age at birth, labor and delivery payment source, Kotelchuck index, and prenatal site)  are added to the OUD dataset for subsequent analysis. 
-   In other words, all births and related covaraites are NOT represented, only the mother's first birth. */
 
 DATA all_births (keep = ID INFANT_DOB BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH LD_PAY KOTELCHUCK prenat_site);
    SET PHDBIRTH.BIRTH_MOM (KEEP = ID INFANT_DOB YEAR_BIRTH AGE_BIRTH LD_PAY KOTELCHUCK prenat_site
@@ -724,13 +727,15 @@ proc sql;
 quit;
 
 /* ========================================================== */
-/* 2. Extract AB/RNA/GENOTYPE Testing Data                    */
+/* 13. Extract AB/RNA/GENOTYPE Testing Data                   */
 /* ========================================================== */
 /* Extract antibody/rna/genotype testing records (CPT codes) from the PHDAPCD.MOUD_MEDICAL dataset.
 Then, remove duplicate testing records based on unique combinations of ID and testing date and sort by ID and testing date in ascending order. 
 Transpose the testing dates for each individual into wide format to create multiple columns for testing dates. 
 Extract the year from the testing records for each ID and creates a new dataset that includes distinct IDs, testing years, and age at testing.
 Select the earliest testing year for each ID and output the frequency of tests occurring in infants under the age of 4. */
+
+/* AB */
 
 DATA ab;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_PROC_CODE MED_FROM_DATE_YEAR
@@ -814,7 +819,7 @@ run;
 title;
 
 /* ========================================================== */
-/* 3. Join All Testing Data with OUD Cohort and Create HCV Testing Indicators */
+/* 14. Join All Testing Data with OUD Cohort and Create HCV Testing Indicators */
 /* ========================================================== */
 /* This step joins antibody, RNA, and genotype testing data to the main OUD dataset based on the ID and
 creates indicators for whether ID had antibody, RNA, and any HCV testing. */
@@ -844,26 +849,44 @@ DATA OUD_HCV;
 	run;
 
 /* ========================================================== */
-/* 4. Extract HCV Status from MAVEN Database                  */
+/* 15. Extract HCV Status from MAVEN Database                 */
 /* ========================================================== */
 /* This section retrieves the HCV diagnosis status for each ID from the MAVEN database,
    calculates the age at diagnosis, and creates indicators for HCV seropositivity and confirmed HCV. */
 
+PROC SORT DATA=PHDHEPC.HCV;
+    BY ID EVENT_DATE_HCV;
+RUN;
+
+DATA HCV_STATUS;
+    SET PHDHEPC.HCV;
+    BY ID EVENT_DATE_HCV;
+    IF FIRST.ID THEN DO;
+        HCV_SEROPOSITIVE_INDICATOR = 1;
+        CONFIRMED_HCV_INDICATOR = (DISEASE_STATUS_HCV = 1);
+        OUTPUT;
+    END;
+KEEP ID AGE_HCV EVENT_MONTH_HCV EVENT_YEAR_HCV EVENT_DATE_HCV HCV_SEROPOSITIVE_INDICATOR CONFIRMED_HCV_INDICATOR;
+RUN;
+
 PROC SQL;
-	CREATE TABLE HCV_STATUS AS
-	SELECT ID,
-	min(AGE_HCV) as AGE_HCV,
-	min(EVENT_YEAR_HCV) as EVENT_YEAR_HCV,
-	min(EVENT_DATE_HCV) as EVENT_DATE_HCV,
-	CASE 
+    CREATE TABLE IDU_STATUS AS 
+    SELECT ID,
+        CASE 
             WHEN SUM(EVER_IDU_HCV = 1) > 0 THEN 1 
             WHEN SUM(EVER_IDU_HCV = 0) > 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 0 
             WHEN SUM(EVER_IDU_HCV = 9) > 0 AND SUM(EVER_IDU_HCV = 0) <= 0 AND SUM(EVER_IDU_HCV = 1) <= 0 THEN 9 
-            ELSE 9
-        END AS EVER_IDU_HCV_MAT,
-	1 as HCV_SEROPOSITIVE_INDICATOR,
-	CASE WHEN min(DISEASE_STATUS_HCV) = 1 THEN 1 ELSE 0 END as CONFIRMED_HCV_INDICATOR FROM PHDHEPC.HCV
-	GROUP BY ID;
+            ELSE 9 
+        END AS EVER_IDU_HCV_MAT
+    FROM PHDHEPC.HCV
+    GROUP BY ID;
+QUIT;
+
+PROC SQL;
+    CREATE TABLE HCV_STATUS AS 
+    SELECT A.*, B.EVER_IDU_HCV_MAT
+    FROM HCV_STATUS A
+    LEFT JOIN IDU_STATUS B ON A.ID = B.ID;
 QUIT;
 
 PROC SQL;
@@ -873,24 +896,29 @@ PROC SQL;
 QUIT;
 
 /* ========================================================== */
-/* 5. Linkage to HCV Care                                     */
+/* 16. Linkage to HCV Care                                    */
 /* ========================================================== */
 /* This section retrieves medical records related to HCV care from the MOUD_MEDICAL dataset,
    filters based on relevant ICD codes, and creates a dataset for infants linked to HCV care. */
 
 DATA HCV_LINKED_SAS;
-SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_ADM_TYPE MED_ICD1
+SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_FROM_DATE_MONTH MED_FROM_DATE_YEAR MED_ADM_TYPE MED_ICD1
  					 WHERE = (MED_ICD1 IN &HCV_ICD)); 
 RUN;
 
-PROC SQL;
-CREATE TABLE HCV_LINKED AS 
-SELECT ID,
- 1 as HCV_PRIMARY_DIAG,
- min(MED_FROM_DATE) as FIRST_HCV_PRIMARY_DIAG_DATE
-from HCV_LINKED_SAS
-GROUP BY ID;
-QUIT;
+PROC SORT DATA=HCV_LINKED_SAS;
+    BY ID MED_FROM_DATE;
+RUN;
+
+DATA HCV_LINKED;
+    SET HCV_LINKED_SAS;
+    BY ID MED_FROM_DATE;
+    IF FIRST.ID THEN DO;
+        HCV_PRIMARY_DIAG = 1;
+        OUTPUT;
+    END;
+KEEP ID MED_FROM_DATE_MONTH MED_FROM_DATE_YEAR HCV_PRIMARY_DIAG;
+RUN;
 
 PROC SQL;
     CREATE TABLE OUD_HCV_LINKED AS
@@ -904,24 +932,29 @@ IF HCV_SEROPOSITIVE_INDICATOR = . THEN HCV_SEROPOSITIVE_INDICATOR = 0;
 run;
 
 /* ========================================================== */
-/* 6. DAA (Direct-Acting Antiviral) Treatment Starts          */
+/* 17. DAA (Direct-Acting Antiviral) Treatment Starts         */
 /* ========================================================== */
 /* This section identifies IDs who started DAA treatment, retains the first DAA start, calculates the age at DAA start,
    and creates indicators for DAA initiation. */
 
-DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
+DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_MONTH PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
  								WHERE = (PHARM_NDC IN &DAA_CODES)); 
 RUN;
 
-PROC SQL;
-CREATE TABLE DAA_STARTS as
-SELECT ID,
-	   min(PHARM_AGE) as PHARM_AGE,
-	   min(PHARM_FILL_DATE_YEAR) as FIRST_DAA_START_YEAR,
-	   min(PHARM_FILL_DATE) as FIRST_DAA_DATE,
-	   1 as DAA_START_INDICATOR from DAA
-GROUP BY ID;
-QUIT;
+PROC SORT DATA=DAA;
+    BY ID PHARM_FILL_DATE;
+RUN;
+
+DATA DAA_STARTS;
+    SET DAA;
+    BY ID PHARM_FILL_DATE;
+    IF FIRST.ID THEN DO;
+        DAA_START_INDICATOR = 1;
+        OUTPUT;
+    END;
+KEEP ID PHARM_AGE PHARM_FILL_DATE_MONTH PHARM_FILL_DATE_YEAR DAA_START_INDICATOR;
+RUN;
+
 
 PROC SQL;
     CREATE TABLE OUD_HCV_DAA AS
@@ -963,11 +996,12 @@ SET OUD_HCV_DAA;
 RUN;
 
 /* ======================================= */
-/* 7. Identifying HCV Status for OUD Cases */
+/* 18. Identifying HCV and OUD Case Counts  */
 /* ======================================= */
-/* This section creates a list of unique IDs for individuals with confirmed or probable HCV (disease status 1 or 2) from the HCV dataset.  
-   It then merges this list with the OUD_HCV_DAA dataset to flag individuals diagnosed with HCV (HCV_FLAG = 1).  
-   A frequency table is generated to display the total count of OUD cases with and without HCV diagnoses for summary statistics and reporting. */
+/* This section calculates and summarizes the total number of HCV cases for women of reproductive age,
+   the number of HCV cases with co-occurring OUD, the total number of OUD cases, and the number of OUD cases
+   without an HCV diagnosis. It also calculates the percentage of HCV cases not captured by the OUD definition 
+   and the percentage of OUD cases without an HCV diagnosis. */
 
 proc sql;
     create table HCV_IDS as
@@ -976,23 +1010,70 @@ proc sql;
     where DISEASE_STATUS_HCV in (1, 2);
 quit;
 
-proc sql;
-    create table OUD_HCV_CROSS as
-    select a.ID,
-           (case when b.ID is not null then 1 else 0 end) as HCV_FLAG
+title "Total N HCV Case Reports for Women of Reproductive Age";
+proc sql noprint;
+    select count(distinct ID) as Total_HCV_Cases
+    from PHDHEPC.HCV
+    where DISEASE_STATUS_HCV in (1, 2)
+      and AGE_HCV between 15 and 45
+      and SEX_HCV = 2;
+quit;
+
+title "Total N HCV Case Reports for Women of Reproductive Age with OUD";
+proc sql noprint;
+    select count(distinct a.ID) as HCV_in_OUD
     from OUD_HCV_DAA as a
-    left join HCV_IDS as b
+    inner join HCV_IDS as b
     on a.ID = b.ID;
 quit;
 
-title "Total # of Confirmed and Probable HCV cases diagnosed with OUD";
-proc freq data=OUD_HCV_CROSS;
-    tables HCV_FLAG / missing;
-run;
+title "Total N OUD Cases for Women of Reproductive Age";
+proc sql noprint;
+    select count(distinct ID) as Total_OUD_Cases
+    from OUD_HCV_DAA;
+quit;
+
+title "Total N OUD Cases Without HCV Diagnoses for Women of Reproductive Age";
+proc sql noprint;
+    select count(distinct a.ID) as OUD_without_HCV
+    from OUD_HCV_DAA as a
+    left join HCV_IDS as b
+    on a.ID = b.ID
+    where b.ID is null;
+quit;
+
+title "Summary of HCV Cases Not Captured by OUD Definition and OUD Without HCV"; 
+proc sql;
+    select Total_HCV_Cases, 
+           HCV_in_OUD, 
+           (Total_HCV_Cases - HCV_in_OUD) as HCV_not_in_OUD,
+           ((Total_HCV_Cases - HCV_in_OUD) / Total_HCV_Cases) * 100 as Percent_Missing_HCV format=8.2,
+           Total_OUD_Cases,
+           HCV_in_OUD as OUD_in_HCV,
+           (Total_OUD_Cases - HCV_in_OUD) as OUD_missing_HCV,
+           ((Total_OUD_Cases - HCV_in_OUD) / Total_OUD_Cases) * 100 as Percent_OUD_missing_HCV format=8.2
+    from (
+        select count(distinct ID) as Total_HCV_Cases
+        from PHDHEPC.HCV
+        where DISEASE_STATUS_HCV in (1, 2)
+          and AGE_HCV between 15 and 45
+          and SEX_HCV = 2
+    ) as total_hcv,
+    (
+        select count(distinct a.ID) as HCV_in_OUD
+        from OUD_HCV_DAA as a
+        inner join HCV_IDS as b
+        on a.ID = b.ID
+    ) as hcv_in_oud,
+    (
+        select count(distinct ID) as Total_OUD_Cases
+        from OUD_HCV_DAA
+    ) as total_oud;
+quit;
 title;
 
 /*=====================*/
-/* 8. Final OUD cohort */
+/* 19. Final OUD cohort */
 /*=====================*/
 
 PROC SQL;
@@ -1003,9 +1084,9 @@ QUIT;
 
 %put Number of unique IDs in TESTING table: &num_unique_ids;
 
-/*=============================*/
-/* Part 3: HCV Cascade         */
-/*=============================*/
+/*============================ */
+/*  Part 2: HCV Care Cascade   */
+/*============================ */
 
 PROC FORMAT;
    VALUE agefmt_all
@@ -1087,7 +1168,7 @@ proc freq data=OUD_HCV_DAA;
            DAA_START_INDICATOR
            BIRTH_INDICATOR
            EVENT_YEAR_HCV
-           FIRST_DAA_START_YEAR / missing norow nocol nopercent;
+           PHARM_FILL_DATE_YEAR / missing norow nocol nopercent;
 run;
 
 proc freq data=OUD_HCV_DAA;
@@ -1123,7 +1204,7 @@ where   CONFIRMED_HCV_INDICATOR = 1;
 tables  BIRTH_INDICATOR
         EOT_RNA_TEST
 		SVR12_RNA_TEST
-		FIRST_DAA_START_YEAR / missing norow nopercent nocol;
+		PHARM_FILL_DATE_YEAR / missing norow nopercent nocol;
 run;
 
 %macro CascadeTestFreq(strata, mytitle, ageformat, raceformat);
@@ -1191,7 +1272,7 @@ run;
 %EndofTrtFreq(num_agegrp, "HCV EOT/SVR Testing Among Confirmed HCV by Age", agefmt_all., racefmt_comb.)
 %YearFreq(EVENT_YEAR_HCV, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
 %YearFreq(EVENT_YEAR_HCV, num_agegrp, 0, "Counts per year among probable, by Age", agefmt_comb., racefmt_all.)
-%YearFreq(FIRST_DAA_START_YEAR, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
+%YearFreq(PHARM_FILL_DATE_YEAR, num_agegrp, 1, "Counts per year among confirmed, by Age", agefmt_comb., racefmt_all.)
 
 proc sort data=OUD_HCV_DAA;
     by final_re;
@@ -1207,7 +1288,7 @@ run;
 %EndofTrtFreq(final_re, "HCV EOT/SVR Testing Among Confirmed HCV by Race -combined", agefmt_all., racefmt_comb.)
 %YearFreq(EVENT_YEAR_HCV, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
 %YearFreq(EVENT_YEAR_HCV, final_re, 0, "Counts per year among probable, by Race", agefmt_comb., racefmt_all.)
-%YearFreq(FIRST_DAA_START_YEAR, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
+%YearFreq(PHARM_FILL_DATE_YEAR, final_re, 1, "Counts per year among confirmed, by Race", agefmt_comb., racefmt_all.)
 
 proc sort data=OUD_HCV_DAA;
     by birth_indicator;
@@ -1222,21 +1303,23 @@ run;
 %EndofTrtFreq(birth_indicator, "HCV EOT/SVR Testing Among Confirmed HCV by Birth", agefmt_all., racefmt_comb.)
 %YearFreq(EVENT_YEAR_HCV, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
 %YearFreq(EVENT_YEAR_HCV, birth_indicator, 0, "Counts per year among probable, by Birth", agefmt_comb., racefmt_all.)
-%YearFreq(FIRST_DAA_START_YEAR, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
+%YearFreq(PHARM_FILL_DATE_YEAR, birth_indicator, 1, "Counts per year among confirmed, by Birth", agefmt_comb., racefmt_all.)
 
-/*=============================*/
-/* Part 4: Output and Analysis */
-/*=============================*/
+/*=========================================*/
+/* Part 3: Tables1 and 2 - Crude Analysis  */
+/*=========================================*/
 
-/*=====================*/
-/* Pull Covariates     */
-/*=====================*/
+/*====================*/
+/* 1. Add Demographic Data */
+/*====================*/
+/* Aggregate Covariates: HOMELESS_EVER, county, FINAL_RE, EVER_INCARCERATED, HOMELESS_HISTORY, FOREIGN_BORN, LANGUAGE
+EDUCATION, OCCUPATION_CODE, MENTAL_HEALTH_DIAG, IJI_DIAG, OTHER_SUBSTANCE_USE, HCV_DIAG, IDU_EVIDENCE */
 
 proc sql;
     create table FINAL_COHORT as
     select OUD_HCV_DAA.*,
            demographics.FINAL_RE, 
-           demographics.HOMELESS_HISTORY,
+           demographics.HOMELESS_EVER,
            demographics.EVER_INCARCERATED,
            demographics.FOREIGN_BORN,
            demographics.LANGUAGE,
@@ -1403,10 +1486,9 @@ proc sql;
     create table FINAL_COHORT as
     select 
         FINAL_COHORT.*, 
-        moud.*, 
         (case when moud.ID is not null then 1 else 0 end) as EVER_MOUD
     from FINAL_COHORT
-    left join PHDSPINE.MOUD as moud
+    left join (select distinct ID from PHDSPINE.MOUD) as moud
     on FINAL_COHORT.ID = moud.ID;
 quit;
 
@@ -1553,9 +1635,9 @@ end as HCV_DIAG
 from FINAL_COHORT;
 quit;
 
-/* ================================================================ */
-/* Finding Closest Medical Event Dates for HCV Cases for HCV Cohort */
-/* ================================================================ */
+/* =================================================================== */
+/* 2. Finding Closest Medical Event Dates for HCV Cases for HCV Cohort */
+/* =================================================================== */
 /* This section identifies the closest APCD claim relative to each HCV diagnosis date.  
    The HCV and MOUD_MEDICAL datasets are first sorted by ID and relevant date variables to facilitate merging.  
    In the merged dataset, past and future MOUD event dates are compared to the HCV diagnosis date for each individual.  
@@ -1649,9 +1731,9 @@ data FINAL_COHORT;
     if a;
 run;
 
-/* ====================================================================== */
-/* Finding Closest Medical Event Dates for OUD Diagnosis (Non-HCV Cohort) */
-/* ====================================================================== */
+/* ========================================================================= */
+/* 3. Finding Closest Medical Event Dates for OUD Diagnosis (Non-HCV Cohort) */
+/* ========================================================================= */
 /* This section identifies the closest APCD claim relative to the OUD diagnosis year for individuals without HCV diagnoses.
    The `missing_hcv` dataset is created by selecting individuals from the FINAL_COHORT who do not have a match in the HCV dataset.  
    Using the sorted APCD_MEDICAL dataset, the closest MOUD event year before or after the OUD diagnosis year is retained for each individual.  
@@ -1748,9 +1830,9 @@ data FINAL_COHORT;
     if a;
 run;
 
-/*====================*/
-/*  TABLE 1			  */
-/*====================*/
+/* ================================= */
+/* 4. FORMATS                        */
+/* ================================= */
 
 proc format;
     value flagf
@@ -1777,7 +1859,8 @@ proc format;
         0 = 'Not Provided' 
         1 = 'English Only'
         2 = 'English and Another Language'
-        3 = 'Another Language';
+        3 = 'Another Language'
+        9 = 'Unknown/missing';
 
     value edu_fmt
         1 = 'HS or less'
@@ -1786,7 +1869,32 @@ proc format;
         8 = 'Missing in dataset'
         9 = 'Not collected'
         10 = 'Special Education';
+    
+    value ld_pay_fmt
+	    1 = 'Public'
+	    2 = 'Private'
+	    9 = 'Unknown';
+    
+    value kotel_fmt
+        0 = 'Missing/Unknown'
+        1 = 'Inadequate'
+        2 = 'Intermediate'
+        3 = 'Adequate'
+        4 = 'Intensive';
+
+    value prenat_site_fmt
+    	1 = 'Private Physicians Office'
+    	2 = 'Community Health Center'
+	    3 = 'HMO'
+	    4 = 'Hospital Clinic'
+    	5 = 'Other'
+    	9 = 'Unknown';
+
 run;
+
+/* ================================= */
+/* 5. RECATEGORIZE                   */
+/* ================================= */
 
 data FINAL_COHORT;
    set FINAL_COHORT;
@@ -1825,37 +1933,96 @@ data FINAL_COHORT;
 	283,296,300,302,312,318,319,326,327,341) then rural =2;
 run;
 
-%macro Table1Freqs(var, format);
-    title "Table 1, Unstratified";
-    proc freq data=FINAL_COHORT;
-        tables &var / missing norow nopercent nocol;
-        format &var &format.;
-    run;
-%mend;
+data FINAL_COHORT;
+    set FINAL_COHORT;
+    if rural = 0 then rural_group = 'Urban';
+    else if rural = 1 then rural_group = 'Rural';
+    else if rural = 2 then rural_group = 'Rural';
+    else rural_group = 'NA/Unknown';
+run;
 
-proc means data=FINAL_COHORT;
+data FINAL_COHORT;
+    length HOMELESS_HISTORY_GROUP $10;
+    set FINAL_COHORT;
+    if HOMELESS_EVER = 0 then HOMELESS_HISTORY_GROUP = 'No';
+    else if 1 <= HOMELESS_EVER <= 5 then HOMELESS_HISTORY_GROUP = 'Yes';
+    else HOMELESS_HISTORY_GROUP = 'Unknown';
+run;
+
+data FINAL_COHORT;
+    length LANGUAGE_SPOKEN_GROUP $30;
+    set FINAL_COHORT;
+    if LANGUAGE = 1 then LANGUAGE_SPOKEN_GROUP = 'English';
+    else if LANGUAGE = 2 then LANGUAGE_SPOKEN_GROUP = 'English and Another Language';
+    else if LANGUAGE = 3 then LANGUAGE_SPOKEN_GROUP = 'Another Language';
+    else LANGUAGE_SPOKEN_GROUP = 'Refused or Unknown';
+run;
+
+data FINAL_COHORT;
+    length EDUCATION_GROUP $30;
+    set FINAL_COHORT;
+    if EDUCATION = 1 then EDUCATION_GROUP = 'HS or less';
+    else if EDUCATION = 2 then EDUCATION_GROUP = '13+ years';
+    else if EDUCATION = 3 then EDUCATION_GROUP = 'Other';
+    else if EDUCATION = 10 then EDUCATION_GROUP = 'Other';
+    else EDUCATION_GROUP = 'Missing or Unknown';
+run;
+
+/* ================================= */
+/* 6. RESTRICT TO HCV CASE REPORTS  */
+/* ================================= */
+data FINAL_HCV_COHORT;
+    set FINAL_COHORT;
+    where not missing(AGE_HCV);
+run;
+
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM FINAL_HCV_COHORT;
+QUIT;
+
+%put Number of unique IDs in FINAL_HCV_COHORT table: &num_unique_ids;
+
+/* ===================================== */
+/* 7. EXPLORATORY TABLES AND SUM STATS   */
+/* ===================================== */
+
+proc means data=FINAL_HCV_COHORT;
     var oud_age;
     where oud_age ne 9999;
     output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
 run;
 
-proc means data=FINAL_COHORT;
+proc means data=FINAL_HCV_COHORT;
     var AGE_HCV;
     where AGE_HCV ne 9999;
     output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
 run;
 
-proc means data=FINAL_COHORT;
+proc means data=FINAL_HCV_COHORT;
     var AGE_BIRTH;
     where AGE_BIRTH ne 9999;
     output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
 run;
 
+/* ================================= */
+/* 8. TABLES 1 AND 2                 */
+/* ================================= */
+
+%macro Table1Freqs(var, format);
+    title "Table 1, Unstratified";
+    proc freq data=FINAL_HCV_COHORT;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
 %Table1Freqs(FINAL_RE, raceef.);
 %Table1Freqs(EVER_INCARCERATED, flagf.);
-%Table1Freqs(HOMELESS_HISTORY, flagf.);
-%Table1Freqs(LANGUAGE, langfsecondary.);
-%Table1Freqs(EDUCATION, edu_fmt.);
+%Table1Freqs(HOMELESS_HISTORY_GROUP);
+%Table1Freqs(LANGUAGE_SPOKEN_GROUP);
+%Table1Freqs(EDUCATION_GROUP);
 %Table1Freqs(FOREIGN_BORN, fbornf.);
 %Table1Freqs(HIV_DIAG, flagf.);
 %Table1Freqs(HCV_DIAG, flagf.);
@@ -1863,32 +2030,27 @@ run;
 %Table1Freqs(mental_health_diag, flagf.);
 %Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
 %Table1Freqs(iji_diag, flagf.);
-%Table1Freqs(OCCUPATION_CODE);
+%Table1Freqs(OCCUPATION_CODE, flagf.);
 %Table1Freqs(EVER_MOUD, flagf.);
 %Table1Freqs(INSURANCE_CAT);
-%Table1Freqs(LD_PAY);
-%Table1Freqs(KOTELCHUCK);
-%Table1Freqs(prenat_site);
-%Table1Freqs(rural);
-
-/*====================*/
-/*  TABLE 2			  */
-/*====================*/
+%Table1Freqs(LD_PAY, ld_pay_fmt.);
+%Table1Freqs(KOTELCHUCK, kotel_fmt.);
+%Table1Freqs(prenat_site, prenat_site_fmt.);
+%Table1Freqs(rural_group);
 
 %macro Table2Linkage(var, ref=);
 	title "Table 2, Crude";
-	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
 	        class &var (ref=&ref);
 	        model HCV_PRIMARY_DIAG(event='1') = &var / dist=binary link=logit solution oddsratio;
-    		random intercept;
 	run;
 %mend;
 
 %Table2Linkage(FINAL_RE, ref ='1');
 %Table2Linkage(EVER_INCARCERATED, ref ='0');
-%Table2Linkage(HOMELESS_HISTORY, ref ='0');
-%Table2Linkage(LANGUAGE, ref ='1');
-%Table2Linkage(EDUCATION, ref ='1');
+%Table2Linkage(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2Linkage(LANGUAGE_SPOKEN_GROUP, ref = 'English');
+%Table2Linkage(EDUCATION_GROUP, ref ='HS or less');
 %Table2Linkage(FOREIGN_BORN, ref ='0');
 %Table2Linkage(HIV_DIAG, ref ='0');
 %Table2Linkage(HCV_DIAG, ref ='0');
@@ -1902,22 +2064,21 @@ run;
 %Table2Linkage(LD_PAY, ref ='1');
 %Table2Linkage(KOTELCHUCK, ref ='3');
 %Table2Linkage(prenat_site, ref ='1');
-%Table2Linkage(rural, ref ='1');
+%Table2Linkage(rural_group, ref ='Urban');
 
 %macro Table2Treatment(var, ref=);
 	title "Table 2, Crude";
-	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
 	        class &var (ref=&ref);
 	        model DAA_START_INDICATOR(event='1') = &var / dist=binary link=logit solution oddsratio;
-    		random intercept;
 	run;
 %mend;
 
 %Table2Treatment(FINAL_RE, ref ='1');
 %Table2Treatment(EVER_INCARCERATED, ref ='0');
-%Table2Treatment(HOMELESS_HISTORY, ref ='0');
-%Table2Treatment(LANGUAGE, ref ='1');
-%Table2Treatment(EDUCATION, ref ='1');
+%Table2Treatment(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2Treatment(LANGUAGE_SPOKEN_GROUP, ref='English');
+%Table2Treatment(EDUCATION_GROUP, ref ='HS or less');
 %Table2Treatment(FOREIGN_BORN, ref ='0');
 %Table2Treatment(HIV_DIAG, ref ='0');
 %Table2Treatment(HCV_DIAG, ref ='0');
@@ -1931,4 +2092,908 @@ run;
 %Table2Treatment(LD_PAY, ref ='1');
 %Table2Treatment(KOTELCHUCK, ref ='3');
 %Table2Treatment(prenat_site, ref ='1');
-%Table2Treatment(rural, ref ='1');
+%Table2Treatment(rural_group, ref ='Urban');
+title;
+
+/* ==================================================================== */
+/* Part 4: Calculate Linkage to Care and DAA Treatment Initiation Rates */
+/* ==================================================================== */
+
+/* =============================================== */
+/* 1. Compile births and define pregnancy periods  */
+/* =============================================== */
+/* Extract relevant birth and infant records for the specified years and merge maternal and infant data based on birth link ID. 
+Then, determine pregnancy start and end dates based on gestational age and flag pregnancy and post-partum states */
+
+data all_births;
+    set PHDBIRTH.BIRTH_MOM (keep = ID BIRTH_LINK_ID MONTH_BIRTH YEAR_BIRTH where=(YEAR_BIRTH IN &year));
+run;
+
+data infants;
+    set PHDBIRTH.BIRTH_INFANT (keep = ID BIRTH_LINK_ID GESTATIONAL_AGE);
+run;
+
+proc sql;
+    create table merged_births_infants as
+    select 
+        a.ID as MATERNAL_ID,
+        a.BIRTH_LINK_ID,
+        a.MONTH_BIRTH,
+        a.YEAR_BIRTH,
+        b.ID as INFANT_ID,
+        b.GESTATIONAL_AGE
+    from all_births as a
+    left join infants as b
+    on a.BIRTH_LINK_ID = b.BIRTH_LINK_ID;
+quit;
+
+data pregnancy_flags;
+    set merged_births_infants; 
+    length month year flag 8;
+        
+    if GESTATIONAL_AGE => 39 then pregnancy_months = 9;
+    else if GESTATIONAL_AGE >= 35 and GESTATIONAL_AGE <= 38 then pregnancy_months = 8;
+    else if GESTATIONAL_AGE >= 31 and GESTATIONAL_AGE <= 34 then pregnancy_months = 7;
+    else if GESTATIONAL_AGE >= 26 and GESTATIONAL_AGE <= 30 then pregnancy_months = 6;
+    else if GESTATIONAL_AGE >= 22 and GESTATIONAL_AGE <= 25 then pregnancy_months = 5;
+    else if GESTATIONAL_AGE >= 18 and GESTATIONAL_AGE <= 21 then pregnancy_months = 4;
+    else if GESTATIONAL_AGE >= 13 and GESTATIONAL_AGE <= 17 then pregnancy_months = 3;
+    else if GESTATIONAL_AGE >= 9 and GESTATIONAL_AGE <= 12 then pregnancy_months = 2;
+    else pregnancy_months = 1;
+        
+    pregnancy_start_month = MONTH_BIRTH - pregnancy_months + 1;
+    pregnancy_start_year = YEAR_BIRTH;
+    if pregnancy_start_month <= 0 then do;
+        pregnancy_start_year = YEAR_BIRTH - 1;
+        pregnancy_start_month = 12 + pregnancy_start_month;
+    end;
+
+    pregnancy_end_month = MONTH_BIRTH;
+    pregnancy_end_year = YEAR_BIRTH;
+
+    month = pregnancy_start_month;
+    year = pregnancy_start_year;
+    do while ((year < pregnancy_end_year) or (year = pregnancy_end_year and month <= pregnancy_end_month));
+        flag = 1;
+        output;
+
+        month + 1;
+        if month > 12 then do;
+            month = 1;
+            year + 1;
+        end;
+    end;
+
+    array post_partum_end_months[4] (6, 12, 18, 24);
+    array post_partum_flags[4] (2, 3, 4, 5);
+
+    do i = 1 to 4;
+        post_partum_end_month = MONTH_BIRTH + post_partum_end_months[i];
+        post_partum_end_year = YEAR_BIRTH;
+        if post_partum_end_month > 12 then do;
+            post_partum_end_year = post_partum_end_year + floor((post_partum_end_month-1) / 12);
+            post_partum_end_month = mod(post_partum_end_month, 12);
+        end;
+
+     month = (ifn(i=1, pregnancy_end_month + 1, month));
+     year = (ifn(i=1, pregnancy_end_year, year));
+     if month > 12 then do;
+         month = 1;
+         year + 1;
+     end;
+	
+     do while ((year < post_partum_end_year) or (year = post_partum_end_year and month <= post_partum_end_month));
+         flag = post_partum_flags[i];
+         output;
+	
+         month + 1;
+         if month > 12 then do;
+            month = 1;
+             year + 1;
+         end;
+     end;
+end;
+	
+keep MATERNAL_ID month year flag;
+run;
+	
+data pregnancy_flags;
+	set pregnancy_flags;
+	rename MATERNAL_ID = ID;
+run;
+	
+proc sort data=pregnancy_flags;
+    by ID year month flag;
+run;
+	
+data pregnancy_flags;
+    set pregnancy_flags;
+    by ID year month;
+	
+    if first.month then output;
+run;
+
+/* =============================================== */
+/* 2. Pivot long and join to exisitng HCH Cohort   */
+/* =============================================== */
+/* This section of code creates a cartesian product where every birth record has 108 rows, one row for every month between Jan 2014 and Dec 2021.
+This long birth table is left joined onto the existing cohort of reproductive age womwn with Hepatitis C and OUD which is similarly pivoted long so that every
+case record of Hepatitis C has 108 rows, now joined with preganancy and birth data. Those who did not have a birth are assigned preg_flag = 9999. 
+This pivot long is necessary so that we can summarize time-varying data (pregnancy status) and assigned assocaited linkage and treatment starts to the correct preganancy state */
+
+%let start_year=%scan(%substr(&year,2,%length(&year)-2),1,':');
+%let end_year=%scan(%substr(&year,2,%length(&year)-2),2,':');
+
+DATA months; DO month = 1 to 12; OUTPUT; END; RUN;
+
+DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
+
+proc sql;
+    create table LONG_FINAL_HCV_COHORT as
+    select 
+        a.ID,
+        a.EVENT_MONTH_HCV,
+        a.EVENT_YEAR_HCV,
+        b.MONTH, 
+        c.YEAR
+    from 
+        FINAL_HCV_COHORT as a, 
+        MONTHS as b, 
+        YEARS as c
+    order by 
+        a.ID, c.YEAR, b.MONTH;
+quit;
+
+proc sql;
+   create table LONG_FINAL_HCV_COHORT as
+   select a.*, 
+          case when b.flag is not null then b.flag 
+               else 9999 end as preg_flag
+   from LONG_FINAL_HCV_COHORT a
+   left join pregnancy_flags b
+   on a.ID = b.ID 
+      and a.month = b.month 
+      and a.year = b.year;
+quit;
+
+/* ========================= */
+/* 3. Pull Linkage to Care   */
+/* ========================= */
+/* Pull intial linkage to care (claim with Hepatitis C as primary diagnosis) data and merge linkage to care claims data in the long cohort to: 
+1. Ensure that the case report preceeds the claim of diagnosis because we begin eligible persom-time for linkage to care at the case report date, and censor when the person links
+In other words, the output from the proc means of linkage_analysis should be overwhelimg negative (case report date smaller than/occurred before claim date) across the cohort.
+78.85% had a case report date that preceded their linkage claim.  A person’s follow-up period starts at time of case report, so the 20% that had a linkage prior to the case report date would not be eligible for primary linkage;
+2. Assign inital linkage event HCV_PRIMARY_DIAG1 = 1;
+and then 3. Pull in all other remaining claims. From these data, we begin counting the months lapsed between visits. If time lapsed between visits exceeds 18 months and the person then has a subsequnt claim with Hepatitis C as primary diagnosis,
+that indicates a relinkage event HCV_PRIMARY_DIAG2 = 1 */
+
+DATA HCV_LINKED_SAS;
+SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_FROM_DATE_MONTH MED_FROM_DATE_YEAR MED_ADM_TYPE MED_ICD1
+  					 WHERE = (MED_ICD1 IN &HCV_ICD));  
+RUN;
+
+PROC SORT DATA=HCV_LINKED_SAS;
+    BY ID MED_FROM_DATE;
+RUN;
+
+DATA HCV_LINKED_FIRST;
+    SET HCV_LINKED_SAS;
+    BY ID MED_FROM_DATE;
+    IF FIRST.ID THEN DO;
+        HCV_PRIMARY_DIAG1 = 1;
+        OUTPUT;
+    END;
+KEEP ID MED_FROM_DATE_MONTH MED_FROM_DATE_YEAR HCV_PRIMARY_DIAG1;
+RUN;
+
+proc sql;
+    create table linkage_analysis as
+    select 
+        a.ID,
+        a.MED_FROM_DATE_MONTH,
+        a.MED_FROM_DATE_YEAR,
+        b.EVENT_MONTH_HCV,
+        b.EVENT_YEAR_HCV,
+        ((b.EVENT_YEAR_HCV - a.MED_FROM_DATE_YEAR) * 12 + (b.EVENT_MONTH_HCV - a.MED_FROM_DATE_MONTH)) as months_between
+    from HCV_LINKED_FIRST as a
+    inner join LONG_FINAL_HCV_COHORT as b 
+    on a.ID = b.ID
+    where a.MED_FROM_DATE_YEAR is not missing 
+      and a.MED_FROM_DATE_MONTH is not missing
+      and b.EVENT_YEAR_HCV is not missing
+      and b.EVENT_MONTH_HCV is not missing;
+quit;
+
+proc sql;
+    select 
+        sum(case when months_between < 0 then 1 else 0 end) as count_early_report,
+        count(*) as total_cases,
+        calculated count_early_report / calculated total_cases as percent_early_report format=percent8.2
+    from linkage_analysis;
+quit;
+
+proc means data=linkage_analysis mean median std min max;
+    var months_between;
+run;
+
+proc sort data=LONG_FINAL_HCV_COHORT;
+    by ID year month;
+run;
+
+proc sort data=HCV_LINKED_FIRST nodupkey;
+    by ID MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH;
+run;
+
+data HCV_LINKED_FIRST;
+    set HCV_LINKED_FIRST;
+    month = MED_FROM_DATE_MONTH; 
+    year = MED_FROM_DATE_YEAR;   
+run;
+
+data LONG_FINAL_HCV_COHORT;
+    merge LONG_FINAL_HCV_COHORT (in=a)
+          HCV_LINKED_FIRST (in=b);
+    by ID year month;
+    
+    if b then do;
+        HCV_PRIMARY_DIAG1 = 1;
+        MED_FROM_DATE_MONTH = MED_FROM_DATE_MONTH;
+        MED_FROM_DATE_YEAR = MED_FROM_DATE_YEAR;
+    end;
+    else HCV_PRIMARY_DIAG1 = 0;
+
+    if a;
+run;
+
+DATA HCV_LINKED_SAS;
+	SET HCV_LINKED_SAS (KEEP = ID MED_FROM_DATE_MONTH MED_FROM_DATE_YEAR);
+RUN;
+
+proc sort data=HCV_LINKED_SAS nodupkey;
+    by ID MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH;
+run;
+
+data HCV_LINKED_SAS;
+    set HCV_LINKED_SAS;
+    month = MED_FROM_DATE_MONTH;
+    year = MED_FROM_DATE_YEAR; 
+run;
+
+data LONG_FINAL_HCV_COHORT;
+    merge LONG_FINAL_HCV_COHORT (in=a)
+          HCV_LINKED_SAS (in=b);
+    by ID year month;
+
+    if a;
+
+run;
+
+data LONG_FINAL_HCV_COHORT;
+    set LONG_FINAL_HCV_COHORT;
+    by ID year month;
+
+    retain months_lapsed;
+
+    if first.ID then do;
+        months_lapsed = .;
+    end;
+
+    HCV_PRIMARY_DIAG2 = 0;
+
+    if HCV_PRIMARY_DIAG1 = 1 then months_lapsed = 1;
+
+    else if not missing(MED_FROM_DATE_MONTH) and not missing(MED_FROM_DATE_YEAR) then do;
+        if months_lapsed >= 18 then do;
+            HCV_PRIMARY_DIAG2 = 1; 
+            months_lapsed = 0;
+        end;
+        else months_lapsed = 0;
+    end;
+    
+    else if missing(MED_FROM_DATE_MONTH) and missing(MED_FROM_DATE_YEAR) then do;
+        if not missing(months_lapsed) then months_lapsed + 1;
+    end;
+run;
+
+/* ================================== */
+/* 4. Pull DAA Treatment Initiation   */
+/* ================================== */
+/* Pull in DAA treatment starts claims data and summarize the prescritpions by ID. Outcomes inlcude the frequency of DAA initaitons without prior linkage.
+The section of code that is commented out previoulsy explored the mean and median starts and overall distirbution of DAA epidsodes per ID as well as
+the distribution of months between consecutive DAA starts to better define refills of primary prescription compared to retreatment. 
+That output showed that 85.8% of DAA “restarts” occurred after just 1 month and over 92.99% “restarted” within 2 months  
+i.e. these were prescription refills for the same treatment episode; 61.9% of individuals had exactly 2 prescription claims and 89.9% had 3 prescription claims. 
+So, we updated the code logic to only retain the first DAA start in our final analysis */
+
+DATA DAA; SET PHDAPCD.MOUD_PHARM (KEEP  = ID PHARM_FILL_DATE PHARM_FILL_DATE_MONTH PHARM_FILL_DATE_YEAR PHARM_NDC PHARM_AGE
+ 								 WHERE = (PHARM_NDC IN &DAA_CODES));  
+RUN;
+
+PROC SORT DATA=DAA;
+    BY ID PHARM_FILL_DATE;
+RUN;
+
+DATA DAA_STARTS;
+    SET DAA;
+    BY ID PHARM_FILL_DATE;
+    IF FIRST.ID THEN DO;
+        DAA_START_INDICATOR = 1;
+        OUTPUT;
+    END;
+KEEP ID PHARM_FILL_DATE_MONTH PHARM_FILL_DATE_YEAR DAA_START_INDICATOR;
+RUN;
+
+proc sort data=LONG_FINAL_HCV_COHORT;
+    by ID year month;
+run;
+
+proc sort data=DAA_STARTS nodupkey;
+    by ID PHARM_FILL_DATE_YEAR PHARM_FILL_DATE_MONTH;
+run;
+
+data LONG_FINAL_HCV_COHORT;
+    merge LONG_FINAL_HCV_COHORT (in=a)
+          DAA_STARTS (rename=(PHARM_FILL_DATE_MONTH=month 
+                              PHARM_FILL_DATE_YEAR=year) in=b);
+    by ID year month;
+
+    if b then DAA_START_INDICATOR = 1;
+    else DAA_START_INDICATOR = 0;
+
+    if a;
+run;
+
+proc sort data=LONG_FINAL_HCV_COHORT;
+  by ID;
+run;
+
+data cohort_with_diag;
+    set LONG_FINAL_HCV_COHORT;
+    by ID;
+    retain diag_month diag_year txt_month txt_year;
+
+    if first.ID then do;
+        diag_month = .;
+        diag_year = .;
+        txt_month = .;
+        txt_year = .;
+    end;
+
+    if HCV_PRIMARY_DIAG1 = 1 and missing(diag_month) then do;
+        diag_month = month;
+        diag_year = year;
+    end;
+    
+    if DAA_START_INDICATOR = 1 then do;
+        txt_month = month;
+        txt_year = year;
+    end;
+
+    if not missing(diag_month) or not missing(txt_month) then output;
+
+    keep ID diag_month diag_year txt_month txt_year;
+run;
+
+proc sql;
+    create table collapsed_data as
+    select 
+        ID,
+        min(diag_month) as diag_month,
+        min(diag_year) as diag_year,
+        min(txt_month) as txt_month,
+        min(txt_year) as txt_year
+    from cohort_with_diag
+    group by ID;
+quit;
+
+data collapsed_data_with_flag;
+    set collapsed_data;
+
+    if missing(diag_month) then DAA_after_diag = 8; 
+    else if missing(txt_month) then DAA_after_diag = 9; 
+    else do; 
+        if (txt_year > diag_year) or (txt_year = diag_year and txt_month > diag_month) then DAA_after_diag = 1;
+        else DAA_after_diag = 0;
+    end;
+
+    keep ID diag_month diag_year txt_month txt_year DAA_after_diag;
+run;
+
+title "Frequency of DAA Initaitons without Prior Linkage";
+proc freq data=collapsed_data_with_flag;
+    tables DAA_after_diag / missing;
+run;
+title;
+
+/* data want(keep=ID cnt_DAA_starts);
+  set LONG_FINAL_HCV_COHORT;
+  by ID;
+  
+  retain cnt_DAA_starts 0;
+  
+  if first.ID then cnt_DAA_starts = 0;
+  
+  if DAA_START_INDICATOR = 1 then cnt_DAA_starts = cnt_DAA_starts + 1;
+  
+  if last.ID then output;
+run;
+
+data want_nonzero;
+  set want;
+  if cnt_DAA_starts > 0;
+run;
+
+proc univariate data=want_nonzero noprint;
+  var cnt_DAA_starts;
+  output out=summary_stats_nonzero mean=mean_DAA_starts median=median_DAA_starts range=range_DAA_starts;
+run;
+
+proc print data=summary_stats_nonzero;
+  title 'Summary Statistics of Number of DAA Starts per ID (Only IDs with ≥1 DAA Start)';
+run;
+
+data daa_intervals (keep=ID months_between DAA_order);
+  set LONG_FINAL_HCV_COHORT;
+  by ID;
+
+  retain prev_DAA_month DAA_order;
+
+  if first.ID then do;
+    prev_DAA_month = .;
+    DAA_order = 0;
+  end;
+
+  if DAA_START_INDICATOR = 1 then do;
+    DAA_order + 1;
+
+    if prev_DAA_month ne . then do;
+      months_between = (YEAR * 12 + MONTH) - prev_DAA_month;
+      output;
+    end;
+
+    prev_DAA_month = YEAR * 12 + MONTH;
+  end;
+run;
+
+proc univariate data=daa_intervals noprint;
+  var months_between;
+  output out=summary_intervals mean=mean_months median=median_months range=range_months;
+run;
+
+proc print data=summary_intervals;
+  title 'Summary Statistics of Months Between Consecutive DAA Starts';
+run;
+
+proc freq data=daa_intervals;
+  tables months_between / missing;
+  title 'Distribution of Months Between Consecutive DAA Starts';
+run;
+
+proc freq data=daa_intervals;
+  tables DAA_order;
+  title 'Distribution of Number of DAA Starts per Individual';
+run; */
+
+/* ========================= */
+/* 5. Define pregnany states */
+/* ========================= */
+
+proc sort data=LONG_FINAL_HCV_COHORT;
+	by ID year month;
+run;
+
+data LONG_FINAL_HCV_COHORT;
+	set LONG_FINAL_HCV_COHORT;
+		
+	time_index = (year - 2014) * 12 + month;
+		   
+	if preg_flag = 1 then group = 1; /* Pregnant */
+	else if preg_flag = 2 then group = 2; /* 0-6 months post-partum */
+	else if preg_flag = 3 then group = 2; /* 7-12 months post-partum */
+	else if preg_flag = 4 then group = 3; /* 13-18 months post-partum */
+	else if preg_flag = 5 then group = 3; /* 19-24 months post-partum */
+	else if preg_flag = 9999 then group = 0; /* Non-pregnant */
+run;
+
+/* ================================== */
+/* 6. Censor linkage eligbility     */
+/* ================================== */
+/* Note: the long cohort is forward censored on case report date in step 9 below after all relinkage, ltfu, and treatment data are integrated into the full long table.
+Thus, a person begins eligble for linkage because their first records is their case report date and will stop contribtuing person-time once they link to care (i.e. if they are diagnosed, they are no longer eligble for linkage as event = 1)
+Another note: We use flags = 1 for every month of contributing person-time and sum(flags) to determine our denomiator rather than delteing rows because there are four different event outcomes: 1. linkage, 2. relinkage, 3, ltfu, and 4. DAA initiation.
+Each rate caluclation uses a different sum(flag) as the denominaotr rather than deleting rows from the dataset */
+
+data LONG_FINAL_HCV_COHORT;
+    set LONG_FINAL_HCV_COHORT;
+    by ID YEAR MONTH;
+
+    retain link_eligible link_censor; 
+
+    if first.ID then do;
+        link_eligible = 1; 
+        link_censor = 0;     
+    end;
+
+    if HCV_PRIMARY_DIAG1 = 1 then link_censor = 1;
+
+    if link_censor = 1 then link_eligible = 0;
+
+    if link_censor = 0 then link_eligible = 1;
+
+run;
+
+/* ================================== */
+/* 7. Censor relinkage eligbility     */
+/* ================================== */
+/* A person is eligble for relinkage when 18 months has lapsed between visits with a primary diagnosis of Hepatitis C. If they are relinked to care or intitate DAAs, they are censored */
+
+data LONG_FINAL_HCV_COHORT; 
+    set LONG_FINAL_HCV_COHORT;
+    by ID YEAR MONTH;
+
+    retain relinkage_eligible relinkage_censor months_lapsed; 
+
+    if first.ID then do;
+        relinkage_eligible = 0;  
+        relinkage_censor = 0; 
+        months_lapsed = 0;
+    end;
+
+    if months_lapsed >= 18 then do;
+        relinkage_eligible = 1;
+    end;
+
+    if HCV_PRIMARY_DIAG2 = 1 or DAA_START_INDICATOR = 1 then do;
+        relinkage_eligible = 0;
+        relinkage_censor = 1;
+    end;
+
+    if relinkage_censor = 1 then do;
+        relinkage_eligible = 0;
+    end;
+
+run;
+
+/* ================================== */
+/* 8. Censor LTFU eligbility          */
+/* ================================== */
+/* A person is eligble for ltfu when 18 months has lapsed between visits with a primary diagnosis of Hepatitis C. If they are relinked to care or intitate DAAs, they are censored */
+
+data LONG_FINAL_HCV_COHORT; 
+    set LONG_FINAL_HCV_COHORT;
+    by ID YEAR MONTH;
+
+    retain ltfu_flag ltfu_eligible ltfu_censor;  
+
+    if first.ID then do;
+        ltfu_flag = 0; 
+        ltfu_eligible = 0;
+        ltfu_censor = 0; 
+    end;
+
+    if months_lapsed = 18 and relinkage_censor = 0 then ltfu_flag = 1;
+    else ltfu_flag = 0;
+
+    if ltfu_flag = 1 then ltfu_censor = 1;
+
+    if ltfu_censor = 1 then 
+        ltfu_eligible = 0;
+    else if link_censor = 1 and relinkage_censor = 0 then 
+        ltfu_eligible = 1;
+    else 
+        ltfu_eligible = 0;
+
+run;
+
+/* =================================== */
+/* 8. Censor DAA Initiation eligbility */
+/* =================================== */
+/* A person is eligble for treatment the month that they link to care (i.e. have a primary diagnosis claim) and are censored once they start DAAs because treatment event = 1.
+We do not include retreatment or multiple treatment outcomes */
+
+data LONG_FINAL_HCV_COHORT;
+    set LONG_FINAL_HCV_COHORT;
+    by ID YEAR MONTH;
+
+    retain treatment_eligible DAA_censor; 
+
+    if first.ID then do;
+        treatment_eligible = 0; 
+        DAA_censor = 0; 
+    end;
+
+    if HCV_PRIMARY_DIAG1 = 1 then treatment_eligible = 1;
+
+    if DAA_START_INDICATOR = 1 then do;
+        DAA_censor = 1;
+        treatment_eligible = 0; 
+    end;
+
+    if DAA_censor = 1 then treatment_eligible = 0;  
+    
+    if treatment_eligible = 1 then TREATMENT_ELIGIBLE = 1;
+    else TREATMENT_ELIGIBLE = 0;
+
+run;
+
+/* =================================== */
+/* 9. Censor on case report date       */
+/* =================================== */
+/* A person is eligble for linkage to care once they have a case report date. This proc makes the first row of data for an individual the month/year of their case report, forward censoring the start of the follow-up period.
+ All three event outcomes should censor on case report date, so delete rows that preceed the case report as to not inflate the denominator with non-contirbuting person-time */
+
+proc sql;
+    create table LONG_FINAL_HCV_COHORT as
+    select *
+    from LONG_FINAL_HCV_COHORT
+    where (YEAR > EVENT_YEAR_HCV) 
+        or (YEAR = EVENT_YEAR_HCV and MONTH >= EVENT_MONTH_HCV)
+    order by ID, YEAR, MONTH;
+quit;
+
+/* ==================== */
+/* 10. Censor on death  */
+/* ==================== */
+/* As well as censooring fo rvent = 1, censor for comepting causes of death to end follow-up. All three event outcomes should censor on death, so delete the rows that follow a death as to not inflate the denominator with non-contirbuting person-time */
+
+proc sql;
+    create table deaths_filtered as
+    select 
+        ID, 
+        YEAR_DEATH, 
+        MONTH_DEATH
+    from PHDDEATH.DEATH
+    where YEAR_DEATH in &year;
+ quit;
+
+ proc sql;
+    create table LONG_FINAL_HCV_COHORT as
+    select a.*, 
+           case 
+               when b.YEAR_DEATH = a.year and b.MONTH_DEATH = a.month then 1
+               else 0
+           end as death_flag
+    from LONG_FINAL_HCV_COHORT as a
+    left join deaths_filtered as b
+    on a.ID = b.ID
+    ;
+quit;
+
+data LONG_FINAL_HCV_COHORT;
+    set LONG_FINAL_HCV_COHORT;
+    retain death_flag_forward 0;
+    by ID;
+    
+    if death_flag = 1 then death_flag_forward = 1;
+    
+    if first.ID then death_flag_forward = death_flag;
+    
+    death_flag = death_flag_forward;
+    
+    drop death_flag_forward;
+run;
+
+data LONG_FINAL_HCV_COHORT;
+    set LONG_FINAL_HCV_COHORT;
+    if death_flag = 1 then delete;
+run;
+
+/* ========================== */
+/* 11. Calculate person time  */
+/* ========================== */
+/* Summarize the person-time contributing to the denominator for each of the three outcomes, separately, by pregnany status. Each month had a flag = 1, so person-months is the reporting metric.
+Each record will now be reduced from 108 rows for evry month of the full APCD follow-up period, to 4 rows, one row per preganncy state defined */
+
+proc sql;
+    create table PERSON_TIME as
+    select 
+        ID, 
+        group,
+        sum(case when link_eligible = 1 then 1 else 0 end) as person_time_link,
+        sum(case when relinkage_eligible = 1 then 1 else 0 end) as person_time_relink, 
+        sum(case when treatment_eligible = 1 then 1 else 0 end) as person_time_txt, 
+        sum(case when ltfu_eligible = 1 then 1 else 0 end) as person_time_ltfu
+    from LONG_FINAL_HCV_COHORT
+    group by ID, group;
+quit;
+
+/* ========================== */
+/* 12. Calculate events       */
+/* ========================== */
+/* Count the number of linkages, relinkages, ltfu, and daa starts that occured, summarized by person and by pregannacy status. Again, each record will now be reduced from 108 rows, to 4 rows, one row per preganncy state defined */
+
+proc sql;
+    create table PERIOD_SUMMARY as
+    select ID,
+           group,
+           sum(HCV_PRIMARY_DIAG1) as hcv_diagnosis1,
+           sum(DAA_START_INDICATOR) as daa_start,
+           sum(HCV_PRIMARY_DIAG2) as hcv_diagnosis2,
+           sum(ltfu_flag) as ltfu_flag
+    from LONG_FINAL_HCV_COHORT
+    group by ID, group;
+ quit;
+
+/* ============================ */
+/* 13. Create Final Rate Table  */
+/* ============================ */
+/* Combine the reported person-time that each ID contibuted to each preganncy state and pull in demographic variables for rate stratification */
+
+proc sort data=PERSON_TIME;
+    by ID group;
+run;
+
+proc sort data=PERIOD_SUMMARY;
+    by ID group;
+run;
+
+data PERIOD_SUMMARY;
+    merge PERIOD_SUMMARY
+          PERSON_TIME;
+    by ID group;
+run;
+
+proc sql;
+    create table PERIOD_SUMMARY_FINAL as
+    select PERIOD_SUMMARY.*,
+           cov.FINAL_RE,
+           cov.INSURANCE_CAT,
+           cov.HOMELESS_HISTORY_GROUP,
+           cov.EVER_INCARCERATED,
+           cov.AGE_HCV,
+           cov.EVER_IDU_HCV_MAT,
+           cov.IJI_DIAG,
+           cov.EVENT_YEAR_HCV
+    from PERIOD_SUMMARY
+    left join FINAL_HCV_COHORT as cov
+    on PERIOD_SUMMARY.ID = cov.ID;
+quit;
+
+data PERIOD_SUMMARY_FINAL;
+	set PERIOD_SUMMARY_FINAL;
+	age_grp_five  = put(AGE_HCV, age_grps_five.);
+run;
+
+data PERIOD_SUMMARY_FINAL;
+    set PERIOD_SUMMARY_FINAL;
+    if EVER_IDU_HCV_MAT = 1 or IJI_DIAG = 1 then IDU_EVIDENCE = 1;
+    else IDU_EVIDENCE = 0;
+run;
+
+proc sql;
+    create table summed_data as
+    select 
+        ID,
+        sum(person_time_link) as total_person_time_link,
+        sum(person_time_relink) as total_person_time_relink,
+        sum(person_time_txt) as total_person_time_txt,
+        sum(person_time_ltfu) as total_person_time_ltfu
+    from 
+        PERIOD_SUMMARY_FINAL
+    group by 
+        ID;
+quit;
+
+title "Summary statistics for Overall Follow-up Time";
+proc means data=summed_data mean std min max q1 median q3;
+    var total_person_time_link total_person_time_relink total_person_time_txt total_person_time_ltfu;
+run;
+
+/* ================================================================= */
+/* 14. Final Rates for Linkage, Reinkage, and Treatment Initiation   */
+/* ================================================================== */
+/* The first two PROC SQL steps generate reates for our four key HCV-related events, HCV diagnoses (both primary and secondary), loss-to-follow-up, and DAA treatment starts. 
+The first query provides overall summaries, while the second stratifies these statistics by pregnancy group.
+The macro integrates additional demographic and social determinant variables. This avoids repetitive code while allowing flexibility in stratifications. 
+The macro takes two parameters:
+   - group_by_vars: the variable to stratify by
+   - mytitle: the title for the output
+The PROC SQL block inside the macro calculates the same key HCV diagnosis and treatment measures as before, along with their confidence intervals.
+The final rate calculation looks at trends of time by year of Hepatitis C diagnosis, not by preganancy status */  
+
+title 'Linkage and Treatment Starts, Overall';
+proc sql;
+    select 
+        sum(hcv_diagnosis1) as hcv_diagnosis1,
+        sum(hcv_diagnosis2) as hcv_diagnosis2,
+        sum(daa_start) as daa_start,
+        sum(ltfu_flag) as ltfu_flag,
+        sum(person_time_link) as person_time_link,
+        sum(person_time_relink) as person_time_relink, 
+        sum(person_time_txt) as person_time_txt,
+        sum(person_time_ltfu) as person_time_ltfu   
+    from PERIOD_SUMMARY_FINAL;
+quit;
+
+title 'Linkage and Treatment Starts by Pregnancy Group, Overall';
+proc sql;
+    select 
+        group,
+        count(*) as total_n,
+        sum(hcv_diagnosis1) as hcv_diagnosis1,
+        sum(hcv_diagnosis2) as hcv_diagnosis2,
+        sum(daa_start) as daa_start,
+        sum(ltfu_flag) as ltfu_flag,
+        sum(person_time_link) as person_time_link,
+        sum(person_time_relink) as person_time_relink,
+        sum(person_time_txt) as person_time_txt,  
+        sum(person_time_ltfu) as person_time_ltfu,
+        
+        calculated hcv_diagnosis1 / calculated person_time_link as hcv_diagnosis1_rate format=8.4,
+        (calculated hcv_diagnosis1 - 1.96 * sqrt(calculated hcv_diagnosis1)) / calculated person_time_link as hcv_diagnosis1_rate_lower format=8.4,
+        (calculated hcv_diagnosis1 + 1.96 * sqrt(calculated hcv_diagnosis1)) / calculated person_time_link as hcv_diagnosis1_rate_upper format=8.4,
+        
+        calculated hcv_diagnosis2 / calculated person_time_relink as hcv_diagnosis2_rate format=8.4,
+        (calculated hcv_diagnosis2 - 1.96 * sqrt(calculated hcv_diagnosis2)) / calculated person_time_relink as hcv_diagnosis2_rate_lower format=8.4,
+        (calculated hcv_diagnosis2 + 1.96 * sqrt(calculated hcv_diagnosis2)) / calculated person_time_relink as hcv_diagnosis2_rate_upper format=8.4,
+        
+        calculated daa_start / calculated person_time_txt as daa_start_rate format=8.4,
+        (calculated daa_start - 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_lower format=8.4,
+        (calculated daa_start + 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_upper format=8.4,
+        
+        calculated ltfu_flag / calculated person_time_ltfu as ltfu_rate format=8.4,
+        (calculated ltfu_flag - 1.96 * sqrt(calculated ltfu_flag)) / calculated person_time_ltfu as ltfu_rate_lower format=8.4,
+        (calculated ltfu_flag + 1.96 * sqrt(calculated ltfu_flag)) / calculated person_time_ltfu as ltfu_rate_upper format=8.4
+        
+    from PERIOD_SUMMARY_FINAL
+    group by group;
+quit;
+
+%macro calculate_rates(group_by_vars, mytitle);
+title &mytitle;
+proc sql;
+    select 
+        group,
+        &group_by_vars,
+        count(*) as total_n,
+        sum(hcv_diagnosis1) as hcv_diagnosis1,
+        sum(hcv_diagnosis2) as hcv_diagnosis2,
+        sum(daa_start) as daa_start,
+        sum(ltfu_flag) as ltfu_flag,
+        sum(person_time_link) as person_time_link,
+        sum(person_time_relink) as person_time_relink,
+        sum(person_time_txt) as person_time_txt,
+        sum(person_time_ltfu) as person_time_ltfu,
+        
+        calculated hcv_diagnosis1 / calculated person_time_link as hcv_diagnosis1_rate format=8.4,
+        (calculated hcv_diagnosis1 - 1.96 * sqrt(calculated hcv_diagnosis1)) / calculated person_time_link as hcv_diagnosis1_rate_lower format=8.4,
+        (calculated hcv_diagnosis1 + 1.96 * sqrt(calculated hcv_diagnosis1)) / calculated person_time_link as hcv_diagnosis1_rate_upper format=8.4,
+
+        calculated hcv_diagnosis2 / calculated person_time_relink as hcv_diagnosis2_rate format=8.4,
+        (calculated hcv_diagnosis2 - 1.96 * sqrt(calculated hcv_diagnosis2)) / calculated person_time_relink as hcv_diagnosis2_rate_lower format=8.4,
+        (calculated hcv_diagnosis2 + 1.96 * sqrt(calculated hcv_diagnosis2)) / calculated person_time_relink as hcv_diagnosis2_rate_upper format=8.4,
+
+        calculated daa_start / calculated person_time_txt as daa_start_rate format=8.4,
+        (calculated daa_start - 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_lower format=8.4,
+        (calculated daa_start + 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_upper format=8.4,
+
+        calculated ltfu_flag / calculated person_time_ltfu as ltfu_rate format=8.4,
+        (calculated ltfu_flag - 1.96 * sqrt(calculated ltfu_flag)) / calculated person_time_ltfu as ltfu_rate_lower format=8.4,
+        (calculated ltfu_flag + 1.96 * sqrt(calculated ltfu_flag)) / calculated person_time_ltfu as ltfu_rate_upper format=8.4
+
+    from PERIOD_SUMMARY_FINAL
+    group by group, &group_by_vars;
+quit;
+%mend calculate_rates;
+
+%calculate_rates(FINAL_RE, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by FINAL_RE');
+%calculate_rates(INSURANCE_CAT, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HOMELESS_HISTORY_GROUP, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by HOMELESS_HISTORY');
+%calculate_rates(EVER_INCARCERATED, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by EVER_INCARCERATED');
+%calculate_rates(age_grp_five, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by Age');
+%calculate_rates(IDU_EVIDENCE, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by IDU_EVIDENCE');
+
+title 'Treatment Starts by Year of Diagnosis';
+proc sql;
+    select 
+        EVENT_YEAR_HCV,
+        count(*) as total_n,
+        sum(daa_start) as daa_start,
+        sum(person_time_txt) as person_time_txt,
+        calculated daa_start / calculated person_time_txt as daa_start_rate format=8.4,
+        (calculated daa_start - 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_lower format=8.4,
+        (calculated daa_start + 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_upper format=8.4
+    from PERIOD_SUMMARY_FINAL
+    group by EVENT_YEAR_HCV;
+quit;
+title;
