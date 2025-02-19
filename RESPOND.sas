@@ -952,7 +952,7 @@ DATA DAA_STARTS;
         DAA_START_INDICATOR = 1;
         OUTPUT;
     END;
-KEEP ID PHARM_AGE PHARM_FILL_DATE_MONTH PHARM_FILL_DATE_YEAR DAA_START_INDICATOR;
+KEEP ID PHARM_AGE PHARM_FILL_DATE PHARM_FILL_DATE_MONTH PHARM_FILL_DATE_YEAR DAA_START_INDICATOR;
 RUN;
 
 
@@ -978,14 +978,14 @@ SET OUD_HCV_DAA;
 	EOT_RNA_TEST = 0;
 	SVR12_RNA_TEST = 0;
 	IF RNA_TEST_DATE_1 = .  THEN DELETE;
-	IF FIRST_DAA_DATE = .  THEN DELETE;
+	IF PHARM_FILL_DATE = .  THEN DELETE;
 
     array test_date_array (*) RNA_TEST_DATE_:;
     num_tests = dim(test_date_array);
 
     do i = 1 to num_tests;
-        if test_date_array{i} > 0 and FIRST_DAA_DATE > 0 then do;
-            time_since = test_date_array{i} - FIRST_DAA_DATE;
+        if test_date_array{i} > 0 and PHARM_FILL_DATE > 0 then do;
+            time_since = test_date_array{i} - PHARM_FILL_DATE;
 
             if time_since > 84 then EOT_RNA_TEST = 1;
             if time_since >= 140 then SVR12_RNA_TEST = 1;
@@ -1968,12 +1968,13 @@ data FINAL_COHORT;
     else EDUCATION_GROUP = 'Missing or Unknown';
 run;
 
-/* ================================= */
-/* 6. RESTRICT TO HCV CASE REPORTS  */
-/* ================================= */
+/* ==================================== */
+/* 6. RESTRICT TO CONFIRMED HEPC CASES  */
+/* ==================================== */
+
 data FINAL_HCV_COHORT;
     set FINAL_COHORT;
-    where not missing(AGE_HCV);
+    where CONFIRMED_HCV_INDICATOR = 1;
 run;
 
 PROC SQL;
@@ -2447,63 +2448,54 @@ proc sort data=LONG_FINAL_HCV_COHORT;
   by ID;
 run;
 
-data cohort_with_diag;
-    set LONG_FINAL_HCV_COHORT;
-    by ID;
-    retain diag_month diag_year txt_month txt_year;
-
-    if first.ID then do;
-        diag_month = .;
-        diag_year = .;
-        txt_month = .;
-        txt_year = .;
-    end;
-
-    if HCV_PRIMARY_DIAG1 = 1 and missing(diag_month) then do;
-        diag_month = month;
-        diag_year = year;
-    end;
-    
-    if DAA_START_INDICATOR = 1 then do;
-        txt_month = month;
-        txt_year = year;
-    end;
-
-    if not missing(diag_month) or not missing(txt_month) then output;
-
-    keep ID diag_month diag_year txt_month txt_year;
-run;
-
 proc sql;
-    create table collapsed_data as
-    select 
-        ID,
-        min(diag_month) as diag_month,
-        min(diag_year) as diag_year,
-        min(txt_month) as txt_month,
-        min(txt_year) as txt_year
-    from cohort_with_diag
-    group by ID;
+    create table HCV_LINKED_FILTERED as 
+    select a.*
+    from HCV_LINKED_FIRST as a
+    inner join FINAL_HCV_COHORT as b
+    on a.ID = b.ID;
+
+    create table DAA_STARTS_FILTERED as 
+    select a.*
+    from DAA_STARTS as a
+    inner join FINAL_HCV_COHORT as b
+    on a.ID = b.ID;
 quit;
 
-data collapsed_data_with_flag;
-    set collapsed_data;
+proc sql;
+    create table HCV_DAA_TIMING as
+    select coalesce(a.ID, b.ID) as ID, 
+           a.MED_FROM_DATE_MONTH, a.MED_FROM_DATE_YEAR, 
+           b.PHARM_FILL_DATE_MONTH, b.PHARM_FILL_DATE_YEAR,
+           case 
+               when b.ID is null then 'No DAA Record, Linked'
+               when a.ID is null then 'No Linkage Record, DAA'
+               when (b.PHARM_FILL_DATE_YEAR < a.MED_FROM_DATE_YEAR) then 'Before'
+               when (b.PHARM_FILL_DATE_YEAR = a.MED_FROM_DATE_YEAR and 
+                     b.PHARM_FILL_DATE_MONTH < a.MED_FROM_DATE_MONTH) then 'Before'
+               when (b.PHARM_FILL_DATE_YEAR = a.MED_FROM_DATE_YEAR and 
+                     b.PHARM_FILL_DATE_MONTH = a.MED_FROM_DATE_MONTH) then 'Same Month'
+               else 'After'
+           end as DAA_Timing
+    from HCV_LINKED_FILTERED as a
+    full join DAA_STARTS_FILTERED as b
+    on a.ID = b.ID;
+quit;
 
-    if missing(diag_month) then DAA_after_diag = 8; 
-    else if missing(txt_month) then DAA_after_diag = 9; 
-    else do; 
-        if (txt_year > diag_year) or (txt_year = diag_year and txt_month > diag_month) then DAA_after_diag = 1;
-        else DAA_after_diag = 0;
-    end;
-
-    keep ID diag_month diag_year txt_month txt_year DAA_after_diag;
-run;
-
-title "Frequency of DAA Initaitons without Prior Linkage";
-proc freq data=collapsed_data_with_flag;
-    tables DAA_after_diag / missing;
+title "Timing of DAA Initaitons Relative to Linkage";
+proc freq data=HCV_DAA_TIMING;
+    tables DAA_Timing;
 run;
 title;
+
+proc sql;
+    create table FINAL_HCV_COHORT as
+    select a.*, 
+           b.DAA_Timing
+    from FINAL_HCV_COHORT as a
+    left join HCV_DAA_TIMING as b
+    on a.ID = b.ID;
+quit;
 
 /* data want(keep=ID cnt_DAA_starts);
   set LONG_FINAL_HCV_COHORT;
@@ -2599,8 +2591,8 @@ run;
 /* 6. Censor linkage eligbility     */
 /* ================================== */
 /* Note: the long cohort is forward censored on case report date in step 9 below after all relinkage, ltfu, and treatment data are integrated into the full long table.
-Thus, a person begins eligble for linkage because their first records is their case report date and will stop contribtuing person-time once they link to care (i.e. if they are diagnosed, they are no longer eligble for linkage as event = 1)
-Another note: We use flags = 1 for every month of contributing person-time and sum(flags) to determine our denomiator rather than delteing rows because there are four different event outcomes: 1. linkage, 2. relinkage, 3, ltfu, and 4. DAA initiation.
+Thus, a person begins eligble for linkage because their first records is their case report date and will stop contribtuing person-time once they link to care (i.e. if they are diagnosed or start DAAs they are no longer eligble for linkage as event = 1)
+Another note: We use flags = 1 for every month of contributing person-time and sum(flags) to determine our denomiator rather than deleting rows because there are four different event outcomes: 1. linkage, 2. relinkage, 3, ltfu, and 4. DAA initiation.
 Each rate caluclation uses a different sum(flag) as the denominaotr rather than deleting rows from the dataset */
 
 data LONG_FINAL_HCV_COHORT;
@@ -2614,7 +2606,7 @@ data LONG_FINAL_HCV_COHORT;
         link_censor = 0;     
     end;
 
-    if HCV_PRIMARY_DIAG1 = 1 then link_censor = 1;
+    if HCV_PRIMARY_DIAG1 = 1 or DAA_START_INDICATOR = 1 then link_censor = 1;
 
     if link_censor = 1 then link_eligible = 0;
 
@@ -2657,7 +2649,8 @@ run;
 /* ================================== */
 /* 8. Censor LTFU eligbility          */
 /* ================================== */
-/* A person is eligble for ltfu when 18 months has lapsed between visits with a primary diagnosis of Hepatitis C. If they are relinked to care or intitate DAAs, they are censored */
+/* A person is eligible for ltfu as soon as they link to care. You are considered ltfu when 18 months has lapsed between visits with a primary diagnosis of Hepatitis C. 
+If they are ltfu or intitate DAAs, they are censored */
 
 data LONG_FINAL_HCV_COHORT; 
     set LONG_FINAL_HCV_COHORT;
@@ -2843,7 +2836,8 @@ proc sql;
            cov.AGE_HCV,
            cov.EVER_IDU_HCV_MAT,
            cov.IJI_DIAG,
-           cov.EVENT_YEAR_HCV
+           cov.EVENT_YEAR_HCV,
+           cov.DAA_Timing
     from PERIOD_SUMMARY
     left join FINAL_HCV_COHORT as cov
     on PERIOD_SUMMARY.ID = cov.ID;
@@ -2982,6 +2976,21 @@ quit;
 %calculate_rates(EVER_INCARCERATED, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by EVER_INCARCERATED');
 %calculate_rates(age_grp_five, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by Age');
 %calculate_rates(IDU_EVIDENCE, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by IDU_EVIDENCE');
+
+title 'Treatment Starts by DAA Timing';
+proc sql;
+    select 
+        DAA_Timing,
+        count(*) as total_n,
+        sum(daa_start) as daa_start,
+        sum(person_time_txt) as person_time_txt,
+        calculated daa_start / calculated person_time_txt as daa_start_rate format=8.4,
+        (calculated daa_start - 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_lower format=8.4,
+        (calculated daa_start + 1.96 * sqrt(calculated daa_start)) / calculated person_time_txt as daa_start_rate_upper format=8.4
+    from PERIOD_SUMMARY_FINAL
+    group by DAA_Timing;
+quit;
+title;
 
 title 'Treatment Starts by Year of Diagnosis';
 proc sql;
