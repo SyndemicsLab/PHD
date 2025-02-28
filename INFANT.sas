@@ -1583,7 +1583,7 @@ title "Contents of Final FILTERED_INFANT_COHORT Dataset";
 run;
 
 /* ========================================================== */
-/* 18. FOMRAT CASCADE TABLES                                   */
+/* 18. FOMRAT CASCADE TABLES                                  */
 /* ========================================================== */
 
 PROC FORMAT;
@@ -2656,7 +2656,38 @@ proc means data=FINAL_INFANT_COHORT_COV mean median q1 q3;
     var AGE_AT_FIRST_TEST;
 run;
 
-proc means data=FINAL_INFANT_COHORT_COV mean median q1 q3;
+/* Step 1: Calculate descriptive statistics */
+proc means data=FINAL_INFANT_COHORT_COV mean median q1 q3; 
+    where AGE_AT_FIRST_TEST ne . and AGE_AT_FIRST_TEST ne -16;
+    class INFANT_YEAR_BIRTH;
+    var AGE_AT_FIRST_TEST;
+run;
+
+/* Step 2: Perform ANOVA */
+proc glm data=FINAL_INFANT_COHORT_COV;
+    where AGE_AT_FIRST_TEST ne . and AGE_AT_FIRST_TEST ne -16;
+    class INFANT_YEAR_BIRTH;
+    model AGE_AT_FIRST_TEST = INFANT_YEAR_BIRTH;
+    output out=anova_results r=residuals;
+run;
+
+/* Step 3: Test for normality of residuals */
+proc univariate data=anova_results normal;
+    var residuals;
+    histogram residuals / normal;
+    probplot residuals / normal(mu=est sigma=est);
+run;
+
+/* Step 4: Test for homogeneity of variances (Bartlett's Test) */
+proc glm data=FINAL_INFANT_COHORT_COV;
+    where AGE_AT_FIRST_TEST ne . and AGE_AT_FIRST_TEST ne -16;
+    class INFANT_YEAR_BIRTH;
+    model AGE_AT_FIRST_TEST = INFANT_YEAR_BIRTH;
+    means INFANT_YEAR_BIRTH / hovtest=bartlett;
+run;
+
+/* Step 5: Perform Kruskal-Wallis test */
+proc npar1way data=FINAL_INFANT_COHORT_COV wilcoxon dscf;
     where AGE_AT_FIRST_TEST ne . and AGE_AT_FIRST_TEST ne -16;
     class INFANT_YEAR_BIRTH;
     var AGE_AT_FIRST_TEST;
