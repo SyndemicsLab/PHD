@@ -1,8 +1,8 @@
 /*==============================================*/
-/* Project: PHD Maternal Analysis HEPC Cascade 	*/
+/* Project: PHD Maternal HEPC Analysis  	    */
 /* Author: Ryan O'Dea and Sarah Munroe          */ 
 /* Created: 4/27/2023 		                    */
-/* Updated: 02/2025 by SJM  	                */
+/* Updated: 03/2025 by SJM  	                */
 /*==============================================*/
 
 /*	Project Goal:
@@ -2104,7 +2104,7 @@ title;
 /* 1. Compile births and define pregnancy periods  */
 /* =============================================== */
 /* Extract relevant birth and infant records for the specified years and merge maternal and infant data based on birth link ID. 
-Then, determine pregnancy start and end dates based on gestational age and flag pregnancy and post-partum states */
+Then, determine pregnancy start and end dates based on gestational age and flag monthly pregnancy and post-partum states */
 
 data all_births;
     set PHDBIRTH.BIRTH_MOM (keep = ID BIRTH_LINK_ID MONTH_BIRTH YEAR_BIRTH where=(YEAR_BIRTH IN &year));
@@ -2220,7 +2220,7 @@ run;
 /* This section of code creates a cartesian product where every birth record has 108 rows, one row for every month between Jan 2014 and Dec 2021.
 This long birth table is left joined onto the existing cohort of reproductive age womwn with Hepatitis C and OUD which is similarly pivoted long so that every
 case record of Hepatitis C has 108 rows, now joined with preganancy and birth data. Those who did not have a birth are assigned preg_flag = 9999. 
-This pivot long is necessary so that we can summarize time-varying data (pregnancy status) and assigned assocaited linkage and treatment starts to the correct preganancy state */
+This pivot long is necessary so that we can summarize time-varying data (pregnancy status) and assigned associated linkage and treatment starts to the correct preganancy state */
 
 %let start_year=%scan(%substr(&year,2,%length(&year)-2),1,':');
 %let end_year=%scan(%substr(&year,2,%length(&year)-2),2,':');
@@ -2260,13 +2260,11 @@ quit;
 /* ========================= */
 /* 3. Pull Linkage to Care   */
 /* ========================= */
-/* Pull intial linkage to care (claim with Hepatitis C as primary diagnosis) data and merge linkage to care claims data in the long cohort to: 
-1. Ensure that the case report preceeds the claim of diagnosis because we begin eligible persom-time for linkage to care at the case report date, and censor when the person links
-In other words, the output from the proc means of linkage_analysis should be overwhelimg negative (case report date smaller than/occurred before claim date) across the cohort.
-78.85% had a case report date that preceded their linkage claim.  A person’s follow-up period starts at time of case report, so the 20% that had a linkage prior to the case report date would not be eligible for primary linkage;
+/* Pull intial (first) linkage to care (claim with Hepatitis C as primary diagnosis) data and merge linkage to care claims data in the long cohort to: 
+1. Ensure that the case report preceeds the claim of diagnosis because we begin eligible persom-time for linkage to care at the case report date, and censor when the person links;
 2. Assign inital linkage event HCV_PRIMARY_DIAG1 = 1;
-and then 3. Pull in all other remaining claims. From these data, we begin counting the months lapsed between visits. If time lapsed between visits exceeds 18 months and the person then has a subsequnt claim with Hepatitis C as primary diagnosis,
-that indicates a relinkage event HCV_PRIMARY_DIAG2 = 1 */
+and 3. Pull in all other remaining claims with Hepatitis C as primary diagnosis. From these data, we begin counting the months lapsed between visits. If time lapsed between visits exceeds 18 months, we deem 
+that person loss-to-follow-up. If that person then has a subsequnt claim with Hepatitis C as primary diagnosis follow that 18-month period, that indicates a relinkage event HCV_PRIMARY_DIAG2 = 1 */
 
 DATA HCV_LINKED_SAS;
 SET PHDAPCD.MOUD_MEDICAL (KEEP = ID MED_FROM_DATE MED_FROM_DATE_MONTH MED_FROM_DATE_YEAR MED_ADM_TYPE MED_ICD1
@@ -2569,6 +2567,8 @@ run; */
 /* ========================= */
 /* 5. Define pregnany states */
 /* ========================= */
+/* This section is somewhat unnecessary, but allows for ease in changing the group_by variable in the rate calculations (we explored many different combinations of grouping 
+different post-partum periods together */
 
 proc sort data=LONG_FINAL_HCV_COHORT;
 	by ID year month;
@@ -2591,7 +2591,7 @@ run;
 /* 6. Censor linkage eligbility     */
 /* ================================== */
 /* Note: the long cohort is forward censored on case report date in step 9 below after all relinkage, ltfu, and treatment data are integrated into the full long table.
-Thus, a person begins eligble for linkage because their first records is their case report date and will stop contribtuing person-time once they link to care (i.e. if they are diagnosed or start DAAs they are no longer eligble for linkage as event = 1)
+Thus, a person begins eligble for linkage because their first records is their case report date and will stop contribtuing person-time once they link to care (i.e. if they are diagnosed or start DAAs, they are no longer eligble for linkage as event = 1)
 Another note: We use flags = 1 for every month of contributing person-time and sum(flags) to determine our denomiator rather than deleting rows because there are four different event outcomes: 1. linkage, 2. relinkage, 3, ltfu, and 4. DAA initiation.
 Each rate caluclation uses a different sum(flag) as the denominaotr rather than deleting rows from the dataset */
 
@@ -2619,7 +2619,7 @@ run;
 /* ================================== */
 /* 7. Censor relinkage eligbility     */
 /* ================================== */
-/* A person is eligble for relinkage when 18 months has lapsed between visits with a primary diagnosis of Hepatitis C. If they are relinked to care or intitate DAAs, they are censored */
+/* A person is eligble for relinkage when 18 months has lapsed between visits with a primary diagnosis of Hepatitis C. If they are relinked to care or intitate DAAs, they are censored for relinkage outcomes */
 
 data LONG_FINAL_HCV_COHORT; 
     set LONG_FINAL_HCV_COHORT;
@@ -2713,8 +2713,9 @@ run;
 /* =================================== */
 /* 9. Censor on case report date       */
 /* =================================== */
-/* A person is eligble for linkage to care once they have a case report date. This proc makes the first row of data for an individual the month/year of their case report, forward censoring the start of the follow-up period.
- All three event outcomes should censor on case report date, so delete rows that preceed the case report as to not inflate the denominator with non-contirbuting person-time */
+/* A person is eligble for linkage to care at their case report date. This proc makes the first row of data for an individual the month/year of their case report, forward censoring the start of the follow-up period.
+ All three event outcomes should censor on case report date, so delete rows that preceed the case report as to not inflate the denominator with non-contirbuting person-time.
+ Exploratory analysis to see the temporality of claims and case report date (these Ns help us understand why the event count in the rate calculation mahy differ from what was reported in the cascade outcomes above) */
  
 proc sql;
     create table case_report_events as 
@@ -2771,7 +2772,9 @@ quit;
 /* ==================== */
 /* 10. Censor on death  */
 /* ==================== */
-/* As well as censooring fo rvent = 1, censor for comepting causes of death to end follow-up. All three event outcomes should censor on death, so delete the rows that follow a death as to not inflate the denominator with non-contirbuting person-time */
+/* As well as censooring for event = 1, censor for comepting causes of death to end follow-up. All three event outcomes should censor on death, so delete the rows that follow a death as to not inflate the denominator with non-contirbuting person-time.
+We do take caution to delete only the ros that follow death, so that if a linkage or DAA event occurs in the same month, it is counted in the num and person-time in the denom.
+Again exploratory analysis to see the temporality of claims and death date (these Ns help us understand why the event count in the rate calculation mahy differ from what was reported in the cascade outcomes above) */
 
 proc sql;
     create table deaths_filtered as

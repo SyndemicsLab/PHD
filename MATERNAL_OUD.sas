@@ -1,9 +1,23 @@
 /*==============================================*/
-/* Project: PHD Maternal Analysis Cascade 	    */
+/* Project: PHD Maternal OUD Analysis    	    */
 /* Author: Ryan O'Dea and Sarah Munroe          */ 
 /* Created: 4/27/2023 		                    */
-/* Updated: 01/2025 by SJM  	                */
+/* Updated: 03/2025 by SJM  	                */
 /*==============================================*/
+
+/*	Project Goal:
+	Characterize a cohort of reproductive age women with OUD and Hepatitis C
+    Describe MOUD and overdose epiosdes by pregnancy status, race/ethnictiy, and age of OUD diagnosis
+    Calculate rates of MOUD initaiton and cesation and fatal and non-fatal overdoses by pregnancy status, important covariate strata and temporality re: MOUD initation and cesssation
+
+    Part 1: Construct OUD cohort
+    Part 2: Summary Stats: MOUD and Overdoses
+    Part 3: Table 1
+    Part 4: Calculate MOUD Rates
+    Part 5: Calculate Overdose Rates
+
+	Detailed documentation of all datasets and variables:
+	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation */
 
 /*===== SUPRESSION CODE =========*/
 ods path(prepend) DPH.template(READ) SASUSER.TEMPLAT (READ);
@@ -809,9 +823,9 @@ QUIT;
 
 %put Number of unique IDs in Spine Dataset: &num_unique_ids;
 
-/*============================*/
+/*==============================*/
 /* 12. Add Pregancy Covariates  */
-/*============================*/
+/*==============================*/
 
 DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
 	SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH
@@ -854,9 +868,9 @@ proc means data=oud_preg mean median std;
     var TOTAL_BIRTHS;
 run;
 
-/*==============================*/
-/* MOUD Table Creation          */
-/*==============================*/
+/*===================================================*/
+/* Part 2: Summary Stats: MOUD and Overdoses         */
+/*===================================================*/
 
 DATA moud;
     SET PHDSPINE.MOUD;
@@ -868,10 +882,18 @@ RUN;
 
 PROC SQL;
     CREATE TABLE moud_demo AS
-    SELECT moud.*, demographics.FINAL_RE, demographics.FINAL_SEX
+    SELECT moud.*, demographics.FINAL_RE, demographics.YOB
     FROM moud
     LEFT JOIN PHDSPINE.DEMO AS demographics 
     ON moud.ID = demographics.ID;
+QUIT;
+
+PROC SQL;
+    CREATE TABLE moud_demo AS
+    SELECT moud_demo.*, oud.age_grp_five
+    FROM moud_demo
+    LEFT JOIN oud
+    ON moud_demo.ID = oud.ID;
 QUIT;
 
 PROC SQL;
@@ -910,25 +932,17 @@ PROC SORT data=moud_demo;
     BY episode_id;
 RUN;
 
+data moud_demo;
+    set moud_demo;
+    where DATE_START_YEAR_MOUD >= 2014;
+run;
+
 PROC SQL;
     CREATE TABLE moud_demo AS 
     SELECT * 
     FROM moud_demo
     WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
 QUIT;
-
-proc format;
-    value moud_typef
-    
-		1='Likely Methadone'
-		2='Buprenorphine'
-		3='Naltrexone';
-
-title "Distribution of MOUD Types";
-proc freq data=moud_demo;
-    table TYPE_MOUD;
-    format TYPE_MOUD moud_typef.;
-run;
 
 DATA moud_demo; 
     SET moud_demo;
@@ -977,13 +991,88 @@ DATA moud_demo;
     ELSE flag_mim = 0;
 
     IF flag_mim = 1 THEN DELETE;
-
-    age = start_year - YOB;
-    age_grp_five = put(age, age_grps_five.);
     
     drop diff;
 
 RUN;
+
+title "Number of persons that experienced MOUD";
+PROC SQL;
+    SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    INTO :num_unique_ids
+    FROM moud_demo;
+QUIT;
+
+title "Number of persons that experienced MOUD by Pregnancy";
+PROC SQL;
+    SELECT BIRTH_INDICATOR, 
+           COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    FROM moud_demo
+    GROUP BY BIRTH_INDICATOR;
+QUIT;
+
+title "Number of persons that experienced MOUD by FINAL_RE";
+PROC SQL;
+    SELECT FINAL_RE, 
+           COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    FROM moud_demo
+    GROUP BY FINAL_RE;
+QUIT;
+
+title "Number of persons that experienced MOUD by Age at OUD Diagnosis";
+PROC SQL;
+    SELECT age_grp_five, 
+           COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    FROM moud_demo
+    GROUP BY age_grp_five;
+QUIT;
+
+proc format;
+    value moud_typef
+        1='Likely Methadone'
+        2='Buprenorphine'
+        3='Naltrexone';
+run;
+
+title "Overall Distribution of MOUD Types per episode";
+proc freq data=moud_demo;
+    table TYPE_MOUD;
+    format TYPE_MOUD moud_typef.;
+run;
+
+title "Overall Distribution of MOUD episodes Stratified by Pregnancy";
+proc sort data=moud_demo;
+    by BIRTH_INDICATOR;
+run;
+
+proc freq data=moud_demo;
+    table TYPE_MOUD;
+    format TYPE_MOUD moud_typef.;
+    by BIRTH_INDICATOR;
+run;
+
+proc sort data=moud_demo;
+   by FINAL_RE;
+run;
+
+title "Overall Distribution of MOUD episodes Stratified by Race/Ethnicity";
+proc freq data=moud_demo;
+   by FINAL_RE;
+    table TYPE_MOUD;
+    format TYPE_MOUD moud_typef.;
+run;
+
+proc sort data=moud_demo;
+   by age_grp_five;
+run;
+
+title "Overall Distribution of MOUD episodes Stratified by Age at OUD Diagnosis";
+proc freq data=moud_demo;
+   by age_grp_five;
+    table TYPE_MOUD;
+    format TYPE_MOUD moud_typef.;
+run;
+title;
 
 PROC SQL;                    
     CREATE TABLE moud_starts AS
@@ -1022,6 +1111,8 @@ proc sql;
     create table episode_counts as
     select ID,
     	   BIRTH_INDICATOR,
+    	   FINAL_RE,
+    	   age_grp_five,
            count(*) as num_episodes
     from episode_length
     group by ID;
@@ -1029,7 +1120,7 @@ quit;
 
 proc sql;
     create table episode_counts as
-    select distinct ID, BIRTH_INDICATOR, num_episodes
+    select distinct ID, BIRTH_INDICATOR, FINAL_RE, age_grp_five, num_episodes
     from episode_counts;
 quit;
 
@@ -1038,8 +1129,21 @@ proc means data=episode_counts mean median std;
     var num_episodes;
 run;
 
+title "Summary stats: Mean number of MOUD episodes per person by BIRTH_INDICATOR";
 proc means data=episode_counts mean median std;
     class BIRTH_INDICATOR;
+    var num_episodes;
+run;
+
+title "Summary stats: Mean number of MOUD episodes per person by FINAL_RE";
+proc means data=episode_counts mean median std;
+    class FINAL_RE;
+    var num_episodes;
+run;
+
+title "Summary stats: Mean number of MOUD episodes per person by Age at OUD Diagnosis";
+proc means data=episode_counts mean median std;
+    class age_grp_five;
     var num_episodes;
 run;
 
@@ -1048,8 +1152,21 @@ proc means data=episode_length mean median std;
     var episode_length;
 run;
 
+title "Summary stats: MOUD episode duration (days) by BIRTH_INDICATOR";
 proc means data=episode_length mean median std;
     class BIRTH_INDICATOR;
+    var episode_length;
+run;
+
+title "Summary stats: MOUD episode duration (days) by FINAL_RE";
+proc means data=episode_length mean median std;
+    class FINAL_RE;
+    var episode_length;
+run;
+
+title "Summary stats: MOUD episode duration (days) by Age at OUD Diagnosis";
+proc means data=episode_length mean median std;
+    class age_grp_five;
     var episode_length;
 run;
 
@@ -1091,6 +1208,17 @@ proc freq data=check_moud_count;
 run;
 title;
 
+title "Distribution of MOUD retention";
+data check_moud_count;
+   set check_moud_count;
+   total_moud_episodes = sum(of episode_0months_sum episode_6months_sum episode_12months_sum episode_24months_sum);
+run;
+
+proc means data=check_moud_count sum;
+   var episode_0months_sum episode_6months_sum episode_12months_sum episode_24months_sum total_moud_episodes;
+run;
+title;
+
 DATA overdose_spine (KEEP=ID OD_YEAR OD_RACE OD_COUNT OD_AGE OD_DATE FATAL_OD_DEATH);
     SET PHDSPINE.OVERDOSE;
 RUN;
@@ -1116,7 +1244,23 @@ QUIT;
 DATA overdose_spine;
     SET overdose_spine;
         IF BIRTH_INDICATOR = . THEN BIRTH_INDICATOR = 0;
-    run;
+run;
+
+PROC SQL;
+    CREATE TABLE overdose_spine AS
+    SELECT overdose_spine.*, demographics.FINAL_RE, demographics.YOB
+    FROM overdose_spine
+    LEFT JOIN PHDSPINE.DEMO AS demographics 
+    ON overdose_spine.ID = demographics.ID;
+QUIT;
+
+PROC SQL;
+    CREATE TABLE overdose_spine AS
+    SELECT overdose_spine.*, oud.age_grp_five
+    FROM overdose_spine
+    LEFT JOIN oud
+    ON overdose_spine.ID = oud.ID;
+QUIT;
 
 title "Number of persons that experienced overdose";
 PROC SQL;
@@ -1141,6 +1285,30 @@ PROC PRINT DATA=overdose_summary;
     TITLE 'Number of Unique IDs that Experienced Overdoses by BIRTH_INDICATOR';
 RUN;
 
+PROC SQL;
+    CREATE TABLE overdose_summary AS
+    SELECT FINAL_RE, 
+           COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    FROM overdose_spine
+    GROUP BY FINAL_RE;
+QUIT;
+
+PROC PRINT DATA=overdose_summary;
+    TITLE 'Number of Unique IDs that Experienced Overdoses by FINAL_RE';
+RUN;
+
+PROC SQL;
+    CREATE TABLE overdose_summary AS
+    SELECT age_grp_five, 
+           COUNT(DISTINCT ID) AS Number_of_Unique_IDs
+    FROM overdose_spine
+    GROUP BY age_grp_five;
+QUIT;
+
+PROC PRINT DATA=overdose_summary;
+    TITLE 'Number of Unique IDs that Experienced Overdoses by Age at OUD Diagnosis';
+RUN;
+
 proc sort data=overdose_spine;
    by ID OD_DATE;
 run;
@@ -1148,7 +1316,7 @@ run;
 proc sql;
     create table overdose_summary as
     select ID,
-              BIRTH_INDICATOR,
+           BIRTH_INDICATOR,
            OD_RACE,
            OD_AGE,
            FATAL_OD_DEATH,
@@ -1216,7 +1384,6 @@ proc sql;
     var OD_Count;
  run;
  
- * Step 1: Transpose DATE_START_MOUD;
  PROC SORT data=moud_demo (KEEP= ID DATE_START_MOUD DATE_END_MOUD);
    by ID DATE_START_MOUD;
  RUN;
@@ -1226,7 +1393,6 @@ proc sql;
    VAR DATE_START_MOUD;
  RUN;
  
- * Step 2: Transpose DATE_END_MOUD;
  PROC SORT data=moud_demo (KEEP= ID DATE_START_MOUD DATE_END_MOUD);
    by ID DATE_END_MOUD;
  RUN;
@@ -1236,7 +1402,6 @@ proc sql;
    VAR DATE_END_MOUD;
  RUN;
  
- * Step 3: Merge the transposed datasets;
  DATA moud_demo_final;
    MERGE moud_demo_wide_start (IN=a) moud_demo_wide_end (IN=b);
    BY ID;
@@ -1245,95 +1410,104 @@ proc sql;
  DATA moud_od_demo;
    MERGE overdose_spine (IN=a) moud_demo_final (IN=b);
    BY ID;
-   IF a;  /* Keeps only records from overdose_spine */
+   IF a;  
  RUN;
  
  DATA moud_od_demo;
-     SET moud_od_demo;
-     by ID;
- 
-     * Define arrays for MOUD episode dates;
-     array MOUD_START (*) DATE_START_MOUD_:; /* Adjust the number 10 as needed based on your dataset */
-     array MOUD_END (*) DATE_END_MOUD_:; /* Adjust the number 10 as needed based on your dataset */
- 
-     num_moud_episodes = dim(MOUD_START);
- 
-     * Retain the classification flags;
-     retain OD_during_MOUD OD_after_MOUD OD_no_MOUD;
- 
-     IF first.ID THEN DO;
-         OD_during_MOUD = 0;  * Initialize to 0 (not during any MOUD episode);
-         OD_after_MOUD = 0; * Initialize to 0 (OD not within 30 days of end of MOUD episode);
-         OD_no_MOUD = 0; * Initialize to 0 (OD not during or near any MOUD episode);
-     END;
- 
-     * Loop through the MOUD episodes for each ID;
-     DO i = 1 TO num_moud_episodes;
-         * Check if OD_DATE is within the range of this episode;
-         IF OD_DATE >= MOUD_START(i) AND OD_DATE <= MOUD_END(i) THEN DO;
-             OD_during_MOUD = 1; * Mark as during MOUD episode;
-             LEAVE; * Exit the loop as we've found a match;
-         END;
- 
-         * Check if OD_DATE is within 30 days after the end of this MOUD episode;
-         IF OD_DATE > MOUD_END(i) AND OD_DATE <= MOUD_END(i) + 30 THEN DO;
-             OD_after_MOUD = 1; * OD occurred within 30 days of the end of a MOUD episode;
-             LEAVE; * Exit the loop as we've found a match;
-         END;
-     END;
- 
-     * If the overdose did not occur during or within 30 days of a MOUD episode, set the flag to 1;
-     IF OD_during_MOUD = 0 AND OD_after_MOUD = 0 THEN OD_no_MOUD = 1;
- 
-     DROP i;
- 
- RUN;
- 
- proc sql;
-     create table overdose_summary as 
-     select 
-         ID, 
-         max(OD_COUNT) as TOTAL_OD_COUNT,
-         sum(OD_during_MOUD) as N_OD_during_MOUD,
-         sum(OD_after_MOUD) as N_OD_after_MOUD,
-         sum(OD_no_MOUD) as N_OD_no_MOUD
-     from moud_od_demo
-     group by ID;
- quit;
- 
- proc sql;
-     create table overdose_summary as
-     select distinct *
-     from overdose_summary;
- quit;
- 
- PROC SQL;
-     CREATE TABLE moud_preg AS
-     SELECT * FROM moud_preg
-     LEFT JOIN overdose_summary ON moud_preg.ID = overdose_summary.ID;
- QUIT;
- 
- DATA moud_preg;
- SET moud_preg;
-     IF TOTAL_OD_COUNT = . THEN TOTAL_OD_COUNT = 0;
-     IF TOTAL_OD_COUNT = 0 THEN OD_no_MOUD = 0 AND OD_during_MOUD = 0 AND OD_after_MOUD = 0;
- run;
- 
- data check_od_count;
-     set moud_preg;
-     
-     OD_Sum = sum(OD_no_MOUD, OD_during_MOUD, OD_after_MOUD);
- 
-     if OD_Sum = TOTAL_OD_COUNT then OD_Match = 1;
-     else OD_Match = 0;
- run;
+    SET moud_od_demo;
+    by ID;
+
+    array MOUD_START (*) DATE_START_MOUD_:; 
+    array MOUD_END (*) DATE_END_MOUD_:;
+
+    num_moud_episodes = dim(MOUD_START);
+
+    retain OD_during_MOUD OD_after_MOUD OD_no_MOUD;
+
+    IF first.ID THEN DO;
+        OD_during_MOUD = 0;  
+        OD_after_MOUD = 0; 
+        OD_no_MOUD = 0; 
+    END;
+    
+    DO i = 1 TO num_moud_episodes;
+        IF OD_DATE >= MOUD_START(i) AND OD_DATE <= MOUD_END(i) THEN DO;
+            OD_during_MOUD + 1; 
+        END;
+
+        IF OD_DATE > MOUD_END(i) AND OD_DATE <= MOUD_END(i) + 30 THEN DO;
+            OD_after_MOUD + 1;
+        END;
+    END;
+
+    IF OD_during_MOUD = 0 AND OD_after_MOUD = 0 THEN OD_no_MOUD + 1;
+
+    DROP i;
+
+RUN;
+
+proc sql;
+    create table overdose_summary as 
+    select 
+        ID, 
+        max(OD_COUNT) as TOTAL_OD_COUNT,
+        max(OD_during_MOUD) as N_OD_during_MOUD,
+        max(OD_after_MOUD) as N_OD_after_MOUD,
+        max(OD_no_MOUD) as N_OD_no_MOUD
+    from moud_od_demo
+    group by ID;
+quit;
+
+proc sql;
+    create table overdose_summary as
+    select distinct *
+    from overdose_summary;
+quit;
+
+PROC SQL;
+    CREATE TABLE moud_preg AS
+    SELECT * FROM moud_preg
+    LEFT JOIN overdose_summary ON moud_preg.ID = overdose_summary.ID;
+QUIT;
+
+DATA moud_preg;
+SET moud_preg;
+IF TOTAL_OD_COUNT = . THEN DO;
+	TOTAL_OD_COUNT = 0;
+    N_OD_no_MOUD = 0;
+    N_OD_during_MOUD = 0;
+    N_OD_after_MOUD = 0;
+END;
+
+data check_od_count;
+    set moud_preg;
+
+    if missing(N_OD_no_MOUD) then N_OD_no_MOUD = 0;
+    if missing(N_OD_during_MOUD) then N_OD_during_MOUD = 0;
+    if missing(N_OD_after_MOUD) then N_OD_after_MOUD = 0;
+
+    OD_Sum = sum(N_OD_no_MOUD, N_OD_during_MOUD, N_OD_after_MOUD);
+
+    if OD_Sum = TOTAL_OD_COUNT then OD_Match = 1;
+    else OD_Match = 0;
+run;
  
  title "Check that the sum of OD_during_MOUD variables = TOTAL_OD_COUNT";
  proc freq data=check_od_count;
     tables OD_Match;
  run;
- title;
  
+title "Distribution of OD relative to MOUD";
+data check_od_count;
+   set check_od_count;
+   total_overdoses = sum(of N_OD_no_MOUD N_OD_during_MOUD N_OD_after_MOUD);
+run;
+
+proc means data=check_od_count sum;
+   var N_OD_no_MOUD N_OD_during_MOUD N_OD_after_MOUD total_overdoses;
+run;
+title;
+
  PROC SQL;
      SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
      INTO :num_unique_ids
@@ -1342,9 +1516,9 @@ proc sql;
  
  %put Number of Unique IDs in Main Dataset: &num_unique_ids; 
 
-/* ========================================================== */
-/* Table 1 */
-/* ========================================================== */
+/* ======================= */
+/* Part 3: Table 1         */
+/* ======================= */
 
 proc sql;
     create table FINAL_COHORT as
@@ -1673,7 +1847,7 @@ QUIT;
 
 data FINAL_COHORT;
     set FINAL_COHORT;
-    if EVER_IDU_HCV_MAT = 1 or IJI_DIAG = 1 then IDU_EVIDENCE = 1;
+    if EVER_IDU_HCV = 1 or IJI_DIAG = 1 then IDU_EVIDENCE = 1;
     else IDU_EVIDENCE = 0;
 run;
 
@@ -1882,59 +2056,25 @@ QUIT;
 
 %put Number of unique Infant IDs in FINAL_COHORT table: &num_unique_ids;
 
-/*==============================================*/ 
-/* Project: MOUD/OD By Pregnancy Status         */
-/* Author: SM                         		    */ 
-/* Created: 11/26/2024				            */ 
-/*==============================================*/
+/*===============================*/
+/*  Part 4: Calculate MOUD Rates */
+/*===============================*/
 
-/*	Project Goal:
+/*  Goal:
 	Characterize and model the differecnes between pregnant and non-pregnant women's 
-	initiation and cessation of opioid use disorder treatment (MOUD) episodes 
-    and non-fatal and fatal overdose events.
+	initiation and cessation of opioid use disorder treatment (MOUD) episodes
 
-    Part 1: This portion of the code processes the `PHDSPINE.MOUD` dataset by first sorting and 
+    This portion of the code processes the `PHDSPINE.MOUD` dataset by first sorting and 
     creating a unique `episode_id` for each treatment episode based on treatment start and end dates, 
     with episodes being flagged when a significant gap is detected between consecutive treatment episodes. 
     It also merges treatment episode data, calculates start and end months/years, removes short treatment 
     episodes based on the specified leniency, and eliminates any overlapping episodes. The dataset is then 
-    cleaned for missing values and sorted for further analysis.
+    cleaned for missing values and sorted for further analysis */
 
-    Part 2: This section of the code defines a macro that merges demographic data from `PHDSPINE.DEMO` 
-    to the input dataset, filters based on gender, and creates a table that flags the presence of treatment 
-    episodes across a specified range of months and years. It also handles the creation of flags for pregnancy 
-    and post-partum periods by calculating the relevant months based on gestational age, ensuring the correct assignment 
-    of treatment and post-partum periods across multiple years. The final output includes flags for each month indicating 
-    the stage of pregnancy or post-partum status for each individual. THe code potion is wrapped in a macro so that two datasets,
-    moud_init and moud_duration, can be run sequentially through the same data manipulation steps. Dataset moud_init includes
-    all IDs in the Maternal OUD cohort while dataset moud_duration is a subset of only those that had an MOUD episode.
+/*======================*/
+/* 1. Pull MOUD Episode */
+/*======================*/
 
-    Part 3: MOUD Duration Model: A Poisson regression is used to examine the relationship between MOUD duration 
-	and variables like group and time_index, incorporating an autoregressive correlation structure for repeated measures.
-	MOUD Initialization Model: A logistic regression model analyzes the probability of initiating MOUD, considering group, 
-	time_index, and interaction terms with an exchangeable correlation structure.
-
-    Part 4: This portion of the code processes the `PHDSPINE.OVERDOSE` dataset by first sorting and 
-    creating a unique `episode_id` for each overdose episode. Missing IDs from the moud dataset are identified and added 
-    with placeholder episode_id values to the overdose data (to recpatilate the structure of the moud_init dataset). 
-    Demographic information is merged with the overdose dataset and filtered filtered to include only female subjects. 
-    The overdose data is sorted and merged with month and year flags to create the final cartesian overdose table, 
-    combining relevant flags such as pregnancy_flags, moud_flag, and posttxt_flag.
-
-    Part 5: Participants are categorized into groups based on their MOUD and post-TXT status. Logistic regression models 
-    are used to assess the impact of group and time_index on the likelihood of overdose (od_flag) and fatal overdose (fod_flag),
-    both with autoregressive correlation structures.
-
-	Detailed documentation of all datasets and variables used:
-	https://www.mass.gov/info-details/public-health-data-warehouse-phd-technical-documentation */
-
-/*=============================*/
-/*  Part 1: MOUD Treatment Episodes */
-/*=============================*/
-
-/*====================*/
-/* 1. Initial Data Setup */
-/*====================*/
 DATA moud;
     SET PHDSPINE.MOUD;
 RUN;
@@ -1943,28 +2083,27 @@ PROC SORT DATA=moud;
     BY ID TYPE_MOUD DATE_START_MOUD;
 RUN;
 
-/*====================*/
-/* 2. Creating Episode IDs */
-/*====================*/
+/*==========================*/
+/* 2. Creating Episode IDs  */
+/*==========================*/
 /* The goal of this step is to create a unique `episode_id` for each treatment episode 
    based on the treatment start and end dates for each individual. The new episode ID 
    will be used for further merging and analysis. */
-DATA moud;
+
+   DATA moud;
     SET moud;
     by ID TYPE_MOUD;
-    retain episode_num; /* Retain the episode number across records for the same ID */
+    retain episode_num;
     
-    lag_date = lag(DATE_END_MOUD); /* Get the previous treatment end date */
-    IF FIRST.TYPE_MOUD THEN lag_date = .; /* Reset lag_date at the start of each new treatment type */
-    IF FIRST.TYPE_MOUD THEN episode_num = 1; /* Start a new episode for the first treatment of the type */
+    lag_date = lag(DATE_END_MOUD);
+    IF FIRST.TYPE_MOUD THEN lag_date = .;
+    IF FIRST.TYPE_MOUD THEN episode_num = 1;
     
-    diff = DATE_START_MOUD - lag_date; /* Calculate the difference in days between current and previous treatment start */
+    diff = DATE_START_MOUD - lag_date;
     
-    /* If the difference is greater than a specified leniency, assume it is a new treatment episode */
     IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1; /* Increment the episode number when a gap is detected */
+    IF flag = 1 THEN episode_num = episode_num + 1;
     
-    /* Create a unique episode_id combining ID and episode number */
     episode_id = catx("_", ID, episode_num);
 RUN;
 
@@ -1972,41 +2111,41 @@ PROC SORT data=moud;
     BY episode_id;
 RUN;
 
-/*====================*/
-/* 3. Merging Start and End Dates for Each Episode */
-/*====================*/
+/*==================================================*/
+/* 3. Merging Start and End Dates for Each Episode  */
+/*==================================================*/
 /* In this step, we retain the start and end dates of each treatment episode. 
    The start date for each episode is taken from the first record in the episode, 
    and the end date is taken from the last record. This allows us to capture the full 
    duration of each treatment episode. */
-DATA moud; 
+
+   DATA moud; 
     SET moud;
 
     by episode_id;
-    retain DATE_START_MOUD; /* Retain the start date across all records within the same episode */
+    retain DATE_START_MOUD;
     
     IF FIRST.episode_id THEN DO;
         start_month = DATE_START_MONTH_MOUD;
         start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD; /* Capture the start date for the first record of the episode */
+        start_date = DATE_START_MOUD;
     END;
     IF LAST.episode_id THEN DO;
         end_month = DATE_END_MONTH_MOUD;
         end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD; /* Capture the end date for the last record of the episode */
+        end_date = DATE_END_MOUD;
     END;
     
-    /* If the duration of the treatment episode is shorter than the specified leniency, 
-       the episode is excluded from further analysis. */
     IF end_date - start_date < &MOUD_leniency THEN DELETE;
 RUN;
 
-/*====================*/
-/* 4. Final Sorting and Removing Duplicates */
-/*====================*/
+/*===========================================*/
+/* 4. Final Sorting and Removing Duplicates  */
+/*===========================================*/
 /* Sorting by ID ensures that data is properly organized for the next steps. 
    The SQL step below removes any duplicate records to ensure that each episode 
    is uniquely represented. */
+
 PROC SORT data=moud;
     BY ID;
 RUN;
@@ -2017,41 +2156,38 @@ PROC SQL;
    FROM moud;
 QUIT;
 
-/*====================*/
-/* 5. Removing Episodes with Short Durations */
-/*====================*/
+/*============================================*/
+/* 5. Removing Episodes with Short Durations  */
+/*============================================*/
 /* In this step, treatment episodes with durations shorter than the leniency threshold 
    are removed to ensure the dataset only contains valid treatment episodes. */
+
 DATA moud;
     SET moud;
     BY ID;
     
-    /* If the duration between treatment start and end is less than the leniency threshold, 
-       the episode is excluded. */
     IF end_date - start_date < &MOUD_leniency THEN DELETE;
 
-    /* Calculate the difference in start date between consecutive treatment episodes for each ID. */
     LAG_ED = LAG(END_DATE);
     
-    IF FIRST.ID THEN diff = .; /* Reset diff at the start of each new ID */
-    ELSE diff = start_date - LAG_ED; /* Calculate the difference for subsequent episodes */
+    IF FIRST.ID THEN diff = .;
+    ELSE diff = start_date - LAG_ED;
     
-    /* Flag episodes with overlapping dates or inconsistencies in treatment duration. */
     IF end_date < LAG_ED THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF FIRST.ID THEN flag_mim = 0;
-    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1; /* Flag as invalid if conditions are met */
+    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
     ELSE flag_mim = 0;
 
-    /* Delete flagged episodes to clean the data */
     IF flag_mim = 1 THEN DELETE;
 RUN;
 
-/*====================*/
-/* 6. Filtering Data by Date Range and ID */
-/*====================*/
-/* Finally, we filter the data to only include treatment episodes that ended in or after 2014. */
+/*=========================================*/
+/* 6. Filtering Data by Date Range and ID  */
+/*=========================================*/
+/* Finally, we filter the data to only include women in our cohort and treatment episodes that ended in or after 2014 */
+
 data moud;
     set moud;
     where DATE_END_YEAR_MOUD >= 2014;
@@ -2064,11 +2200,12 @@ PROC SQL;
     WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
 QUIT;
 
-/*====================*/
+/*============================*/
 /* 7. Identifying Missing IDs */
-/*====================*/
+/*============================*/
 /* This step identifies IDs in the `oud_preg` dataset that do not have matching records in the 
    `moud` dataset. The result is saved in the `missing_ids` table. */
+
 proc sql;
    create table missing_ids as
    select a.ID
@@ -2076,16 +2213,18 @@ proc sql;
    where not exists (select 1 from moud as b where a.ID = b.ID);
 quit;
 
-/*====================*/
-/* 8. Creating Two MOUD Datasets */
-/*====================*/
+/*================================*/
+/* 8. Creating Two MOUD Datasets  */
+/*================================*/
 /* This dataset contains all records from `moud`, which will be used for further analysis of MOUD duration. */
+
 DATA moud_duration;
     SET moud;
 RUN;
 
 /* This step completes the final dataset `moud_full` by taking the moud dataset and creating additional observations 
 for those in the OUD cohort that did not have a record from the `moud` dataset. This dataset will be used to assess MOUD initiation */
+
 DATA moud_full;
     SET moud;
 RUN;
@@ -2096,9 +2235,15 @@ proc sql;
    from missing_ids;
 quit;
 
-/*=============================*/
-/*  Part 2: Macro for flag generation */
-/*=============================*/
+/*=====================================*/
+/* 9. Prepare Pregnancy Tables         */
+/*=====================================*/
+/* This portion processes birth and infant data to generate monthly pregnancy and postpartum period flags for each birth. It first extracts relevant birth records from `PHDBIRTH.BIRTH_MOM` based on a specified year range and 
+retrieves gestational age from `PHDBIRTH.BIRTH_INFANT`, merging them using `BIRTH_LINK_ID`. The script then estimates pregnancy duration based on gestational age and determines the start and end months of pregnancy. 
+It iterates through months to flag each as part of the pregnancy period, then defines postpartum periods (6, 12, 18, and 24 months after birth) with specific flags. The dataset is sorted by mother ID, year, and month, 
+keeping only the earliest flag for each month. Finally, the script extracts the start and end years from a macro variable and generates datasets for months (1–12) and the range of years within the study period.
+Thus, the outcome is a long table, where each birth has 108 rows (one row per month Jan 2014-Dec 2022) that is flagged either pregnant or post-partum. */
+
 data all_births;
     set PHDBIRTH.BIRTH_MOM (keep = ID BIRTH_LINK_ID MONTH_BIRTH YEAR_BIRTH where=(YEAR_BIRTH IN &year));
 run;
@@ -2107,7 +2252,6 @@ data infants;
     set PHDBIRTH.BIRTH_INFANT (keep = ID BIRTH_LINK_ID GESTATIONAL_AGE);
 run;
 
-/* Step 13: Merge birth and infant data based on BIRTH_LINK_ID */
 proc sql;
     create table merged_births_infants as
     select 
@@ -2122,12 +2266,10 @@ proc sql;
     on a.BIRTH_LINK_ID = b.BIRTH_LINK_ID;
 quit;
 
-/* Step 14: Flag months within pregnancy and post-partum periods */
 data pregnancy_flags;
-    set merged_births_infants; /* Assume your birth data is named 'merged_births_infants' */
+    set merged_births_infants;
     length month year flag 8;
         
-/* Calculate pregnancy duration based on gestational age (weeks) */
     if GESTATIONAL_AGE => 39 then pregnancy_months = 9;
     else if GESTATIONAL_AGE >= 35 and GESTATIONAL_AGE <= 38 then pregnancy_months = 8;
     else if GESTATIONAL_AGE >= 31 and GESTATIONAL_AGE <= 34 then pregnancy_months = 7;
@@ -2136,28 +2278,24 @@ data pregnancy_flags;
     else if GESTATIONAL_AGE >= 18 and GESTATIONAL_AGE <= 21 then pregnancy_months = 4;
     else if GESTATIONAL_AGE >= 13 and GESTATIONAL_AGE <= 17 then pregnancy_months = 3;
     else if GESTATIONAL_AGE >= 9 and GESTATIONAL_AGE <= 12 then pregnancy_months = 2;
-    else pregnancy_months = 1; /* For extremely preterm cases */
+    else pregnancy_months = 1;
         
-/* Calculate pregnancy start based on gestational months */
-    pregnancy_start_month = MONTH_BIRTH - pregnancy_months + 1; /* Delivery month is included */
+    pregnancy_start_month = MONTH_BIRTH - pregnancy_months + 1;
     pregnancy_start_year = YEAR_BIRTH;
     if pregnancy_start_month <= 0 then do;
         pregnancy_start_year = YEAR_BIRTH - 1;
         pregnancy_start_month = 12 + pregnancy_start_month;
     end;
 
-/* Define pregnancy end as the birth month */
     pregnancy_end_month = MONTH_BIRTH;
     pregnancy_end_year = YEAR_BIRTH;
 
-/* Flag each month in the pregnancy period */
     month = pregnancy_start_month;
     year = pregnancy_start_year;
     do while ((year < pregnancy_end_year) or (year = pregnancy_end_year and month <= pregnancy_end_month));
-       flag = 1; /* Pregnancy flag */
+       flag = 1; 
        output;
 
-/* Increment the month and year */
        month + 1;
        if month > 12 then do;
             month = 1;
@@ -2165,11 +2303,9 @@ data pregnancy_flags;
         end;
     end;
 
-/* Flag each post-partum period */
     array post_partum_end_months[4] (6, 12, 18, 24);
     array post_partum_flags[4] (2, 3, 4, 5);
 
-/* Loop through the post-partum groups */
     do i = 1 to 4;
        post_partum_end_month = MONTH_BIRTH + post_partum_end_months[i];
        post_partum_end_year = YEAR_BIRTH;
@@ -2178,7 +2314,6 @@ data pregnancy_flags;
             post_partum_end_month = mod(post_partum_end_month, 12);
        end;
 
-/* Start from the month after delivery */
      month = (ifn(i=1, pregnancy_end_month + 1, month));
      year = (ifn(i=1, pregnancy_end_year, year));
      if month > 12 then do;
@@ -2187,10 +2322,9 @@ data pregnancy_flags;
      end;
 	
      do while ((year < post_partum_end_year) or (year = post_partum_end_year and month <= post_partum_end_month));
-        flag = post_partum_flags[i]; /* Post-partum flag: 2, 3, 4, or 5 */
+        flag = post_partum_flags[i];
         output;
 	
-/* Increment the month and year */
          month + 1;
          if month > 12 then do;
              month = 1;
@@ -2199,7 +2333,7 @@ data pregnancy_flags;
      end;
  end;
 	
- keep MATERNAL_ID month year flag;
+    keep MATERNAL_ID pregnancy_start_month pregnancy_start_year month year flag;
 run;
 	
 data pregnancy_flags;
@@ -2207,120 +2341,153 @@ data pregnancy_flags;
 		rename MATERNAL_ID = ID;
 run;
 	
-/* Sort the data by ID, month, year, and flag to ensure the lowest flag is first */
 proc sort data=pregnancy_flags;
     by ID year month flag;
 run;
 	
-/* Keep only the first row for each ID, year, month combination */
 data pregnancy_flags;
     set pregnancy_flags;
     by ID year month;
 	
-/* Retain only the first row for each ID, year, month combination */
     if first.month then output;
 run;
 
-/* Step 4: Extract start and end years from a macro variable &year */
 %let start_year=%scan(%substr(&year,2,%length(&year)-2),1,':');
 %let end_year=%scan(%substr(&year,2,%length(&year)-2),2,':');
 
-/* Step 5: Create a dataset for months (1 to 12) */
 DATA months; DO month = 1 to 12; OUTPUT; END; RUN;
 
-/* Step 6: Create a dataset for the range of years */
 DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
-    
+
+/*=====================================*/
+/* 10. Macro for flag generation       */
+/*=====================================*/
+/* This section of the code defines a macro that merges demographic data from `PHDSPINE.DEMO` 
+to the input dataset, filters based on gender, and creates a table that flags the presence of treatment 
+episodes across a specified range of months and years. It also handles the creation of flags for pregnancy 
+and post-partum periods by calculating the relevant months based on gestational age, ensuring the correct assignment 
+of treatment and post-partum periods across multiple years. The final output includes flags for each month indicating 
+the stage of pregnancy or post-partum status for each individual. THe code potion is wrapped in a macro so that two datasets,
+moud_init and moud_duration, can be run sequentially through the same data manipulation steps. Dataset moud_init includes
+all IDs in the Maternal OUD cohort (to analyze MOUD initation outcomes since all with OUD are eligible) while dataset moud_duration 
+is a subset of only those that had an MOUD episode (to analyze MOUD duration and cessation since being on MOUD is required to eligiblity) */
+
 %macro moud_table_creation(input_dataset);
 
-    /* Step 7: Cross join moud_demo, months, and years to create a dataset with all combinations */
+    /* Create the cartesian product of our input dataset, months, and years to represent every month in our study period */
     PROC SQL;
         CREATE TABLE moud_table AS
         SELECT * FROM &input_dataset, months, years;
     QUIT;
 
-	/* Merge pregnancy and post-partum flags with the MOUD episodes without duplicating rows */
+	/* Pull in pregnancy and post-partum flags and pregnancy date information */
 	proc sql;
 	    create table moud_table as
 	    select a.*, 
 	           case when b.flag is not null then b.flag 
-	                else 9999 end as preg_flag
-	    from moud_table a /* Original MOUD data */
+	                else 9999 end as preg_flag,
+	           case when b.pregnancy_start_month is not null then b.pregnancy_start_month 
+	                else . end as pregnancy_start_month,
+	           case when b.pregnancy_start_year is not null then b.pregnancy_start_year 
+	                else . end as pregnancy_start_year
+	    from moud_table a
 	    left join pregnancy_flags b
 	    on a.ID = b.ID 
 	       and a.month = b.month 
 	       and a.year = b.year;
 	quit;
 	
-	    /* Step 8: Create a summary dataset with a flag indicating whether a month overlaps with the MOUD episode */
+	/* Create a summary dataset with a flag indicating whether a month overlaps with the MOUD episode */
     data moud_summary;
         set moud_table;
-        /* Convert the start and end month/year into a single month-year value */
         start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
         end_month_year = mdy(DATE_END_MONTH_MOUD, 1, DATE_END_YEAR_MOUD);
         target_month_year = mdy(month, 1, year);
 
-        /* Flag for overlap */
         if start_month_year <= target_month_year <= end_month_year then
             moud_flag = 1;
         else
             moud_flag = 0;
     run;
 
-	/* Step 9: Create a dataset with post-treatment overlap flag (posttxt_flag) */
+	/* Create a dataset with post-treatment overlap flag */
 	data moud_spine_posttxt;
 	    set moud_table;
 	
-	    /* Create start/end month-year variables for comparison */
 	    start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
 	    end_month_year = mdy(DATE_END_MONTH_MOUD, 1, DATE_END_YEAR_MOUD);
 	    target_month_year = mdy(month, 1, year);
 	
-	    /* Flag for posttxt overlap */
 	    if target_month_year = end_month_year then
 	        posttxt_flag = 1;
 	    else
 	        posttxt_flag = 0;
 	run;
 
-    /* Step 10: Sort moud_summary by ID, year, and month */
     proc sort data=moud_summary;
         by ID year month;
     run;
 
-    /* Step 11: Create final moud_table, retaining lag information for moud_flag */
+    /* Create moud initiation flag */
     data moud_table;
         set moud_summary;
         by ID year month;
 
-        retain moud_init lag_moud_flag; /* Retain lag_moud_flag within ID */
+        retain moud_init lag_moud_flag;
         
-        /* Initialize for each new ID */
         if first.ID then do;
             moud_init = 0;
-            lag_moud_flag = .; /* Reset lag_moud_flag at the start of a new ID */
+            lag_moud_flag = .;
         end;
 
-        /* Mark the first month of each new episode */
         if moud_flag = 1 then do;
-            /* For the first record of the new ID or when lag_moud_flag is missing */
             if lag_moud_flag = 0 or lag_moud_flag = . then moud_init = 1;
             else if lag_moud_flag = 1 then moud_init = 0;
         end;
 
-        /* Reset moud_init when not in a new episode */
         if moud_flag = 0 then moud_init = 0;
 
-        /* Update lag_moud_flag after the logic to ensure it applies to the next record */
         lag_moud_flag = moud_flag;
 
-        keep ID EPISODE_ID DATE_START_MONTH_MOUD DATE_START_YEAR_MOUD DATE_END_MONTH_MOUD DATE_END_YEAR_MOUD month year moud_flag moud_init preg_flag;
+        keep ID EPISODE_ID DATE_START_MONTH_MOUD DATE_START_YEAR_MOUD DATE_END_MONTH_MOUD DATE_END_YEAR_MOUD pregnancy_start_month pregnancy_start_year month year moud_flag moud_init preg_flag;
     run;
+    
+	proc sort data=moud_table;
+	    by episode_id year month;
+	run;
+	
+	/* Create a dataset to group by whether a MOUD was initiated before, during, or after pregnancy */
+	data moud_spine_preg;
+	    set moud_table;
+	    by episode_id year month;
+	    	    
+	    moud_start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
+	    pregnancy_start_month_year = mdy(pregnancy_start_month, 1, pregnancy_start_year);
+	    
+	    target_month_year = mdy(month, 1, year);
+	    
+	    if first.episode_id then moud_start_group = .; 
+	    
+	    if moud_init = 1 then do;
+	        if moud_start_month_year < pregnancy_start_month_year then 
+	            moud_start_group = 1; /* MOUD initiation occurred before pregnancy */
+	        else if preg_flag = 1 then 
+	            moud_start_group = 2; /* MOUD initiation occurred during pregnancy */
+	        else if moud_start_month_year > pregnancy_start_month_year and preg_flag ne 1 then
+	            moud_start_group = 3; /* MOUD initiation occurred after pregnancy */
+	        else
+	            moud_start_group = .;
+	    end;
+	    else moud_start_group = .;
+	
+	    keep episode_id ID year month moud_init preg_flag moud_start_group pregnancy_start_month pregnancy_start_year;
+	run;
 	
 	proc sort data=moud_table;
 	by ID year month;
-	run;
+	run;	
 	
+    /* Create moud duration variable */
 	proc sql;
 	    create table moud_table as
 	    select a.*, 
@@ -2336,7 +2503,8 @@ DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
 	    ) as b
 	    on a.EPISODE_ID = b.EPISODE_ID;
 	quit;
-
+    
+    /* Create moud cessation variable */
 	data MOUD_TABLE;
 	    set MOUD_TABLE;
 	    if DATE_END_MONTH_MOUD = MONTH and DATE_END_YEAR_MOUD = YEAR then moud_cessation = 1;
@@ -2380,6 +2548,7 @@ DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
     group by ID, month, year;
 	quit;
 
+    /* Censor on death and assess event temporality with regard to death date (i.e. claims processed after death)  */
 	proc sql;
 	   create table deaths_filtered as
 	   select 
@@ -2394,42 +2563,57 @@ DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
 	by ID year month;
 	run;
 
-	proc sql;
-	    create table PREPARED_DATA as
-	    select a.*, 
-	           case 
-	               when b.YEAR_DEATH = a.year and b.MONTH_DEATH = a.month then 1
-	               else 0
-	           end as death_flag
-	    from PREPARED_DATA as a
-	    left join deaths_filtered as b
-	    on a.ID = b.ID
-	    ;
+    proc sql;
+        create table PREPARED_DATA as
+        select a.*, 
+            b.YEAR_DEATH, 
+            b.MONTH_DEATH,
+            case 
+                when b.YEAR_DEATH = a.year and b.MONTH_DEATH = a.month then 1
+                else 0
+            end as death_flag
+        from PREPARED_DATA as a
+        left join deaths_filtered as b
+        on a.ID = b.ID;
+    quit;
+
+    proc sql;
+    create table death_events as 
+    select ID, min(year*12 + month) as death_period
+    from PREPARED_DATA
+    where death_flag = 1
+    group by ID;
 	quit;
 	
-	data PREPARED_DATA;
-	    set PREPARED_DATA;
-	    retain death_flag_forward 0;
-	    by ID;
-	    
-	    if death_flag = 1 then death_flag_forward = 1;
-	    
-	    if first.ID then death_flag_forward = death_flag;
-	    
-	    death_flag = death_flag_forward;
-	    
-	    drop death_flag_forward;
-	run;
+	proc sql;
+	    create table post_death_counts as
+	    select 
+        	sum(moud_init) as moud_init_before_case
+	    from PREPARED_DATA as a
+	    inner join death_events as d
+	    on a.ID = d.ID
+	    where (a.year*12 + a.month) > d.death_period;
+	quit;
 	
-	data PREPARED_DATA;
-	    set PREPARED_DATA;
-	    if death_flag = 1 then delete;
+	title "Counts of Events Occurring After Death";
+	proc print data=post_death_counts noobs;
 	run;
+	title;
 	
-	proc sort data=PREPARED_DATA;
-		by ID year month;
-	run;
-	
+    data PREPARED_DATA;
+        set PREPARED_DATA;
+        retain death_flag_forward 0;
+        by ID;
+
+        if first.ID then death_flag_forward = 0;
+        if death_flag = 1 then death_flag_forward = 1;
+
+        if death_flag_forward = 1 and (year > YEAR_DEATH or (year = YEAR_DEATH and month > MONTH_DEATH)) then delete;
+
+        drop death_flag_forward;
+    run;
+
+	/* Add covariates for rate stratification  */
 	PROC SQL;
     CREATE TABLE PREPARED_DATA AS
     SELECT a.*, 
@@ -2478,9 +2662,12 @@ DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
 	
 %mend;
 
-/*=============================*/
-/*  Part 3: MOUD Regressions   */
-/*=============================*/
+/*=================================================================*/
+/* 11. MOUD Duration Stats and Cessation Rates by Pregnancy Status */
+/*=================================================================*/
+/* This section creates summary tables (`PERSON_TIME` and `PERIOD_SUMMARY`) to calculate the number of eligible cessation periods and actual MOUD cessation events for each individual. 
+These tables are merged with demographic data, including variables such as race, sex, education, incarceration history, and homelessness status. Additional variables are created, including an indicator for injection drug use (`IDU_EVIDENCE`) and age groups. 
+Next, generates summary tables and calculates MOUD cessation rates overall and by stratified groups, providing confidence intervals for cessation rates. The macro `%calculate_rates` automates the stratified rate calculations across multiple demographic factors. */
 
 %moud_table_creation(moud_duration);
 
@@ -2567,29 +2754,27 @@ run;
 DATA PERIOD_SUMMARY_FINAL;
     SET PERIOD_SUMMARY_FINAL;
 		    
-	    /* Calculate the age using the current year dynamically */
     age = YEAR(TODAY()) - YOB;
 		    
-	    /* Apply the format to create the age_grp variable */
     age_grp = PUT(age, age_grps_five.); 
 RUN;
 
 proc sql;
-    create table PREPARED_DATA as
+    create table FILT_PREPARED_DATA as
     SELECT *
     from PREPARED_DATA
     where moud_flag = 1;
 quit;
 
-proc means data=PREPARED_DATA mean median min max std;
+proc means data=FILT_PREPARED_DATA mean median min max std;
    var moud_duration;
 run;
 
-proc sort data=PREPARED_DATA;
+proc sort data=FILT_PREPARED_DATA;
 	by group;
 run;
 
-proc means data=PREPARED_DATA mean median min max std;
+proc means data=FILT_PREPARED_DATA mean median min max std;
 	by group;
     var moud_duration;
 run;
@@ -2693,6 +2878,191 @@ quit;
 %calculate_rates(IDU_EVIDENCE, 'Moud Cessation by Pregnancy Group, Stratified by IDU_EVIDENCE');
 title;
 
+/*=================================================================*/
+/* 12. MOUD Duration Stats and Cessation Rates by MOUD Start Time  */
+/*=================================================================*/
+/* This section does the same thing as section 11 but rather than pregnancy status as the group of anlaysis, it uses MOUD start time relative to pregnancy as the group of analysis (i.e. MOUD start before, during, or after pregnancy)
+So, it begins with summarized MOUD start group information, merging this with a prepared dataset that tracks individuals by ID, month, and year. The script then calculates person-time eligible for cessation and summarizes cessation events by MOUD start group. 
+Demographic and clinical data, including homelessness history, incarceration, birth indicators, and HCV status, are integrated into the final dataset. Additional derived variables, such as age and an indicator for injection drug use (IDU) evidence, are created. 
+Next, generate statistical summaries of MOUD cessation rates overall and stratified by key demographic and clinical characteristics using a macro for automated subgroup analysis. */
+
+proc sql;
+    create table moud_spine_preg as
+    select distinct
+        ID,
+        month,
+        year,
+        max(moud_start_group) as moud_start_group
+    from moud_spine_preg
+    group by ID, month, year;
+quit;
+
+proc sql;
+    create table PREPARED_DATA as
+    select a.*, 
+           coalesce(b.moud_flag, 0) as moud_flag,
+           coalesce(c.moud_start_group, 0) as moud_start_group 
+    from PREPARED_DATA a
+    left join PREPARED_DATA b 
+    on a.ID = b.ID and a.month = b.month and a.year = b.year
+    left join moud_spine_preg c
+    on a.ID = c.ID and a.month = c.month and a.year = c.year;
+quit;
+
+proc sql;
+    create table PERSON_TIME as
+    select 
+        ID, 
+        moud_start_group,
+        sum(case when moud_flag = 1 then 1 else 0 end) as eligble_cessation
+    from PREPARED_DATA
+    group by ID, moud_start_group;
+quit;
+
+proc sql;
+   create table PERIOD_SUMMARY as
+   select ID,
+          moud_start_group,
+          sum(moud_cessation) as moud_stops
+   from PREPARED_DATA
+   group by ID, moud_start_group;
+quit;
+	
+proc sort data=PERSON_TIME;
+    by ID moud_start_group;
+run;
+	
+proc sort data=PERIOD_SUMMARY;
+    by ID moud_start_group;
+run;
+	
+data PERIOD_SUMMARY_FINAL;
+    merge PERIOD_SUMMARY
+          PERSON_TIME;
+    by ID moud_start_group;
+run;
+
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          demographics.FINAL_RE, 
+          demographics.FINAL_SEX,
+          demographics.EDUCATION,
+          demographics.EVER_INCARCERATED,
+          demographics.FOREIGN_BORN,
+          demographics.HOMELESS_EVER,
+          demographics.YOB
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN PHDSPINE.DEMO AS demographics 
+   ON a.ID = demographics.ID;
+QUIT;
+
+proc sql;
+    create table PERIOD_SUMMARY_FINAL as
+    select a.*, b.BIRTH_INDICATOR
+    from PERIOD_SUMMARY_FINAL a
+    left join births b
+    on a.ID = b.ID;
+quit;
+
+PROC SQL;
+	CREATE TABLE PERIOD_SUMMARY_FINAL AS
+	SELECT DISTINCT *
+	FROM PERIOD_SUMMARY_FINAL
+	WHERE BIRTH_INDICATOR = 1;
+QUIT;
+
+data PERIOD_SUMMARY_FINAL;
+    length HOMELESS_HISTORY_GROUP $10;
+    set PERIOD_SUMMARY_FINAL;
+    if HOMELESS_EVER = 0 then HOMELESS_HISTORY_GROUP = 'No';
+    else if 1 <= HOMELESS_EVER <= 5 then HOMELESS_HISTORY_GROUP = 'Yes';
+    else HOMELESS_HISTORY_GROUP = 'Unknown';
+run;
+
+proc sql;
+create table PERIOD_SUMMARY_FINAL as select *,
+case
+when ID in (select ID from IJI_COHORT) then 1
+else 0
+end as IJI_DIAG
+from PERIOD_SUMMARY_FINAL;
+quit;
+		
+proc sql;
+    create table PERIOD_SUMMARY_FINAL as
+    select PERIOD_SUMMARY_FINAL.*,
+           hcv.EVER_IDU_HCV
+    from PERIOD_SUMMARY_FINAL
+    left join HCV_STATUS as hcv
+    on PERIOD_SUMMARY_FINAL.ID = hcv.ID;
+quit;
+		
+data PERIOD_SUMMARY_FINAL;
+    set PERIOD_SUMMARY_FINAL;
+    if EVER_IDU_HCV = 1 or IJI_DIAG = 1 then IDU_EVIDENCE = 1;
+    else IDU_EVIDENCE = 0;
+run;
+	
+DATA PERIOD_SUMMARY_FINAL;
+    SET PERIOD_SUMMARY_FINAL;
+		    
+    age = YEAR(TODAY()) - YOB;
+		    
+    age_grp = PUT(age, age_grps_five.); 
+RUN;
+
+title 'Moud Cessation by moud_start_group Group, Overall';
+proc sql;
+    select 
+        moud_start_group,
+        count(*) as total_n,
+        sum(moud_stops) as moud_stops,
+        sum(eligble_cessation) as eligble_cessation,
+        calculated moud_stops / calculated eligble_cessation as moud_stops_rate format=8.4,
+        (calculated moud_stops - 1.96 * sqrt(calculated moud_stops)) / calculated eligble_cessation as moud_stops_rate_lower format=8.4,
+        (calculated moud_stops + 1.96 * sqrt(calculated moud_stops)) / calculated eligble_cessation as moud_stops_rate_upper format=8.4
+    from PERIOD_SUMMARY_FINAL
+    group by moud_start_group;
+quit;
+
+%macro calculate_rates(group_by_vars, mytitle);
+title &mytitle;
+proc sql;
+    select 
+        moud_start_group,
+        &group_by_vars,
+        count(*) as total_n,
+        sum(moud_stops) as moud_stops,
+        sum(eligble_cessation) as eligble_cessation,
+        calculated moud_stops / calculated eligble_cessation as moud_stops_rate format=8.4,
+        (calculated moud_stops - 1.96 * sqrt(calculated moud_stops)) / calculated eligble_cessation as moud_stops_rate_lower format=8.4,
+        (calculated moud_stops + 1.96 * sqrt(calculated moud_stops)) / calculated eligble_cessation as moud_stops_rate_upper format=8.4
+    from PERIOD_SUMMARY_FINAL
+    group by moud_start_group, &group_by_vars;
+quit;
+%mend calculate_rates;
+
+%calculate_rates(age_grp, 'Moud Cessation by moud_start_group Group, Stratified by Age');
+%calculate_rates(FINAL_RE, 'Moud Cessation by moud_start_group Group, Stratified by FINAL_RE');
+%calculate_rates(EDUCATION, 'Moud Cessation by moud_start_group Group, Stratified by EDUCATION');
+%calculate_rates(HOMELESS_HISTORY_GROUP, 'Moud Cessation by moud_start_group Group, Stratified by HOMELESS_HISTORY');
+%calculate_rates(EVER_INCARCERATED, 'Moud Cessation by moud_start_group Group, Stratified by EVER_INCARCERATED');
+%calculate_rates(FOREIGN_BORN, 'Moud Cessation by moud_start_group Group, Stratified by FOREIGN_BORN');
+%calculate_rates(IDU_EVIDENCE, 'Moud Cessation by moud_start_group Group, Stratified by IDU_EVIDENCE');
+title;
+
+/*============================================*/
+/* 13. MOUD Primary and Secondary Initation   */
+/*============================================*/
+/* This section again repeats 11 and 12 on a different dataset. MOUD_FULL contains all IDs from the cohort (both those who did and did not have MOUD episodes) compared to MOUD_DURATION that only contained IDs that had an episode of MOUD.
+This section begins by merging OUD-related information into a prepared dataset and calculates the earliest OUD case report period for each individual. It then determines the number of events (e.g., MOUD initiation) occurring before the case report. 
+The dataset is further refined by filtering records based on time criteria and calculating eligibility and censoring variables related to MOUD initiation and reinitiation. 
+The code then aggregates person-time data for MOUD initiation and reinitiation, merges demographic data, and categorizes homelessness history. 
+It also identifies individuals with injection drug use (IDU) history based on available datasets. Age groups are assigned, and overall follow-up time statistics are calculated. 
+Finally, it generates summary statistics and stratified analyses of MOUD initiation and reinitiation rates by key demographic variables (e.g., age, race, education, homelessness, incarceration, foreign-born status, and IDU history). 
+The analysis uses a macro to generate stratified tables efficiently. */
+
 %moud_table_creation(moud_full); 
 
 proc sql;
@@ -2705,9 +3075,27 @@ proc sql;
     on PREPARED_DATA.ID = cov.ID;
 quit;
 
-proc freq data=PREPARED_DATA;
-    tables OUD_YEAR OUD_MONTH / missing;
+proc sql;
+    create table case_report_events as 
+    select ID, min(OUD_YEAR*12 + OUD_MONTH) as case_report_period
+    from PREPARED_DATA
+    group by ID;
+quit;
+
+proc sql;
+    create table pre_case_report_counts as
+    select 
+        sum(moud_init) as moud_init_before_case
+    from PREPARED_DATA as a
+    inner join case_report_events as c
+    on a.ID = c.ID
+    where (a.year*12 + a.month) < c.case_report_period;
+quit;
+
+title "Counts of Events Occurring Before Case Report";
+proc print data=pre_case_report_counts noobs;
 run;
+title;
 
 proc sql;
     create table PREPARED_DATA as
@@ -2724,43 +3112,34 @@ data PREPARED_DATA;
 
     retain censor_init eligible_init censor_reinit moud_reinit eligible_reinit moud_primaryinit;
 
-    /* Reset for a new ID */
     if first.ID then do;
-        eligible_init = 1;  /* Start counting person-time */
+        eligible_init = 1; 
         censor_init = 0;
-        censor_reinit = 0;    /* Reset reinitiation flag */
-        moud_reinit = 0; /* Temporary flag to track the reset */
-        eligible_reinit = 0;  /* Initialize eligible_reinit */
-        moud_primaryinit = 0; /* Initialize moud_primaryinit */
+        censor_reinit = 0;   
+        moud_reinit = 0; 
+        eligible_reinit = 0;  
+        moud_primaryinit = 0;
     end;
 
-    /* Censor at first occurrence of moud_init = 1 */
     if moud_init = 1 then censor_init = 1;
     
-    /* Only count person-time before censorship */
     if censor_init = 1 then eligible_init = 0;
 
-    /* Set reinitiation flag only for the month when moud_init = 1 */
     if moud_init = 1 and lag(eligible_init) = 0 and moud_reinit = 0 then do;
-        censor_reinit = 1;  /* Set reinitiation flag for the month */
-        moud_reinit = 1;  /* Set the flag to prevent further reinitiation */
+        censor_reinit = 1;
+        moud_reinit = 1; 
     end;
     
-    /* Reset moud_reinit once the reinitiation is flagged for the month */
     if moud_init = 0 then moud_reinit = 0;
 
-    /* Set eligible_reinit = 1 when moud_cessation is flagged */
     if moud_cessation = 1 then eligible_reinit = 1;
 
-    /* Set eligible_reinit = 0 when moud_reinit is flagged */
     if moud_reinit = 1 then eligible_reinit = 0;
 
-    /* Set moud_primaryinit = 1 for the first occurrence of moud_init = 1 */
     if moud_init = 1 and lag(eligible_init) = 1 and moud_primaryinit = 0 then do;
-        moud_primaryinit = 1;  /* Set the flag for the first occurrence */
+        moud_primaryinit = 1; 
     end;
     
-    /* Reset moud_reinit once the reinitiation is flagged for the month */
     if moud_init = 0 then moud_primaryinit = 0;
 
 run;
@@ -2850,10 +3229,8 @@ run;
 DATA PERIOD_SUMMARY_FINAL;
     SET PERIOD_SUMMARY_FINAL;
 		    
-	    /* Calculate the age using the current year dynamically */
     age = YEAR(TODAY()) - YOB;
 		    
-	    /* Apply the format to create the age_grp variable */
     age_grp = PUT(age, age_grps_five.); 
 RUN;
 
@@ -2886,10 +3263,10 @@ proc sql;
         (calculated moud_primaryinit + 1.96 * sqrt(calculated moud_primaryinit)) / calculated eligible_init as moud_primaryinit_rate_upper format=8.4,
         
         sum(moud_reinit) as moud_reinit,
-        sum(eligible_init) as eligible_init,
-        calculated moud_reinit / calculated eligible_init as moud_reinit_rate format=8.4,
-        (calculated moud_reinit - 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_init as moud_reinit_rate_lower format=8.4,
-        (calculated moud_reinit + 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_init as moud_reinit_rate_upper format=8.4
+        sum(eligible_reinit) as eligible_reinit,
+        calculated moud_reinit / calculated eligible_reinit as moud_reinit_rate format=8.4,
+        (calculated moud_reinit - 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_reinit as moud_reinit_rate_lower format=8.4,
+        (calculated moud_reinit + 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_reinit as moud_reinit_rate_upper format=8.4
         
     from PERIOD_SUMMARY_FINAL
     group by group;
@@ -2909,10 +3286,10 @@ proc sql;
         (calculated moud_primaryinit + 1.96 * sqrt(calculated moud_primaryinit)) / calculated eligible_init as moud_primaryinit_rate_upper format=8.4,
         
         sum(moud_reinit) as moud_reinit,
-        sum(eligible_init) as eligible_init,
-        calculated moud_reinit / calculated eligible_init as moud_reinit_rate format=8.4,
-        (calculated moud_reinit - 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_init as moud_reinit_rate_lower format=8.4,
-        (calculated moud_reinit + 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_init as moud_reinit_rate_upper format=8.4
+        sum(eligible_reinit) as eligible_reinit,
+        calculated moud_reinit / calculated eligible_reinit as moud_reinit_rate format=8.4,
+        (calculated moud_reinit - 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_reinit as moud_reinit_rate_lower format=8.4,
+        (calculated moud_reinit + 1.96 * sqrt(calculated moud_reinit)) / calculated eligible_reinit as moud_reinit_rate_upper format=8.4
         
     from PERIOD_SUMMARY_FINAL
     group by group, &group_by_vars;
@@ -2928,60 +3305,73 @@ quit;
 %calculate_rates(IDU_EVIDENCE, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by IDU_EVIDENCE');
 title;
 
-/*=============================*/
-/*  Part 4: Overdose Episodes  */
-/*=============================*/
+title 'Moud Initiation and Reinitiation, Overall';
+proc sql;
+    select 
+        sum(moud_primaryinit) as moud_primaryinit,
+        sum(eligible_init) as eligible_init,
+        sum(moud_reinit) as moud_reinit,
+        sum(eligible_reinit) as eligible_reinit
+    from PERIOD_SUMMARY_FINAL;
+quit;
+title;
 
-/*====================*/
+/*===================================*/
+/* Part 5: Calculate Overdose Rates  */
+/*===================================*/
+/* This portion of the code processes the `PHDSPINE.OVERDOSE` dataset by first sorting and 
+creating a unique `episode_id` for each overdose episode. Missing IDs from the moud dataset are identified and added 
+with placeholder episode_id values to the overdose data (to recpatilate the structure of the moud_init dataset). 
+Demographic information is merged with the overdose dataset and filtered filtered to include only female subjects. 
+The overdose data is sorted and merged with month and year flags to create the final cartesian overdose table, 
+combining relevant flags such as pregnancy_flags, moud_flag, and posttxt_flag. */
+
+/*==========================*/
 /* 1. Prepare Overdose Data */
-/*====================*/
+/*==========================*/
 /* This section prepares the overdose data by selecting relevant variables from the source dataset 
    and ensures that only the necessary columns are retained. The dataset is then sorted by ID and overdose date (OD_DATE) to organize the data for further analysis. */
 
 DATA overdose;
     SET PHDSPINE.OVERDOSE;
-    KEEP ID OD_MONTH OD_YEAR OD_DATE FATAL_OD_DEATH OD_COUNT;  /* Retain only the required columns for further analysis */
+    KEEP ID OD_MONTH OD_YEAR OD_DATE FATAL_OD_DEATH OD_COUNT;
 RUN;
 
-/* Sorting the overdose data by ID and OD_DATE */
 PROC SORT data=overdose; 
-    BY ID OD_DATE;  /* Sorting by ID ensures that the data for each individual is in order by date */
+    BY ID OD_DATE;
 RUN;
 
-/*====================*/
+/*===========================*/
 /* 2. Create Episode Numbers */
-/*====================*/
+/*===========================*/
 /* This step assigns an episode number to each overdose event for each individual. The episode number is initialized to 1 for the first record and incremented for subsequent records within the same ID. 
    A new variable, 'episode_id', is created by concatenating the individual ID and the episode number to uniquely identify each episode. */
 
 DATA overdose;
     SET overdose;
-    by ID OD_DATE;  /* Ensure that the data is processed in order for each ID */
-    retain episode_num;  /* Retain the episode_num variable across rows for each ID */
+    by ID OD_DATE; 
+    retain episode_num;
 
-    /* Initialize the episode number for the first occurrence of each ID */
     if first.ID then episode_num = 1; 
-    else episode_num + 1;  /* Increment the episode number for subsequent rows */
+    else episode_num + 1;
 
-    /* Create episode_id by concatenating ID and episode_num */
     episode_id = catx("_", ID, episode_num);
     
-    drop episode_num;  /* Drop episode_num as it's no longer needed after creating episode_id */
+    drop episode_num;
 RUN;
 
-/* Sorting the data again by the newly created episode_id for future analysis */
 PROC SORT data=overdose; 
-    BY EPISODE_ID;  /* Sort by episode_id for efficient access */
+    BY EPISODE_ID;
 RUN;
 
 /*==========================*/
 /* 3. Filter by Year and ID */
 /*==========================*/
-/* Filter the overdose data to keep only records from the year 2014 and onwards, ensuring the analysis is limited to more recent data. */
+/* Filter the overdose data to keep only records from our cohort and from the year 2014 and onwards */
 
 data overdose;
     set overdose;
-    where OD_YEAR >= 2014;  /* Filter for overdose events occurring from 2014 onwards */
+    where OD_YEAR >= 2014;
 run;
 
 PROC SQL;
@@ -2991,42 +3381,41 @@ PROC SQL;
     WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
 QUIT;
 
-/*====================*/
+/*======================================*/
 /* 4. Identify Missing IDs in MOUD Data */
-/*====================*/
-/* This SQL procedure identifies individuals (IDs) who appear in the pregnancy data (oud_preg) but do not have corresponding entries in the MOUD data, 
-   helping to identify records that may require further attention or imputation. */
+/*======================================*/
+/* This SQL procedure identifies individuals (IDs) who appear in the pregnancy data (oud_preg) but do not have corresponding entries in the MOUD data */
 
 proc sql;
    create table missing_ids as
    select a.ID
    from oud_preg as a
-   where not exists (select 1 from moud as b where a.ID = b.ID);  /* Select IDs with no match in MOUD dataset */
+   where not exists (select 1 from overdose as b where a.ID = b.ID);
 quit;
 
-/*====================*/
+/*=========================================*/
 /* 5. Merge Missing IDs into Overdose Data */
-/*====================*/
+/*=========================================*/
 /* The next step merges the missing IDs into the overdose data, where a placeholder value (".") is assigned to the episode_id for these missing records. 
    This ensures that all IDs are accounted for in the dataset, even if no MOUD data is available. */
 
 DATA overdose_full;
-    SET overdose;  /* Keep all original overdose data */
+    SET overdose; 
 RUN;
 
 proc sql;
    insert into overdose_full (ID, episode_id)
-   select ID, "."  /* Insert placeholder for missing IDs */
+   select ID, "." 
    from missing_ids;
 quit;
 
-/*====================*/
+/*===========================*/
 /* 8. Sort Data for Analysis */
-/*====================*/
+/*===========================*/
 /* Sorting the overdose dataset by ID, OD_YEAR, and OD_MONTH to facilitate time-series analysis and ensure chronological order of overdose events. */
 
 PROC SORT DATA=overdose_full;
-by ID OD_YEAR OD_MONTH;  /* Sorting by ID and date variables to maintain chronological order */
+by ID OD_YEAR OD_MONTH;
 run;
 
 /*====================*/
@@ -3036,50 +3425,50 @@ run;
 
 PROC SQL;
     CREATE TABLE od_table AS
-    SELECT * FROM overdose_full, months, years;  /* Create the basic table structure, merging with month and year variables */
+    SELECT * FROM overdose_full, months, years;
 QUIT;
 
-/*====================*/
+/*==============================================*/
 /* 10. Flag Overdoses by Month-Year Combination */
-/*====================*/
+/*==============================================*/
 /* This step creates an "od_flag" variable indicating whether a particular overdose event matches a given month and year. The flag is set to 1 if there's a match, otherwise 0. */
 
 data od_table;
     set od_table;
-    if OD_MONTH = month and OD_YEAR = year then od_flag = 1;  /* Flag overdose events for the exact month/year combination */
-    else od_flag = 0;  /* Flag as 0 if no match */
+    if OD_MONTH = month and OD_YEAR = year then od_flag = 1;
+    else od_flag = 0;
 run;
 
-/*====================*/
+/*==========================*/
 /* 11. Flag Fatal Overdoses */
-/*====================*/
-/* This step creates a "fod_flag" variable to flag fatal overdoses. The flag is set to 1 for fatal overdoses (FATAL_OD_DEATH = 1) and 0 otherwise. */
+/*==========================*/
+/* This step creates a "fod_flag" variable to flag fatal overdoses. The flag is set to 1 for fatal overdoses (FATAL_OD_DEATH = 1) and 0 otherwise.
+Observations are censored after their fatal overdose and then explore whether overdoses were flagged after death date.
+Lastly, forward censor on earliest date of evidence of OUD to begin eligble period. */
 
 data od_table;
     set od_table;
-    if OD_MONTH = month and OD_YEAR = year and FATAL_OD_DEATH = 1 then fod_flag = 1;  /* Flag fatal overdoses for the exact month/year combination */
-    else fod_flag = 0;  /* Flag as 0 if no match or non-fatal overdose */
+    if OD_MONTH = month and OD_YEAR = year and FATAL_OD_DEATH = 1 then fod_flag = 1;
+    else fod_flag = 0;
 run;
 
 proc sort data=od_table;
-by ID;
+by ID year month;
 run;
 
 data od_table;
     set od_table;
     by ID;
     
-    /* If a fatal overdose is found, delete all rows after for that ID */
-    retain censor_fod 0;  /* Track whether a fatal overdose has occurred */
+    retain censor_fod 0; 
    
     if first.ID then do;
       censor_fod = 0; 
     end;
     
-    if fod_flag = 1 then censor_fod = 1;  /* Set flag when a fatal overdose is encountered */
+    if fod_flag = 1 then censor_fod = 1; 
     
-    /* Delete all subsequent rows for this ID after a fatal overdose, except the one with fod_flag = 1 */
-    if censor_fod = 1 and fod_flag = 0 then delete;  /* Corrected condition */
+    if censor_fod = 1 and fod_flag = 0 then delete; 
    
 run;
 
@@ -3093,9 +3482,28 @@ proc sql;
     on od_table.ID = cov.ID;
 quit;
 
-proc freq data=od_table;
-    tables OUD_YEAR OUD_MONTH / missing;
+proc sql;
+    create table case_report_events as 
+    select ID, min(OUD_YEAR*12 + OUD_MONTH) as case_report_period
+    from od_table
+    group by ID;
+quit;
+
+proc sql;
+    create table pre_case_report_counts as
+    select 
+        sum(od_flag) as od_flag_before_case,
+        sum(fod_flag) as fod_flag_before_case
+    from od_table as a
+    inner join case_report_events as c
+    on a.ID = c.ID
+    where (a.year*12 + a.month) < c.case_report_period;
+quit;
+
+title "Counts of Events Occurring Before Case Report";
+proc print data=pre_case_report_counts noobs;
 run;
+title;
 
 proc sql;
     create table od_table as
@@ -3106,25 +3514,25 @@ proc sql;
     order by ID, YEAR, MONTH;
 quit;
 
-/*====================*/
+/*=========================*/
 /* 12. Sort Final OD Table */
-/*====================*/
-/* Sorting the final overdose table by ID, year, and month, and keeping only relevant variables for further analysis. */
+/*=========================*/
+/* Sorting the final overdose table by ID, year, and month */
 
 proc sort data=od_table;
-    by ID year month;  /* Sort by ID and month-year for chronological analysis */
+    by ID year month; 
 run;
 
-/*====================*/
+/*========================================*/
 /* 13. Merge Pregnancy Flags with OD Data */
-/*====================*/
+/*========================================*/
 /* Merge pregnancy flags with the overdose data. For any month/year combination, if a pregnancy flag exists, it's added to the table, otherwise the flag is set to a default value (9999). */
 
 proc sql;
     create table od_table as
     select a.*, 
            case when b.flag is not null then b.flag 
-                else 9999 end as preg_flag  /* Add pregnancy flag, defaulting to 9999 if missing */
+                else 9999 end as preg_flag
     from od_table a
     left join pregnancy_flags b
     on a.ID = b.ID 
@@ -3132,9 +3540,9 @@ proc sql;
        and a.year = b.year;
 quit;
 
-/*====================*/
+/*=============================================*/
 /* 14. Summarize MOUD Flag for Each Month-Year */
-/*====================*/
+/*=============================================*/
 /* This step reduces the dataset to unique ID-month-year combinations and retains the maximum MOUD flag value for each combination. */
 
 proc sql;
@@ -3143,14 +3551,14 @@ proc sql;
         ID,
         month,
         year,
-        max(moud_flag) as moud_flag  /* Retain the maximum MOUD flag for each ID-month-year combination */
+        max(moud_flag) as moud_flag 
     from moud_summary
     group by ID, month, year;
 quit;
 
-/*====================*/
+/*====================================================*/
 /* 15. Reduce Post-Treatment Flag for Each Month-Year */
-/*====================*/
+/*====================================================*/
 /* Similar to the MOUD flag, we reduce the spine data to distinct ID-month-year combinations, keeping the maximum post-treatment flag for each combination. */
 
 proc sql;
@@ -3159,21 +3567,21 @@ proc sql;
         ID,
         month,
         year,
-        max(posttxt_flag) as posttxt_flag  /* Keep maximum post-treatment flag for each month/year */
+        max(posttxt_flag) as posttxt_flag 
     from moud_spine_posttxt
     group by ID, month, year;
 quit;
 
-/*====================*/
+/*======================================================*/
 /* 16. Merge MOUD and Post-Treatment Flags with OD Data */
-/*====================*/
+/*======================================================*/
 /* This final merge combines both the MOUD and post-treatment flags with the overdose data, ensuring that missing flags are replaced with default values (0) where applicable. */
 
 proc sql;
     create table od_table_full as
     select a.*, 
-           coalesce(b.moud_flag, 0) as moud_flag,  /* Use coalesce to replace missing MOUD flags with 0 */
-           coalesce(c.posttxt_flag, 0) as posttxt_flag  /* Use coalesce to replace missing post-treatment flags with 0 */
+           coalesce(b.moud_flag, 0) as moud_flag,
+           coalesce(c.posttxt_flag, 0) as posttxt_flag
     from od_table a
     left join moud_summary b 
     on a.ID = b.ID and a.month = b.month and a.year = b.year
@@ -3181,24 +3589,19 @@ proc sql;
     on a.ID = c.ID and a.month = c.month and a.year = c.year;
 quit;
 
-/*=============================*/
-/*  Part 5: Overdose Regressions by Pregnancy and Treatment */
-/*=============================*/
-
-/*====================*/
-/* 1. Prepare Data for Analysis */
-/*====================*/
-/* This step prepares the data by creating a unique time index based on the month and year, 
-   and categorizes individuals into different groups based on pregnancy and post-partum status. 
-   The 'group' variable is used to distinguish between different states, such as pregnant, post-partum, and non-pregnant. */
+/*===============================*/
+/* 17. Prepare Data for Analysis */
+/*===============================*/
+/* This step prepares the data by creating a unique time index based on the month and year, and categorizes individuals into different groups based on pregnancy and post-partum status. 
+The 'group' variable is used to distinguish between different states, such as pregnant, post-partum, and non-pregnant. 
+It then filters death records (`deaths_filtered`) and merges them with the treatment dataset to flag deaths (`death_flag`). A new dataset (`death_events`) identifies the earliest death date per individual, and post-death events such as overdoses are counted (`post_death_counts`). 
+The dataset is then cleaned to remove records occurring after death. */
 
 data prepared_data;
     set od_table_full;
 
-    /* Create a unique time index based on year and month */
-    time_index = (year - 2014) * 12 + month; /* Convert year and month into a unique index starting from 2014 */
+    time_index = (year - 2014) * 12 + month;
    
-    /* Categorize individuals based on pregnancy and post-partum status */
     if preg_flag = 1 then group = 1; /* Pregnant */
     else if preg_flag = 2 then group = 2; /* 0-6 months post-partum */
     else if preg_flag = 3 then group = 2; /* 7-12 months post-partum */
@@ -3207,8 +3610,8 @@ data prepared_data;
     else if preg_flag = 9999 then group = 0; /* Non-pregnant */
    
     /* Categorize individuals based on MOUD and post-treatment flags */
-    if moud_flag = 1 then treat_group = 1; /* On MOUD */
-    else if moud_flag = 0 and posttxt_flag = 1 then treat_group = 2; /* Post-TXT */
+    if moud_flag = 1 and posttxt_flag = 0 then treat_group = 1; /* On MOUD */
+    else if moud_flag = 1 and posttxt_flag = 1 then treat_group = 2; /* Post-TXT */
     else if moud_flag = 0 and posttxt_flag = 0 then treat_group = 0; /* No MOUD */
    
 run;
@@ -3217,23 +3620,6 @@ run;
 PROC SORT DATA=prepared_data;
 BY ID YEAR MONTH;
 RUN;
-
-proc sql;
-   create table PREPARED_DATA as
-   select distinct
-      ID, 
-      YEAR, 
-      MONTH,
-      group,
-      treat_group,
-      max(moud_flag) as moud_flag,
-      max(posttxt_flag) as posttxt_flag,
-      sum(od_flag) as od_flag,
-      max(fod_flag) as fod_flag,
-      min(preg_flag) as preg_flag
-   from PREPARED_DATA
-   group by ID, YEAR, MONTH;
-quit;
 
 proc sql;
    create table deaths_filtered as
@@ -3249,49 +3635,89 @@ proc sort data=PREPARED_DATA;
 by ID year month;
 run;
 
-proc sql;
+ proc sql;
     create table PREPARED_DATA as
     select a.*, 
+           b.YEAR_DEATH, 
+           b.MONTH_DEATH,
            case 
                when b.YEAR_DEATH = a.year and b.MONTH_DEATH = a.month then 1
                else 0
            end as death_flag
     from PREPARED_DATA as a
     left join deaths_filtered as b
-    on a.ID = b.ID
-    ;
+    on a.ID = b.ID;
 quit;
-	
+
+proc sql;
+    create table death_events as 
+    select ID, min(year*12 + month) as death_period
+    from PREPARED_DATA
+    where death_flag = 1
+    group by ID;
+quit;
+
+proc sql;
+    create table post_death_counts as
+    select 
+        sum(od_flag) as od_flag_after_death,
+        sum(fod_flag) as fod_flag_after_death
+    from PREPARED_DATA as a
+    inner join death_events as d
+    on a.ID = d.ID
+    where (a.year*12 + a.month) > d.death_period;
+quit;
+
+title "Counts of Events Occurring After Death";
+proc print data=post_death_counts noobs;
+run;
+title;
+
 data PREPARED_DATA;
     set PREPARED_DATA;
     retain death_flag_forward 0;
     by ID;
-    
+
+    if first.ID then death_flag_forward = 0;
     if death_flag = 1 then death_flag_forward = 1;
-    
-    if first.ID then death_flag_forward = death_flag;
-    
-    death_flag = death_flag_forward;
-	    
+
+    if death_flag_forward = 1 and (year > YEAR_DEATH or (year = YEAR_DEATH and month > MONTH_DEATH)) then delete;
+
     drop death_flag_forward;
 run;
-	
-data PREPARED_DATA;
-    set PREPARED_DATA;
-    if death_flag = 1 then delete;
-run;
-	
-proc sort data=PREPARED_DATA;
-	by ID year month;
-run;
-	
+
+/*=====================================*/
+/* 18. Overdoses by Pregnancy Status   */
+/*=====================================*/
+/* This section again repeats on above section by preparing the dataset for rate calculation. It begins by aggregating treatment data (`PREPARED_DATA`), ensuring unique records per individual and time period. 
+Next, person-time (`PERSON_TIME`) is calculated for each individual, and summary statistics on overdoses and fatal overdoses are generated (`PERIOD_SUMMARY`). 
+This summary is merged with demographic data (`PHDSPINE.DEMO`) to create the final dataset (`PERIOD_SUMMARY_FINAL`). Additional variables, including homelessness history and injection drug use evidence (`IDU_EVIDENCE`), are derived. 
+Age is computed, and individuals are grouped into age categories. The final step involves calculating overdose rates, stratified by various demographic and risk factors using a macro (`calculate_rates`). 
+Overdose rates and confidence intervals are computed for different groups, including pregnancy status, education, incarceration history, and homelessness */
+
+proc sql;
+   create table PREPARED_DATA_preg as
+   select distinct
+      ID, 
+      YEAR, 
+      MONTH,
+      group,
+      max(moud_flag) as moud_flag,
+      max(posttxt_flag) as posttxt_flag,
+      sum(od_flag) as od_flag,
+      max(fod_flag) as fod_flag,
+      min(preg_flag) as preg_flag
+   from PREPARED_DATA
+   group by ID, YEAR, MONTH;
+quit;
+
 proc sql;
     create table PERSON_TIME as
     select 
         ID, 
         group,
         count(month) as person_time
-    from PREPARED_DATA
+    from PREPARED_DATA_preg
     group by ID, group;
 quit;
 
@@ -3301,7 +3727,7 @@ proc sql;
           group,
           sum(od_flag) as overdoses,
           sum(fod_flag) as fatal_overdoses
-   from PREPARED_DATA
+   from PREPARED_DATA_preg
    group by ID, group;
 quit;
 	
@@ -3368,10 +3794,8 @@ run;
 DATA PERIOD_SUMMARY_FINAL;
     SET PERIOD_SUMMARY_FINAL;
 		    
-	    /* Calculate the age using the current year dynamically */
     age = YEAR(TODAY()) - YOB;
 		    
-	    /* Apply the format to create the age_grp variable */
     age_grp = PUT(age, age_grps_five.); 
 RUN;
 
@@ -3422,13 +3846,34 @@ quit;
 %calculate_rates(IDU_EVIDENCE, 'Overdoses by Pregnancy Group, Stratified by IDU_EVIDENCE');
 title;
 
+/*==========================================*/
+/* 19. Overdoses by MOUD Treatment Status   */
+/*==========================================*/
+/* The same process is repeated for `treat_group`, segmenting individuals based on treatment received. The output consists of tables summarizing overdoses, person-time, and risk factors, providing insights into overdose patterns among individuals with OUD. */
+
+proc sql;
+   create table PREPARED_DATA_treat as
+   select distinct
+      ID, 
+      YEAR, 
+      MONTH,
+      treat_group,
+      max(moud_flag) as moud_flag,
+      max(posttxt_flag) as posttxt_flag,
+      sum(od_flag) as od_flag,
+      max(fod_flag) as fod_flag,
+      min(preg_flag) as preg_flag
+   from PREPARED_DATA
+   group by ID, YEAR, MONTH;
+quit;
+
 proc sql;
     create table PERSON_TIME as
     select 
         ID, 
         treat_group,
         count(month) as person_time
-    from PREPARED_DATA
+    from PREPARED_DATA_treat
     group by ID, treat_group;
 quit;
 	
@@ -3438,7 +3883,7 @@ proc sql;
           treat_group,
           sum(od_flag) as overdoses,
           sum(fod_flag) as fatal_overdoses
-   from PREPARED_DATA
+   from PREPARED_DATA_treat
    group by ID, treat_group;
 quit;
 	
@@ -3505,10 +3950,8 @@ run;
 DATA PERIOD_SUMMARY_FINAL;
     SET PERIOD_SUMMARY_FINAL;
 		    
-	    /* Calculate the age using the current year dynamically */
     age = YEAR(TODAY()) - YOB;
 		    
-	    /* Apply the format to create the age_grp variable */
     age_grp = PUT(age, age_grps_five.); 
 RUN;
 
@@ -3535,6 +3978,7 @@ title &mytitle;
 proc sql;
     select 
         treat_group,
+        &group_by_vars,
         count(*) as total_n,
         sum(overdoses) as overdoses,
         sum(fatal_overdoses) as fatal_overdoses,
@@ -3550,13 +3994,13 @@ proc sql;
 quit;
 %mend calculate_rates;
 
-%calculate_rates(age_grp, 'Overdoses by Pregnancy Group, Stratified by Age');
-%calculate_rates(FINAL_RE, 'Overdoses by Pregnancy Group, Stratified by FINAL_RE');
-%calculate_rates(EDUCATION, 'Overdoses by Pregnancy Group, Stratified by EDUCATION');
-%calculate_rates(HOMELESS_HISTORY_GROUP, 'Overdoses by Pregnancy Group, Stratified by HOMELESS_HISTORY_GROUP');
-%calculate_rates(EVER_INCARCERATED, 'Overdoses by Pregnancy Group, Stratified by EVER_INCARCERATED');
-%calculate_rates(FOREIGN_BORN, 'Overdoses by Pregnancy Group, Stratified by FOREIGN_BORN');
-%calculate_rates(IDU_EVIDENCE, 'Overdoses by Pregnancy Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(age_grp, 'Overdoses by Treatment Group, Stratified by Age');
+%calculate_rates(FINAL_RE, 'Overdoses by Treatment Group, Stratified by FINAL_RE');
+%calculate_rates(EDUCATION, 'Overdoses by Treatment Group, Stratified by EDUCATION');
+%calculate_rates(HOMELESS_HISTORY_GROUP, 'Overdoses by Treatment Group, Stratified by HOMELESS_HISTORY_GROUP');
+%calculate_rates(EVER_INCARCERATED, 'Overdoses by Treatment Group, Stratified by EVER_INCARCERATED');
+%calculate_rates(FOREIGN_BORN, 'Overdoses by Treatment Group, Stratified by FOREIGN_BORN');
+%calculate_rates(IDU_EVIDENCE, 'Overdoses by Treatment Group, Stratified by IDU_EVIDENCE');
 title;
 
 title 'Overdoses, Overall';
