@@ -1312,7 +1312,7 @@ run;
 /*====================*/
 /* 1. Add Demographic Data */
 /*====================*/
-/* Aggregate Covariates: HOMELESS_EVER, county, FINAL_RE, EVER_INCARCERATED, HOMELESS_HISTORY, FOREIGN_BORN, LANGUAGE
+/* Aggregate Covariates: HOMELESS_EVER, county, FINAL_RE, EVER_INCARCERATED, FOREIGN_BORN, LANGUAGE
 EDUCATION, OCCUPATION_CODE, MENTAL_HEALTH_DIAG, IJI_DIAG, OTHER_SUBSTANCE_USE, HCV_DIAG, IDU_EVIDENCE */
 
 proc sql;
@@ -1963,13 +1963,72 @@ data FINAL_COHORT;
     set FINAL_COHORT;
     if EDUCATION = 1 then EDUCATION_GROUP = 'HS or less';
     else if EDUCATION = 2 then EDUCATION_GROUP = '13+ years';
-    else if EDUCATION = 3 then EDUCATION_GROUP = 'Other';
-    else if EDUCATION = 10 then EDUCATION_GROUP = 'Other';
-    else EDUCATION_GROUP = 'Missing or Unknown';
+    else EDUCATION_GROUP = 'Other or Unknown';
 run;
 
+data FINAL_COHORT;
+    set FINAL_COHORT;
+    if EVER_IDU_HCV_MAT = 1 or IJI_DIAG = 1 then IDU_EVIDENCE = 1;
+    else IDU_EVIDENCE = 0;
+run;
+
+/* ================================================= */
+/* 6. EXPLORATORY TABLES AND SUM STATS, OUD Cohort   */
+/* ================================================= */
+
+proc means data=FINAL_COHORT;
+    var oud_age;
+    where oud_age ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+proc means data=FINAL_COHORT;
+    var AGE_HCV;
+    where AGE_HCV ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+proc means data=FINAL_COHORT;
+    var AGE_BIRTH;
+    where AGE_BIRTH ne 9999;
+    output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
+run;
+
+/* ================================= */
+/* 7. TABLE 1, OUD Cohort            */
+/* ================================= */
+
+%macro Table1Freqs(var, format);
+    title "Table 1, OUD Cohort, Unstratified";
+    proc freq data=FINAL_COHORT;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table1Freqs(FINAL_RE, raceef.);
+%Table1Freqs(EVER_INCARCERATED, flagf.);
+%Table1Freqs(HOMELESS_HISTORY_GROUP);
+%Table1Freqs(LANGUAGE_SPOKEN_GROUP);
+%Table1Freqs(EDUCATION_GROUP);
+%Table1Freqs(FOREIGN_BORN, fbornf.);
+%Table1Freqs(HIV_DIAG, flagf.);
+%Table1Freqs(HCV_DIAG, flagf.);
+%Table1Freqs(EVER_IDU_HCV_MAT, flagf.);
+%Table1Freqs(mental_health_diag, flagf.);
+%Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
+%Table1Freqs(iji_diag, flagf.);
+%Table1Freqs(IDU_EVIDENCE, flagf.);
+%Table1Freqs(OCCUPATION_CODE, flagf.);
+%Table1Freqs(EVER_MOUD, flagf.);
+%Table1Freqs(INSURANCE_CAT);
+%Table1Freqs(LD_PAY, ld_pay_fmt.);
+%Table1Freqs(KOTELCHUCK);
+%Table1Freqs(prenat_site);
+%Table1Freqs(rural_group);
+
 /* ==================================== */
-/* 6. RESTRICT TO CONFIRMED HEPC CASES  */
+/* 8. RESTRICT TO CONFIRMED HEPC CASES  */
 /* ==================================== */
 
 data FINAL_HCV_COHORT;
@@ -1985,9 +2044,9 @@ QUIT;
 
 %put Number of unique IDs in FINAL_HCV_COHORT table: &num_unique_ids;
 
-/* ===================================== */
-/* 7. EXPLORATORY TABLES AND SUM STATS   */
-/* ===================================== */
+/* ================================================= */
+/* 9. EXPLORATORY TABLES AND SUM STATS, HCV Cohort   */
+/* ================================================= */
 
 proc means data=FINAL_HCV_COHORT;
     var oud_age;
@@ -2008,11 +2067,11 @@ proc means data=FINAL_HCV_COHORT;
 run;
 
 /* ================================= */
-/* 8. TABLES 1 AND 2                 */
+/* 10. TABLES 1 AND 2, HCV Cohort    */
 /* ================================= */
 
 %macro Table1Freqs(var, format);
-    title "Table 1, Unstratified";
+    title "Table 1, HCV Cohort, Unstratified";
     proc freq data=FINAL_HCV_COHORT;
         tables &var / missing norow nopercent nocol;
         format &var &format.;
@@ -2031,12 +2090,83 @@ run;
 %Table1Freqs(mental_health_diag, flagf.);
 %Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
 %Table1Freqs(iji_diag, flagf.);
+%Table1Freqs(IDU_EVIDENCE, flagf.);
 %Table1Freqs(OCCUPATION_CODE, flagf.);
 %Table1Freqs(EVER_MOUD, flagf.);
 %Table1Freqs(INSURANCE_CAT);
 %Table1Freqs(LD_PAY, ld_pay_fmt.);
 %Table1Freqs(KOTELCHUCK, kotel_fmt.);
 %Table1Freqs(prenat_site, prenat_site_fmt.);
+%Table1Freqs(rural_group);
+
+%macro Table1Freqs(var, format);
+
+    proc sort data=FINAL_HCV_COHORT;
+        by HCV_PRIMARY_DIAG;
+    run;
+    
+    title "Table 1, HCV Cohort, Stratified by HCV_PRIMARY_DIAG";
+    proc freq data=FINAL_HCV_COHORT;
+        by HCV_PRIMARY_DIAG;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table1Freqs(FINAL_RE, raceef.);
+%Table1Freqs(EVER_INCARCERATED, flagf.);
+%Table1Freqs(HOMELESS_HISTORY_GROUP);
+%Table1Freqs(LANGUAGE_SPOKEN_GROUP);
+%Table1Freqs(EDUCATION_GROUP);
+%Table1Freqs(FOREIGN_BORN, fbornf.);
+%Table1Freqs(HIV_DIAG, flagf.);
+%Table1Freqs(HCV_DIAG, flagf.);
+%Table1Freqs(EVER_IDU_HCV_MAT, flagf.);
+%Table1Freqs(mental_health_diag, flagf.);
+%Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
+%Table1Freqs(iji_diag, flagf.);
+%Table1Freqs(IDU_EVIDENCE, flagf.);
+%Table1Freqs(OCCUPATION_CODE, flagf.);
+%Table1Freqs(EVER_MOUD, flagf.);
+%Table1Freqs(INSURANCE_CAT);
+%Table1Freqs(LD_PAY, ld_pay_fmt.);
+%Table1Freqs(KOTELCHUCK);
+%Table1Freqs(prenat_site);
+%Table1Freqs(rural_group);
+
+%macro Table1Freqs(var, format);
+
+    proc sort data=FINAL_HCV_COHORT;
+        by DAA_START_INDICATOR;
+    run;
+    
+    title "Table 1, HCV Cohort, Stratified by DAA_START_INDICATOR";
+    proc freq data=FINAL_HCV_COHORT;
+        by DAA_START_INDICATOR;
+        tables &var / missing norow nopercent nocol;
+        format &var &format.;
+    run;
+%mend;
+
+%Table1Freqs(FINAL_RE, raceef.);
+%Table1Freqs(EVER_INCARCERATED, flagf.);
+%Table1Freqs(HOMELESS_HISTORY_GROUP);
+%Table1Freqs(LANGUAGE_SPOKEN_GROUP);
+%Table1Freqs(EDUCATION_GROUP);
+%Table1Freqs(FOREIGN_BORN, fbornf.);
+%Table1Freqs(HIV_DIAG, flagf.);
+%Table1Freqs(HCV_DIAG, flagf.);
+%Table1Freqs(EVER_IDU_HCV_MAT, flagf.);
+%Table1Freqs(mental_health_diag, flagf.);
+%Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
+%Table1Freqs(iji_diag, flagf.);
+%Table1Freqs(IDU_EVIDENCE, flagf.);
+%Table1Freqs(OCCUPATION_CODE, flagf.);
+%Table1Freqs(EVER_MOUD, flagf.);
+%Table1Freqs(INSURANCE_CAT);
+%Table1Freqs(LD_PAY, ld_pay_fmt.);
+%Table1Freqs(KOTELCHUCK);
+%Table1Freqs(prenat_site);
 %Table1Freqs(rural_group);
 
 %macro Table2Linkage(var, ref=);
@@ -2059,6 +2189,7 @@ run;
 %Table2Linkage(mental_health_diag, ref ='0');
 %Table2Linkage(OTHER_SUBSTANCE_USE, ref ='0');
 %Table2Linkage(iji_diag, ref ='0');
+%Table2Linkage(IDU_EVIDENCE, ref ='0');
 %Table2Linkage(OCCUPATION_CODE, ref ='0');
 %Table2Linkage(EVER_MOUD, ref ='0');
 %Table2Linkage(INSURANCE_CAT, ref ='Public');
@@ -2066,6 +2197,7 @@ run;
 %Table2Linkage(KOTELCHUCK, ref ='3');
 %Table2Linkage(prenat_site, ref ='1');
 %Table2Linkage(rural_group, ref ='Urban');
+%Table2Linkage(EVENT_YEAR_HCV, ref ='2017');
 
 %macro Table2Treatment(var, ref=);
 	title "Table 2, Crude";
@@ -2087,6 +2219,7 @@ run;
 %Table2Treatment(mental_health_diag, ref ='0');
 %Table2Treatment(OTHER_SUBSTANCE_USE, ref ='0');
 %Table2Treatment(iji_diag, ref ='0');
+%Table2Treatment(IDU_EVIDENCE, ref ='0');
 %Table2Treatment(OCCUPATION_CODE, ref ='0');
 %Table2Treatment(EVER_MOUD, ref ='0');
 %Table2Treatment(INSURANCE_CAT, ref ='Public');
@@ -2094,7 +2227,199 @@ run;
 %Table2Treatment(KOTELCHUCK, ref ='3');
 %Table2Treatment(prenat_site, ref ='1');
 %Table2Treatment(rural_group, ref ='Urban');
+%Table2Treatment(EVENT_YEAR_HCV, ref ='2017');
 title;
+
+data FINAL_HCV_COHORT;
+    set FINAL_HCV_COHORT;
+    if FINAL_RE NE 9 and EDUCATION_GROUP NE 'Other or Unknown' and HOMELESS_HISTORY_GROUP NE 'Unknown' and INSURANCE_CAT NE 'Other';
+run;
+
+/* TO CHOOSE ONE: Multivariable Logistic Regression for Linkage to Care */
+title "Table 2, MV";
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE HOMELESS_HISTORY_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
+    model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE EDUCATION_GROUP HOMELESS_HISTORY_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+
+/* TO CHOOSE ONE: Multivariable Logistic Regression for DAA Start */
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVER_INCARCERATED (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVER_INCARCERATED (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') mental_health_diag (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP mental_health_diag / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVER_INCARCERATED (ref='0') mental_health_diag (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVER_INCARCERATED mental_health_diag / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017') mental_health_diag (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVENT_YEAR_HCV mental_health_diag / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVER_INCARCERATED (ref='0') mental_health_diag (ref='0');
+    model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP EVER_INCARCERATED mental_health_diag / dist=binary link=logit solution oddsratio;
+run;
+title;
+
+/* ================================= */
+/* 10. Multivariable Models          */
+/* ================================= */
 
 /* ==================================================================== */
 /* Part 4: Calculate Linkage to Care and DAA Treatment Initiation Rates */
@@ -2922,6 +3247,7 @@ proc sql;
            cov.AGE_HCV,
            cov.EVER_IDU_HCV_MAT,
            cov.IJI_DIAG,
+           cov.rural_group,
            cov.EVENT_YEAR_HCV,
            cov.DAA_Timing
     from PERIOD_SUMMARY
@@ -3062,6 +3388,7 @@ quit;
 %calculate_rates(EVER_INCARCERATED, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by EVER_INCARCERATED');
 %calculate_rates(age_grp_five, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by Age');
 %calculate_rates(IDU_EVIDENCE, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(rural_group, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by rural_group');
 
 title 'Treatment Starts by DAA Timing';
 proc sql;
