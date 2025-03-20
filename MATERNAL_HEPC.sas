@@ -280,6 +280,15 @@ DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
 	ELSE oud_cm_ed_diag = 0;
 RUN;
 
+PROC SQL;
+    CREATE TABLE casemix_ed_diag AS
+    SELECT a.ID, a.ED_ID, a.ED_ADMIT_YEAR, b.oud_cm_ed_diag
+    FROM PHDCM.ED AS a
+    RIGHT JOIN casemix_ed_diag AS b
+    ON a.ED_ID = b.ED_ID
+    WHERE a.ED_ADMIT_YEAR IN &year;
+QUIT;
+
 /* ED_PROC */
 
 DATA casemix_ed_proc (KEEP= oud_cm_ed_proc ED_ID);
@@ -351,6 +360,15 @@ DATA hd_diag (KEEP= HD_ID oud_hd_diag);
 	ELSE oud_hd_diag = 0;
 RUN;
 
+PROC SQL;
+    CREATE TABLE hd_diag AS
+    SELECT a.ID, a.HD_ID, a.HD_ADMIT_YEAR, b.oud_hd_diag
+    FROM PHDCM.HD AS a
+    RIGHT JOIN hd_diag AS b
+    ON a.HD_ID = b.HD_ID
+    WHERE a.HD_ADMIT_YEAR IN &year;
+QUIT;
+
 /* HD PROC DATA */
 
 DATA hd_proc(KEEP= HD_ID oud_hd_proc);
@@ -412,9 +430,10 @@ DATA oo (KEEP= ID oud_oo year_oo);
     ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4 OO_CPT1-OO_CPT10 OO_PRINCIPALEXTERNAL_CAUSECODE;
     
     DO k = 1 TO dim(vars2);
-        IF SUBSTR(VNAME(vars2[k]), 1) = 'OO_PROC' THEN 
+        IF SUBSTR(VNAME(vars2[k]), 1) IN ('OO_PROC', 'OO_CPT') THEN DO;
             IF vars2[k] IN &PROC THEN 
                 cnt_oud_oo = cnt_oud_oo + 1;
+   END;
             ELSE IF vars2[k] IN &ICD THEN 
                 cnt_oud_oo = cnt_oud_oo + 1;
     END;
@@ -670,10 +689,26 @@ QUIT;
 /* 12. ADD PREGANANCY          */
 /*============================ */
 
-DATA all_births (keep = ID INFANT_DOB BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH LD_PAY KOTELCHUCK prenat_site);
-   SET PHDBIRTH.BIRTH_MOM (KEEP = ID INFANT_DOB YEAR_BIRTH AGE_BIRTH LD_PAY KOTELCHUCK prenat_site
+DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH);
+   SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH AGE_BIRTH
                             WHERE= (YEAR_BIRTH IN &year));
    BIRTH_INDICATOR = 1;
+RUN;
+
+data fetal_deaths_renamed;
+    set PHDFETAL.FETALDEATH;
+    rename FETAL_DEATH_YEAR = YEAR_BIRTH
+    	   MOTHER_AGE_FD = AGE_BIRTH;
+run;
+
+DATA fetal_deaths_renamed (keep = ID BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH);
+   SET fetal_deaths_renamed (KEEP = ID YEAR_BIRTH AGE_BIRTH
+                            WHERE= (YEAR_BIRTH IN &year));
+   BIRTH_INDICATOR = 1;
+RUN;
+
+DATA all_births;
+   SET all_births fetal_deaths_renamed;
 RUN;
 
 proc SQL;
@@ -705,22 +740,19 @@ SET oud_preg;
 run;
 
 proc sort data=all_births;
-    by ID INFANT_DOB;
+    by ID AGE_BIRTH;
 run;
 
 data birthsmoms_first;
     set all_births;
-    by ID INFANT_DOB;
+    by ID AGE_BIRTH;
     if first.ID;
 run;
 
 proc sql;
     create table oud_preg as
     select oud_preg.*,
-           birthsmoms_first.AGE_BIRTH,
-           birthsmoms_first.LD_PAY,
-           birthsmoms_first.KOTELCHUCK,
-           birthsmoms_first.prenat_site
+           birthsmoms_first.AGE_BIRTH
     from oud_preg
     left join birthsmoms_first
     on oud_preg.ID = birthsmoms_first.ID;
@@ -866,7 +898,7 @@ DATA HCV_STATUS;
         CONFIRMED_HCV_INDICATOR = (DISEASE_STATUS_HCV = 1);
         OUTPUT;
     END;
-KEEP ID AGE_HCV EVENT_MONTH_HCV EVENT_YEAR_HCV EVENT_DATE_HCV HCV_SEROPOSITIVE_INDICATOR CONFIRMED_HCV_INDICATOR;
+KEEP ID AGE_HCV EVENT_MONTH_HCV EVENT_YEAR_HCV EVENT_DATE_HCV HCV_SEROPOSITIVE_INDICATOR CONFIRMED_HCV_INDICATOR RES_CODE_HCV;
 RUN;
 
 PROC SQL;
@@ -1336,15 +1368,15 @@ select distinct FINAL_COHORT.ID,
        case
            when prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ECODE) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ADM_DIAGNOSIS) > 0 or
-                prxmatch('/^V(6|20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD1) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD1) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD2) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD3) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD4) > 0 or
-                prxmatch('/^E(88|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD5) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD5) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD6) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD7) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD8) > 0 or
-                prxmatch('/^E(0|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD9) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD9) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD10) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD11) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD12) > 0 or
@@ -1488,7 +1520,10 @@ proc sql;
         FINAL_COHORT.*, 
         (case when moud.ID is not null then 1 else 0 end) as EVER_MOUD
     from FINAL_COHORT
-    left join (select distinct ID from PHDSPINE.MOUD) as moud
+    left join 
+        (select distinct ID 
+         from PHDSPINE.MOUD3 
+         where DATE_START_YEAR_MOUD >= 2014) as moud
     on FINAL_COHORT.ID = moud.ID;
 quit;
 
@@ -1646,53 +1681,57 @@ quit;
    The final dataset includes ID, HCV event date, closest MOUD event date, insurance type, and provider city,  
    which are then merged with the FINAL_COHORT dataset to add context on healthcare access. */
 
-proc sort data=PHDHEPC.HCV;
+DATA hepc;
+    SET PHDHEPC.HCV;
+RUN;
+
+proc sort data=hepc;
     by ID EVENT_DATE_HCV;
 run;
 
-proc sort data=PHDAPCD.MOUD_MEDICAL;
-    by ID MED_FROM_DATE;
+DATA apcd;
+    SET PHDAPCD.ME_MTH;
+RUN;
+
+proc sort data=apcd;
+    by ID ME_MEM_YEAR ME_MEM_MONTH;
 run;
 
 data closest_date;
-length closest_past_type closest_future_type closest_type $2 closest_past_city closest_future_city $50;
-    merge PHDHEPC.HCV (in=a)
-          PHDAPCD.MOUD_MEDICAL (in=b);
+length closest_past_type closest_future_type closest_type $2;
+    merge hepc (in=a)
+          apcd (in=b);
     by ID;
     
     if a;
 
-    retain closest_past_date closest_past_type min_past_diff closest_past_city;
-    retain closest_future_date closest_future_type min_future_diff closest_future_city;
+    retain closest_past_date closest_past_type min_past_diff;
+    retain closest_future_date closest_future_type min_future_diff;
 
     if first.ID then do;
         closest_past_date = .;
         closest_past_type = "";
-        closest_past_city = "";
         min_past_diff = .;
         closest_future_date = .;
         closest_future_type = "";
-        closest_future_city = "";
         min_future_diff = .;
     end;
 
-    if MED_FROM_DATE < EVENT_DATE_HCV then do;
-        past_diff = EVENT_DATE_HCV - MED_FROM_DATE;
+    if ME_MEM_YEAR < EVENT_YEAR_HCV or (ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH < EVENT_MONTH_HCV) then do;
+        past_diff = (EVENT_YEAR_HCV - ME_MEM_YEAR) * 12 + (EVENT_MONTH_HCV - ME_MEM_MONTH);
         if min_past_diff = . or past_diff < min_past_diff then do;
             min_past_diff = past_diff;
-            closest_past_date = MED_FROM_DATE;
-            closest_past_type = MED_INSURANCE_TYPE;
-            closest_past_city = MED_PROV_CITY;
+            closest_past_date = mdy(ME_MEM_MONTH, 1, ME_MEM_YEAR);
+            closest_past_type = ME_INSURANCE_PRODUCT;
         end;
     end;
 
-    else do;
-        future_diff = MED_FROM_DATE - EVENT_DATE_HCV;
+    else if ME_MEM_YEAR > EVENT_YEAR_HCV or (ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH > EVENT_MONTH_HCV) then do;
+        future_diff = (ME_MEM_YEAR - EVENT_YEAR_HCV) * 12 + (ME_MEM_MONTH - EVENT_MONTH_HCV);
         if min_future_diff = . or future_diff < min_future_diff then do;
             min_future_diff = future_diff;
-            closest_future_date = MED_FROM_DATE;
-            closest_future_type = MED_INSURANCE_TYPE;
-            closest_future_city = MED_PROV_CITY;
+            closest_future_date = mdy(ME_MEM_MONTH, 1, ME_MEM_YEAR);
+            closest_future_type = ME_INSURANCE_PRODUCT;
         end;
     end;
 
@@ -1700,12 +1739,10 @@ length closest_past_type closest_future_type closest_type $2 closest_past_city c
         if min_past_diff ne . then do;
             closest_date = closest_past_date;
             closest_type = closest_past_type;
-            closest_city = closest_past_city;
         end;
         else do;
             closest_date = closest_future_date;
             closest_type = closest_future_type;
-            closest_city = closest_future_city;
         end;
         output;
     end;
@@ -1713,7 +1750,7 @@ run;
 
 data final_output;
     set closest_date;
-    keep ID EVENT_DATE_HCV closest_date closest_type closest_city;
+    keep ID EVENT_YEAR_HCV EVENT_MONTH_HCV closest_date closest_type 
 run;
 
 proc sort data=FINAL_COHORT;
@@ -1726,7 +1763,7 @@ run;
 
 data FINAL_COHORT;
     merge FINAL_COHORT (in=a)
-          final_output (keep=ID closest_type closest_city rename=(closest_type=INSURANCE) rename=(closest_city=MED_PROV_CITY));
+          final_output (keep=ID closest_type rename=(closest_type=INSURANCE));
     by ID;
     if a;
 run;
@@ -1737,7 +1774,7 @@ run;
 /* This section identifies the closest APCD claim relative to the OUD diagnosis year for individuals without HCV diagnoses.
    The `missing_hcv` dataset is created by selecting individuals from the FINAL_COHORT who do not have a match in the HCV dataset.  
    Using the sorted APCD_MEDICAL dataset, the closest MOUD event year before or after the OUD diagnosis year is retained for each individual.  
-   The closest event's attributes (insurance type and provider city) are captured, with preference given to past events if available.  
+   The closest event's attributes (insurance type and res zip) are captured, with preference given to past events if available.  
    Finally, the enriched data with closest MOUD event details is merged back into the FINAL_COHORT dataset for a comprehensive view of healthcare access. */
 
 proc sql;
@@ -1749,49 +1786,54 @@ proc sql;
     where h.ID is null;
 quit;
 
-proc sort data=PHDAPCD.MOUD_MEDICAL;
-    by ID MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH;
+DATA apcd;
+    SET PHDAPCD.ME_MTH;
+RUN;
+
+proc sort data=apcd;
+    by ID ME_MEM_YEAR ME_MEM_MONTH;
 run;
 
 data closest_date;
-length closest_past_type closest_future_type closest_type $2 closest_past_city closest_future_city $50;
+length closest_past_type closest_future_type closest_type $2 closest_zip $10;
     merge missing_hcv (in=a)
-          PHDAPCD.MOUD_MEDICAL (in=b);
+          apcd (in=b);
     by ID;
     
     if a;
 
-    retain closest_past_date closest_past_type min_past_diff closest_past_city;
-    retain closest_future_date closest_future_type min_future_diff closest_future_city;
+    retain closest_past_date closest_past_type min_past_diff closest_past_zip;
+    retain closest_future_date closest_future_type min_future_diff closest_future_zip;
 
     if first.ID then do;
         closest_past_date = .;
         closest_past_type = "";
-        closest_past_city = "";
         min_past_diff = .;
+        closest_past_zip = "";
         closest_future_date = .;
         closest_future_type = "";
-        closest_future_city = "";
         min_future_diff = .;
+        closest_future_zip = "";
     end;
 
-    if MED_FROM_DATE_YEAR < OUD_DIAGNOSIS_YEAR then do;
-        past_diff = OUD_DIAGNOSIS_YEAR - MED_FROM_DATE_YEAR;
+    /* Compare the months and years for past and future dates */
+    if ME_MEM_YEAR < EVENT_YEAR_HCV or (ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH < EVENT_MONTH_HCV) then do;
+        past_diff = (EVENT_YEAR_HCV - ME_MEM_YEAR) * 12 + (EVENT_MONTH_HCV - ME_MEM_MONTH);
         if min_past_diff = . or past_diff < min_past_diff then do;
             min_past_diff = past_diff;
-            closest_past_date = MED_FROM_DATE_YEAR;
-            closest_past_type = MED_INSURANCE_TYPE;
-            closest_past_city = MED_PROV_CITY;
+            closest_past_date = mdy(ME_MEM_MONTH, 1, ME_MEM_YEAR);  /* create a date from year and month */
+            closest_past_type = ME_INSURANCE_PRODUCT;
+            closest_past_zip = RES_ZIP_APCD_ME;
         end;
     end;
 
-    else do;
-        future_diff = MED_FROM_DATE_YEAR - OUD_DIAGNOSIS_YEAR;
+    else if ME_MEM_YEAR > EVENT_YEAR_HCV or (ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH > EVENT_MONTH_HCV) then do;
+        future_diff = (ME_MEM_YEAR - EVENT_YEAR_HCV) * 12 + (ME_MEM_MONTH - EVENT_MONTH_HCV);
         if min_future_diff = . or future_diff < min_future_diff then do;
             min_future_diff = future_diff;
-            closest_future_date = MED_FROM_DATE_YEAR;
-            closest_future_type = MED_INSURANCE_TYPE;
-            closest_future_city = MED_PROV_CITY;
+            closest_future_date = mdy(ME_MEM_MONTH, 1, ME_MEM_YEAR);
+            closest_future_type = ME_INSURANCE_PRODUCT;
+            closest_future_zip = RES_ZIP_APCD_ME;
         end;
     end;
 
@@ -1799,12 +1841,12 @@ length closest_past_type closest_future_type closest_type $2 closest_past_city c
         if min_past_diff ne . then do;
             closest_date = closest_past_date;
             closest_type = closest_past_type;
-            closest_city = closest_past_city;
+            closest_zip = closest_past_zip;
         end;
         else do;
             closest_date = closest_future_date;
             closest_type = closest_future_type;
-            closest_city = closest_future_city;
+            closest_zip = closest_future_zip;
         end;
         output;
     end;
@@ -1812,7 +1854,7 @@ run;
 
 data final_output;
     set closest_date;
-    keep ID closest_type closest_city;
+    keep ID closest_type closest_zip;
 run;
 
 proc sort data=FINAL_COHORT;
@@ -1825,7 +1867,7 @@ run;
 
 data FINAL_COHORT;
     merge FINAL_COHORT (in=a)
-          final_output (keep=ID closest_type closest_city rename=(closest_type=INSURANCE) rename=(closest_city=MED_PROV_CITY));
+          final_output (keep=ID closest_type closest_zip rename=(closest_type=INSURANCE));
     by ID;
     if a;
 run;
@@ -1899,14 +1941,786 @@ run;
 data FINAL_COHORT;
    set FINAL_COHORT;
    length INSURANCE_CAT $10.;
-   if INSURANCE in ('12', '13', '14', '15', 'CE', 'CI', 'HM') then INSURANCE_CAT = 'Private';
-   else if INSURANCE in ('16', '20, 21', '30', 'HN', 'IC', 'MA', 'MB', 'MC', 'MD', 'MO', 'MP', 'MS', 'QM', 'SC') then INSURANCE_CAT = 'Public';
-   else INSURANCE_CAT = 'Other';
+   if INSURANCE = 1 then INSURANCE_CAT = 'Commercial';
+   else if INSURANCE = 2 then INSURANCE_CAT = 'Medicaid';
+   else if INSURANCE = 3 then INSURANCE_CAT = 'Medicare';
+   else INSURANCE_CAT = 'Other/Missing';
+run;
+
+/* Recategorize zip into town/city code for OUD cohort (HCV cohort has direct pull from HEPC dataset) */
+data FINAL_COHORT;
+   set FINAL_COHORT;
+     if not missing(closest_zip) then do;
+	 if closest_zip = "02351" then RES_CODE_HCV = 1;
+else if closest_zip = "01718" then RES_CODE_HCV = 2;
+else if closest_zip = "01720" then RES_CODE_HCV = 2;
+else if closest_zip = "02743" then RES_CODE_HCV = 3;
+else if closest_zip = "01220" then RES_CODE_HCV = 4;
+else if closest_zip = "01001" then RES_CODE_HCV = 5;
+else if closest_zip = "01030" then RES_CODE_HCV = 5;
+else if closest_zip = "01230" then RES_CODE_HCV = 6;
+else if closest_zip = "01913" then RES_CODE_HCV = 7;
+else if closest_zip = "01003" then RES_CODE_HCV = 8;
+else if closest_zip = "01004" then RES_CODE_HCV = 8;
+else if closest_zip = "01059" then RES_CODE_HCV = 8;
+else if closest_zip = "01810" then RES_CODE_HCV = 9;
+else if closest_zip = "01812" then RES_CODE_HCV = 9;
+else if closest_zip = "01899" then RES_CODE_HCV = 9;
+else if closest_zip = "02174" then RES_CODE_HCV = 10;
+else if closest_zip = "02175" then RES_CODE_HCV = 10;
+else if closest_zip = "02474" then RES_CODE_HCV = 10;
+else if closest_zip = "02475" then RES_CODE_HCV = 10;
+else if closest_zip = "02476" then RES_CODE_HCV = 10;
+else if closest_zip = "01430" then RES_CODE_HCV = 11;
+else if closest_zip = "01466" then RES_CODE_HCV = 11;
+else if closest_zip = "01431" then RES_CODE_HCV = 12;
+else if closest_zip = "01330" then RES_CODE_HCV = 13;
+else if closest_zip = "01721" then RES_CODE_HCV = 14;
+else if closest_zip = "01331" then RES_CODE_HCV = 15;
+else if closest_zip = "02703" then RES_CODE_HCV = 16;
+else if closest_zip = "02760" then RES_CODE_HCV = 16;
+else if closest_zip = "02763" then RES_CODE_HCV = 16;
+else if closest_zip = "01501" then RES_CODE_HCV = 17;
+else if closest_zip = "02322" then RES_CODE_HCV = 18;
+else if closest_zip = "01432" then RES_CODE_HCV = 19;
+else if closest_zip = "01433" then RES_CODE_HCV = 19;
+else if closest_zip = "02601" then RES_CODE_HCV = 20;
+else if closest_zip = "02630" then RES_CODE_HCV = 20;
+else if closest_zip = "02632" then RES_CODE_HCV = 20;
+else if closest_zip = "02634" then RES_CODE_HCV = 20;
+else if closest_zip = "02635" then RES_CODE_HCV = 20;
+else if closest_zip = "02636" then RES_CODE_HCV = 20;
+else if closest_zip = "02637" then RES_CODE_HCV = 20;
+else if closest_zip = "02647" then RES_CODE_HCV = 20;
+else if closest_zip = "02648" then RES_CODE_HCV = 20;
+else if closest_zip = "02655" then RES_CODE_HCV = 20;
+else if closest_zip = "02668" then RES_CODE_HCV = 20;
+else if closest_zip = "02672" then RES_CODE_HCV = 20;
+else if closest_zip = "01005" then RES_CODE_HCV = 21;
+else if closest_zip = "01074" then RES_CODE_HCV = 21;
+else if closest_zip = "01223" then RES_CODE_HCV = 22;
+else if closest_zip = "01730" then RES_CODE_HCV = 23;
+else if closest_zip = "01731" then RES_CODE_HCV = 23;
+else if closest_zip = "01007" then RES_CODE_HCV = 24;
+else if closest_zip = "02019" then RES_CODE_HCV = 25;
+else if closest_zip = "02178" then RES_CODE_HCV = 26;
+else if closest_zip = "02179" then RES_CODE_HCV = 26;
+else if closest_zip = "02478" then RES_CODE_HCV = 26;
+else if closest_zip = "02479" then RES_CODE_HCV = 26;
+else if closest_zip = "02779" then RES_CODE_HCV = 27;
+else if closest_zip = "01503" then RES_CODE_HCV = 28;
+else if closest_zip = "01337" then RES_CODE_HCV = 29;
+else if closest_zip = "01915" then RES_CODE_HCV = 30;
+else if closest_zip = "01965" then RES_CODE_HCV = 30;
+else if closest_zip = "01821" then RES_CODE_HCV = 31;
+else if closest_zip = "01822" then RES_CODE_HCV = 31;
+else if closest_zip = "01862" then RES_CODE_HCV = 31;
+else if closest_zip = "01865" then RES_CODE_HCV = 31;
+else if closest_zip = "01866" then RES_CODE_HCV = 31;
+else if closest_zip = "01504" then RES_CODE_HCV = 32;
+else if closest_zip = "01008" then RES_CODE_HCV = 33;
+else if closest_zip = "01740" then RES_CODE_HCV = 34;
+else if closest_zip = "02101" then RES_CODE_HCV = 35;
+else if closest_zip = "02102" then RES_CODE_HCV = 35;
+else if closest_zip = "02103" then RES_CODE_HCV = 35;
+else if closest_zip = "02104" then RES_CODE_HCV = 35;
+else if closest_zip = "02105" then RES_CODE_HCV = 35;
+else if closest_zip = "02106" then RES_CODE_HCV = 35;
+else if closest_zip = "02107" then RES_CODE_HCV = 35;
+else if closest_zip = "02108" then RES_CODE_HCV = 35;
+else if closest_zip = "02109" then RES_CODE_HCV = 35;
+else if closest_zip = "02110" then RES_CODE_HCV = 35;
+else if closest_zip = "02111" then RES_CODE_HCV = 35;
+else if closest_zip = "02112" then RES_CODE_HCV = 35;
+else if closest_zip = "02113" then RES_CODE_HCV = 35;
+else if closest_zip = "02114" then RES_CODE_HCV = 35;
+else if closest_zip = "02115" then RES_CODE_HCV = 35;
+else if closest_zip = "02116" then RES_CODE_HCV = 35;
+else if closest_zip = "02117" then RES_CODE_HCV = 35;
+else if closest_zip = "02118" then RES_CODE_HCV = 35;
+else if closest_zip = "02119" then RES_CODE_HCV = 35;
+else if closest_zip = "02120" then RES_CODE_HCV = 35;
+else if closest_zip = "02121" then RES_CODE_HCV = 35;
+else if closest_zip = "02122" then RES_CODE_HCV = 35;
+else if closest_zip = "02123" then RES_CODE_HCV = 35;
+else if closest_zip = "02124" then RES_CODE_HCV = 35;
+else if closest_zip = "02125" then RES_CODE_HCV = 35;
+else if closest_zip = "02126" then RES_CODE_HCV = 35;
+else if closest_zip = "02127" then RES_CODE_HCV = 35;
+else if closest_zip = "02128" then RES_CODE_HCV = 35;
+else if closest_zip = "02129" then RES_CODE_HCV = 35;
+else if closest_zip = "02130" then RES_CODE_HCV = 35;
+else if closest_zip = "02131" then RES_CODE_HCV = 35;
+else if closest_zip = "02132" then RES_CODE_HCV = 35;
+else if closest_zip = "02133" then RES_CODE_HCV = 35;
+else if closest_zip = "02134" then RES_CODE_HCV = 35;
+else if closest_zip = "02135" then RES_CODE_HCV = 35;
+else if closest_zip = "02136" then RES_CODE_HCV = 35;
+else if closest_zip = "02137" then RES_CODE_HCV = 35;
+else if closest_zip = "02163" then RES_CODE_HCV = 35;
+else if closest_zip = "02196" then RES_CODE_HCV = 35;
+else if closest_zip = "02199" then RES_CODE_HCV = 35;
+else if closest_zip = "02201" then RES_CODE_HCV = 35;
+else if closest_zip = "02202" then RES_CODE_HCV = 35;
+else if closest_zip = "02203" then RES_CODE_HCV = 35;
+else if closest_zip = "02204" then RES_CODE_HCV = 35;
+else if closest_zip = "02205" then RES_CODE_HCV = 35;
+else if closest_zip = "02206" then RES_CODE_HCV = 35;
+else if closest_zip = "02207" then RES_CODE_HCV = 35;
+else if closest_zip = "02208" then RES_CODE_HCV = 35;
+else if closest_zip = "02209" then RES_CODE_HCV = 35;
+else if closest_zip = "02210" then RES_CODE_HCV = 35;
+else if closest_zip = "02211" then RES_CODE_HCV = 35;
+else if closest_zip = "02212" then RES_CODE_HCV = 35;
+else if closest_zip = "02215" then RES_CODE_HCV = 35;
+else if closest_zip = "02216" then RES_CODE_HCV = 35;
+else if closest_zip = "02217" then RES_CODE_HCV = 35;
+else if closest_zip = "02222" then RES_CODE_HCV = 35;
+else if closest_zip = "02241" then RES_CODE_HCV = 35;
+else if closest_zip = "02266" then RES_CODE_HCV = 35;
+else if closest_zip = "02293" then RES_CODE_HCV = 35;
+else if closest_zip = "02295" then RES_CODE_HCV = 35;
+else if closest_zip = "02297" then RES_CODE_HCV = 35;
+else if closest_zip = "02562" then RES_CODE_HCV = 36;
+else if closest_zip = "02532" then RES_CODE_HCV = 36;
+else if closest_zip = "02534" then RES_CODE_HCV = 36;
+else if closest_zip = "02553" then RES_CODE_HCV = 36;
+else if closest_zip = "02559" then RES_CODE_HCV = 36;
+else if closest_zip = "02561" then RES_CODE_HCV = 36;
+else if closest_zip = "01719" then RES_CODE_HCV = 37;
+else if closest_zip = "01885" then RES_CODE_HCV = 38;
+else if closest_zip = "01921" then RES_CODE_HCV = 38;
+else if closest_zip = "01505" then RES_CODE_HCV = 39;
+else if closest_zip = "02184" then RES_CODE_HCV = 40;
+else if closest_zip = "02185" then RES_CODE_HCV = 40;
+else if closest_zip = "02631" then RES_CODE_HCV = 41;
+else if closest_zip = "02324" then RES_CODE_HCV = 42;
+else if closest_zip = "02325" then RES_CODE_HCV = 42;
+else if closest_zip = "01010" then RES_CODE_HCV = 43;
+else if closest_zip = "02301" then RES_CODE_HCV = 44;
+else if closest_zip = "02302" then RES_CODE_HCV = 44;
+else if closest_zip = "02303" then RES_CODE_HCV = 44;
+else if closest_zip = "02304" then RES_CODE_HCV = 44;
+else if closest_zip = "02401" then RES_CODE_HCV = 44;
+else if closest_zip = "02402" then RES_CODE_HCV = 44;
+else if closest_zip = "02403" then RES_CODE_HCV = 44;
+else if closest_zip = "02404" then RES_CODE_HCV = 44;
+else if closest_zip = "02405" then RES_CODE_HCV = 44;
+else if closest_zip = "01506" then RES_CODE_HCV = 45;
+else if closest_zip = "02146" then RES_CODE_HCV = 46;
+else if closest_zip = "02147" then RES_CODE_HCV = 46;
+else if closest_zip = "02445" then RES_CODE_HCV = 46;
+else if closest_zip = "02446" then RES_CODE_HCV = 46;
+else if closest_zip = "02447" then RES_CODE_HCV = 46;
+else if closest_zip = "02467" then RES_CODE_HCV = 46;
+else if closest_zip = "01338" then RES_CODE_HCV = 47;
+else if closest_zip = "01803" then RES_CODE_HCV = 48;
+else if closest_zip = "01805" then RES_CODE_HCV = 48;
+else if closest_zip = "02138" then RES_CODE_HCV = 49;
+else if closest_zip = "02139" then RES_CODE_HCV = 49;
+else if closest_zip = "02140" then RES_CODE_HCV = 49;
+else if closest_zip = "02141" then RES_CODE_HCV = 49;
+else if closest_zip = "02142" then RES_CODE_HCV = 49;
+else if closest_zip = "02238" then RES_CODE_HCV = 49;
+else if closest_zip = "02239" then RES_CODE_HCV = 49;
+else if closest_zip = "02021" then RES_CODE_HCV = 50;
+else if closest_zip = "01741" then RES_CODE_HCV = 51;
+else if closest_zip = "02330" then RES_CODE_HCV = 52;
+else if closest_zip = "02355" then RES_CODE_HCV = 52;
+else if closest_zip = "02366" then RES_CODE_HCV = 52;
+else if closest_zip = "01339" then RES_CODE_HCV = 53;
+else if closest_zip = "01507" then RES_CODE_HCV = 54;
+else if closest_zip = "01508" then RES_CODE_HCV = 54;
+else if closest_zip = "01509" then RES_CODE_HCV = 54;
+else if closest_zip = "02633" then RES_CODE_HCV = 55;
+else if closest_zip = "02650" then RES_CODE_HCV = 55;
+else if closest_zip = "02659" then RES_CODE_HCV = 55;
+else if closest_zip = "02669" then RES_CODE_HCV = 55;
+else if closest_zip = "01824" then RES_CODE_HCV = 56;
+else if closest_zip = "01863" then RES_CODE_HCV = 56;
+else if closest_zip = "02150" then RES_CODE_HCV = 57;
+else if closest_zip = "01225" then RES_CODE_HCV = 58;
+else if closest_zip = "01011" then RES_CODE_HCV = 59;
+else if closest_zip = "01050" then RES_CODE_HCV = 143;
+else if closest_zip = "01012" then RES_CODE_HCV = 60;
+else if closest_zip = "01026" then RES_CODE_HCV = 60;
+else if closest_zip = "01084" then RES_CODE_HCV = 60;
+else if closest_zip = "01013" then RES_CODE_HCV = 61;
+else if closest_zip = "01014" then RES_CODE_HCV = 61;
+else if closest_zip = "01020" then RES_CODE_HCV = 61;
+else if closest_zip = "01021" then RES_CODE_HCV = 61;
+else if closest_zip = "01022" then RES_CODE_HCV = 61;
+else if closest_zip = "02535" then RES_CODE_HCV = 62;
+else if closest_zip = "02552" then RES_CODE_HCV = 62;
+else if closest_zip = "01247" then RES_CODE_HCV = 63;
+else if closest_zip = "01510" then RES_CODE_HCV = 64;
+else if closest_zip = "02025" then RES_CODE_HCV = 65;
+else if closest_zip = "01340" then RES_CODE_HCV = 66;
+else if closest_zip = "01369" then RES_CODE_HCV = 66;
+else if closest_zip = "01742" then RES_CODE_HCV = 67;
+else if closest_zip = "01341" then RES_CODE_HCV = 68;
+else if closest_zip = "01226" then RES_CODE_HCV = 70;
+else if closest_zip = "01227" then RES_CODE_HCV = 70;
+else if closest_zip = "01923" then RES_CODE_HCV = 71;
+else if closest_zip = "01937" then RES_CODE_HCV = 71;
+else if closest_zip = "02714" then RES_CODE_HCV = 72;
+else if closest_zip = "02747" then RES_CODE_HCV = 72;
+else if closest_zip = "02748" then RES_CODE_HCV = 72;
+else if closest_zip = "02026" then RES_CODE_HCV = 73;
+else if closest_zip = "02027" then RES_CODE_HCV = 73;
+else if closest_zip = "01342" then RES_CODE_HCV = 74;
+else if closest_zip = "02638" then RES_CODE_HCV = 75;
+else if closest_zip = "02639" then RES_CODE_HCV = 75;
+else if closest_zip = "02641" then RES_CODE_HCV = 75;
+else if closest_zip = "02660" then RES_CODE_HCV = 75;
+else if closest_zip = "02670" then RES_CODE_HCV = 75;
+else if closest_zip = "02715" then RES_CODE_HCV = 76;
+else if closest_zip = "02754" then RES_CODE_HCV = 76;
+else if closest_zip = "02764" then RES_CODE_HCV = 76;
+else if closest_zip = "01516" then RES_CODE_HCV = 77;
+else if closest_zip = "02030" then RES_CODE_HCV = 78;
+else if closest_zip = "01826" then RES_CODE_HCV = 79;
+else if closest_zip = "01571" then RES_CODE_HCV = 80;
+else if closest_zip = "01827" then RES_CODE_HCV = 81;
+else if closest_zip = "02331" then RES_CODE_HCV = 82;
+else if closest_zip = "02332" then RES_CODE_HCV = 82;
+else if closest_zip = "02333" then RES_CODE_HCV = 83;
+else if closest_zip = "02337" then RES_CODE_HCV = 83;
+else if closest_zip = "01515" then RES_CODE_HCV = 84;
+else if closest_zip = "01028" then RES_CODE_HCV = 85;
+else if closest_zip = "02642" then RES_CODE_HCV = 86;
+else if closest_zip = "02651" then RES_CODE_HCV = 86;
+else if closest_zip = "01027" then RES_CODE_HCV = 87;
+else if closest_zip = "02334" then RES_CODE_HCV = 88;
+else if closest_zip = "02356" then RES_CODE_HCV = 88;
+else if closest_zip = "02357" then RES_CODE_HCV = 88;
+else if closest_zip = "02375" then RES_CODE_HCV = 88;
+else if closest_zip = "02539" then RES_CODE_HCV = 89;
+else if closest_zip = "01252" then RES_CODE_HCV = 90;
+else if closest_zip = "01344" then RES_CODE_HCV = 91;
+else if closest_zip = "01929" then RES_CODE_HCV = 92;
+else if closest_zip = "02149" then RES_CODE_HCV = 93;
+else if closest_zip = "02719" then RES_CODE_HCV = 94;
+else if closest_zip = "02720" then RES_CODE_HCV = 95;
+else if closest_zip = "02721" then RES_CODE_HCV = 95;
+else if closest_zip = "02722" then RES_CODE_HCV = 95;
+else if closest_zip = "02723" then RES_CODE_HCV = 95;
+else if closest_zip = "02724" then RES_CODE_HCV = 95;
+else if closest_zip = "02536" then RES_CODE_HCV = 96;
+else if closest_zip = "02540" then RES_CODE_HCV = 96;
+else if closest_zip = "02541" then RES_CODE_HCV = 96;
+else if closest_zip = "02543" then RES_CODE_HCV = 96;
+else if closest_zip = "02556" then RES_CODE_HCV = 96;
+else if closest_zip = "02565" then RES_CODE_HCV = 96;
+else if closest_zip = "02574" then RES_CODE_HCV = 96;
+else if closest_zip = "01420" then RES_CODE_HCV = 97;
+else if closest_zip = "01343" then RES_CODE_HCV = 98;
+else if closest_zip = "02035" then RES_CODE_HCV = 99;
+else if closest_zip = "01701" then RES_CODE_HCV = 100;
+else if closest_zip = "01702" then RES_CODE_HCV = 100;
+else if closest_zip = "01703" then RES_CODE_HCV = 100;
+else if closest_zip = "01705" then RES_CODE_HCV = 100;
+else if closest_zip = "02038" then RES_CODE_HCV = 101;
+else if closest_zip = "02702" then RES_CODE_HCV = 102;
+else if closest_zip = "02717" then RES_CODE_HCV = 102;
+else if closest_zip = "01440" then RES_CODE_HCV = 103;
+else if closest_zip = "01441" then RES_CODE_HCV = 103;
+else if closest_zip = "02535" then RES_CODE_HCV = 104;
+else if closest_zip = "01833" then RES_CODE_HCV = 105;
+else if closest_zip = "01354" then RES_CODE_HCV = 106;
+else if closest_zip = "01376" then RES_CODE_HCV = 192;
+else if closest_zip = "01930" then RES_CODE_HCV = 107;
+else if closest_zip = "01931" then RES_CODE_HCV = 107;
+else if closest_zip = "01032" then RES_CODE_HCV = 108;
+else if closest_zip = "01096" then RES_CODE_HCV = 108;
+else if closest_zip = "02713" then RES_CODE_HCV = 109;
+else if closest_zip = "01519" then RES_CODE_HCV = 110;
+else if closest_zip = "01536" then RES_CODE_HCV = 110;
+else if closest_zip = "01560" then RES_CODE_HCV = 110;
+else if closest_zip = "01033" then RES_CODE_HCV = 111;
+else if closest_zip = "01034" then RES_CODE_HCV = 112;
+else if closest_zip = "01230" then RES_CODE_HCV = 113;
+else if closest_zip = "01244" then RES_CODE_HCV = 203;
+else if closest_zip = "01301" then RES_CODE_HCV = 114;
+else if closest_zip = "01302" then RES_CODE_HCV = 114;
+else if closest_zip = "01450" then RES_CODE_HCV = 115;
+else if closest_zip = "01470" then RES_CODE_HCV = 115;
+else if closest_zip = "01471" then RES_CODE_HCV = 115;
+else if closest_zip = "01472" then RES_CODE_HCV = 115;
+else if closest_zip = "01834" then RES_CODE_HCV = 116;
+else if closest_zip = "01035" then RES_CODE_HCV = 117;
+else if closest_zip = "02338" then RES_CODE_HCV = 118;
+else if closest_zip = "01936" then RES_CODE_HCV = 119;
+else if closest_zip = "01982" then RES_CODE_HCV = 119;
+else if closest_zip = "01036" then RES_CODE_HCV = 120;
+else if closest_zip = "01201" then RES_CODE_HCV = 121;
+else if closest_zip = "02339" then RES_CODE_HCV = 122;
+else if closest_zip = "02340" then RES_CODE_HCV = 122;
+else if closest_zip = "02341" then RES_CODE_HCV = 123;
+else if closest_zip = "02350" then RES_CODE_HCV = 123;
+else if closest_zip = "01031" then RES_CODE_HCV = 124;
+else if closest_zip = "01037" then RES_CODE_HCV = 124;
+else if closest_zip = "01094" then RES_CODE_HCV = 124;
+else if closest_zip = "01434" then RES_CODE_HCV = 125;
+else if closest_zip = "01451" then RES_CODE_HCV = 125;
+else if closest_zip = "01467" then RES_CODE_HCV = 125;
+else if closest_zip = "02645" then RES_CODE_HCV = 126;
+else if closest_zip = "02646" then RES_CODE_HCV = 126;
+else if closest_zip = "02661" then RES_CODE_HCV = 126;
+else if closest_zip = "02671" then RES_CODE_HCV = 126;
+else if closest_zip = "01038" then RES_CODE_HCV = 127;
+else if closest_zip = "01066" then RES_CODE_HCV = 127;
+else if closest_zip = "01088" then RES_CODE_HCV = 127;
+else if closest_zip = "01830" then RES_CODE_HCV = 128;
+else if closest_zip = "01831" then RES_CODE_HCV = 128;
+else if closest_zip = "01832" then RES_CODE_HCV = 128;
+else if closest_zip = "01835" then RES_CODE_HCV = 128;
+else if closest_zip = "01339" then RES_CODE_HCV = 128;
+else if closest_zip = "01070" then RES_CODE_HCV = 129;
+else if closest_zip = "01346" then RES_CODE_HCV = 130;
+else if closest_zip = "02043" then RES_CODE_HCV = 131;
+else if closest_zip = "02044" then RES_CODE_HCV = 131;
+else if closest_zip = "01226" then RES_CODE_HCV = 132;
+else if closest_zip = "02343" then RES_CODE_HCV = 133;
+else if closest_zip = "01520" then RES_CODE_HCV = 134;
+else if closest_zip = "01522" then RES_CODE_HCV = 134;
+else if closest_zip = "01521" then RES_CODE_HCV = 135;
+else if closest_zip = "01746" then RES_CODE_HCV = 136;
+else if closest_zip = "01040" then RES_CODE_HCV = 137;
+else if closest_zip = "01041" then RES_CODE_HCV = 137;
+else if closest_zip = "01747" then RES_CODE_HCV = 138;
+else if closest_zip = "01748" then RES_CODE_HCV = 139;
+else if closest_zip = "01784" then RES_CODE_HCV = 139;
+else if closest_zip = "01452" then RES_CODE_HCV = 140;
+else if closest_zip = "01749" then RES_CODE_HCV = 141;
+else if closest_zip = "02045" then RES_CODE_HCV = 142;
+else if closest_zip = "01050" then RES_CODE_HCV = 143;
+else if closest_zip = "01938" then RES_CODE_HCV = 144;
+else if closest_zip = "02364" then RES_CODE_HCV = 145;
+else if closest_zip = "02347" then RES_CODE_HCV = 146;
+else if closest_zip = "01523" then RES_CODE_HCV = 147;
+else if closest_zip = "01561" then RES_CODE_HCV = 147;
+else if closest_zip = "01224" then RES_CODE_HCV = 148;
+else if closest_zip = "01237" then RES_CODE_HCV = 148;
+else if closest_zip = "01840" then RES_CODE_HCV = 149;
+else if closest_zip = "01841" then RES_CODE_HCV = 149;
+else if closest_zip = "01842" then RES_CODE_HCV = 149;
+else if closest_zip = "01843" then RES_CODE_HCV = 149;
+else if closest_zip = "01238" then RES_CODE_HCV = 150;
+else if closest_zip = "01260" then RES_CODE_HCV = 150;
+else if closest_zip = "01524" then RES_CODE_HCV = 151;
+else if closest_zip = "01542" then RES_CODE_HCV = 151;
+else if closest_zip = "01611" then RES_CODE_HCV = 151;
+else if closest_zip = "01240" then RES_CODE_HCV = 152;
+else if closest_zip = "01242" then RES_CODE_HCV = 152;
+else if closest_zip = "01453" then RES_CODE_HCV = 153;
+else if closest_zip = "01054" then RES_CODE_HCV = 154;
+else if closest_zip = "02173" then RES_CODE_HCV = 155;
+else if closest_zip = "02420" then RES_CODE_HCV = 155;
+else if closest_zip = "02421" then RES_CODE_HCV = 155;
+else if closest_zip = "01301" then RES_CODE_HCV = 156;
+else if closest_zip = "01773" then RES_CODE_HCV = 157;
+else if closest_zip = "01460" then RES_CODE_HCV = 158;
+else if closest_zip = "01106" then RES_CODE_HCV = 159;
+else if closest_zip = "01116" then RES_CODE_HCV = 159;
+else if closest_zip = "01850" then RES_CODE_HCV = 160;
+else if closest_zip = "01851" then RES_CODE_HCV = 160;
+else if closest_zip = "01852" then RES_CODE_HCV = 160;
+else if closest_zip = "01853" then RES_CODE_HCV = 160;
+else if closest_zip = "01854" then RES_CODE_HCV = 160;
+else if closest_zip = "01056" then RES_CODE_HCV = 161;
+else if closest_zip = "01462" then RES_CODE_HCV = 162;
+else if closest_zip = "01901" then RES_CODE_HCV = 163;
+else if closest_zip = "01902" then RES_CODE_HCV = 163;
+else if closest_zip = "01903" then RES_CODE_HCV = 163;
+else if closest_zip = "01904" then RES_CODE_HCV = 163;
+else if closest_zip = "01905" then RES_CODE_HCV = 163;
+else if closest_zip = "01910" then RES_CODE_HCV = 163;
+else if closest_zip = "01940" then RES_CODE_HCV = 164;
+else if closest_zip = "02148" then RES_CODE_HCV = 165;
+else if closest_zip = "01944" then RES_CODE_HCV = 166;
+else if closest_zip = "02031" then RES_CODE_HCV = 167;
+else if closest_zip = "02048" then RES_CODE_HCV = 167;
+else if closest_zip = "01945" then RES_CODE_HCV = 168;
+else if closest_zip = "01947" then RES_CODE_HCV = 168;
+else if closest_zip = "02738" then RES_CODE_HCV = 169;
+else if closest_zip = "01752" then RES_CODE_HCV = 170;
+else if closest_zip = "02020" then RES_CODE_HCV = 171;
+else if closest_zip = "02041" then RES_CODE_HCV = 171;
+else if closest_zip = "02047" then RES_CODE_HCV = 264;
+else if closest_zip = "02050" then RES_CODE_HCV = 171;
+else if closest_zip = "02051" then RES_CODE_HCV = 171;
+else if closest_zip = "02059" then RES_CODE_HCV = 171;
+else if closest_zip = "02065" then RES_CODE_HCV = 171;
+else if closest_zip = "02649" then RES_CODE_HCV = 172;
+else if closest_zip = "02739" then RES_CODE_HCV = 173;
+else if closest_zip = "01754" then RES_CODE_HCV = 174;
+else if closest_zip = "02052" then RES_CODE_HCV = 175;
+else if closest_zip = "02153" then RES_CODE_HCV = 176;
+else if closest_zip = "02155" then RES_CODE_HCV = 176;
+else if closest_zip = "02156" then RES_CODE_HCV = 176;
+else if closest_zip = "02053" then RES_CODE_HCV = 177;
+else if closest_zip = "02176" then RES_CODE_HCV = 178;
+else if closest_zip = "02177" then RES_CODE_HCV = 178;
+else if closest_zip = "01756" then RES_CODE_HCV = 179;
+else if closest_zip = "01860" then RES_CODE_HCV = 180;
+else if closest_zip = "01844" then RES_CODE_HCV = 181;
+else if closest_zip = "02344" then RES_CODE_HCV = 182;
+else if closest_zip = "02346" then RES_CODE_HCV = 182;
+else if closest_zip = "02348" then RES_CODE_HCV = 182;
+else if closest_zip = "02349" then RES_CODE_HCV = 182;
+else if closest_zip = "01243" then RES_CODE_HCV = 183;
+else if closest_zip = "01949" then RES_CODE_HCV = 184;
+else if closest_zip = "01757" then RES_CODE_HCV = 185;
+else if closest_zip = "01527" then RES_CODE_HCV = 186;
+else if closest_zip = "01586" then RES_CODE_HCV = 186;
+else if closest_zip = "02054" then RES_CODE_HCV = 187;
+else if closest_zip = "01529" then RES_CODE_HCV = 188;
+else if closest_zip = "02186" then RES_CODE_HCV = 189;
+else if closest_zip = "02187" then RES_CODE_HCV = 189;
+else if closest_zip = "01350" then RES_CODE_HCV = 190;
+else if closest_zip = "01057" then RES_CODE_HCV = 191;
+else if closest_zip = "01347" then RES_CODE_HCV = 192;
+else if closest_zip = "01349" then RES_CODE_HCV = 192;
+else if closest_zip = "01351" then RES_CODE_HCV = 192;
+else if closest_zip = "01245" then RES_CODE_HCV = 193;
+else if closest_zip = "01050" then RES_CODE_HCV = 194;
+else if closest_zip = "01258" then RES_CODE_HCV = 195;
+else if closest_zip = "01908" then RES_CODE_HCV = 196;
+else if closest_zip = "02554" then RES_CODE_HCV = 197;
+else if closest_zip = "02564" then RES_CODE_HCV = 197;
+else if closest_zip = "02584" then RES_CODE_HCV = 197;
+else if closest_zip = "01760" then RES_CODE_HCV = 198;
+else if closest_zip = "02192" then RES_CODE_HCV = 199;
+else if closest_zip = "02194" then RES_CODE_HCV = 199;
+else if closest_zip = "02492" then RES_CODE_HCV = 199;
+else if closest_zip = "02494" then RES_CODE_HCV = 199;
+else if closest_zip = "01220" then RES_CODE_HCV = 200;
+else if closest_zip = "02740" then RES_CODE_HCV = 201;
+else if closest_zip = "02741" then RES_CODE_HCV = 201;
+else if closest_zip = "02742" then RES_CODE_HCV = 201;
+else if closest_zip = "02744" then RES_CODE_HCV = 201;
+else if closest_zip = "02745" then RES_CODE_HCV = 201;
+else if closest_zip = "02746" then RES_CODE_HCV = 201;
+else if closest_zip = "01531" then RES_CODE_HCV = 202;
+else if closest_zip = "01259" then RES_CODE_HCV = 203;
+else if closest_zip = "01355" then RES_CODE_HCV = 204;
+else if closest_zip = "01922" then RES_CODE_HCV = 205;
+else if closest_zip = "01951" then RES_CODE_HCV = 205;
+else if closest_zip = "01950" then RES_CODE_HCV = 206;
+else if closest_zip = "02158" then RES_CODE_HCV = 207;
+else if closest_zip = "02159" then RES_CODE_HCV = 207;
+else if closest_zip = "02160" then RES_CODE_HCV = 207;
+else if closest_zip = "02161" then RES_CODE_HCV = 207;
+else if closest_zip = "02162" then RES_CODE_HCV = 207;
+else if closest_zip = "02164" then RES_CODE_HCV = 207;
+else if closest_zip = "02165" then RES_CODE_HCV = 207;
+else if closest_zip = "02166" then RES_CODE_HCV = 207;
+else if closest_zip = "02167" then RES_CODE_HCV = 207;
+else if closest_zip = "02168" then RES_CODE_HCV = 207;
+else if closest_zip = "02195" then RES_CODE_HCV = 207;
+else if closest_zip = "02258" then RES_CODE_HCV = 207;
+else if closest_zip = "02456" then RES_CODE_HCV = 207;
+else if closest_zip = "02458" then RES_CODE_HCV = 207;
+else if closest_zip = "02459" then RES_CODE_HCV = 207;
+else if closest_zip = "02460" then RES_CODE_HCV = 207;
+else if closest_zip = "02461" then RES_CODE_HCV = 207;
+else if closest_zip = "02462" then RES_CODE_HCV = 207;
+else if closest_zip = "02464" then RES_CODE_HCV = 207;
+else if closest_zip = "02465" then RES_CODE_HCV = 207;
+else if closest_zip = "02466" then RES_CODE_HCV = 207;
+else if closest_zip = "02468" then RES_CODE_HCV = 207;
+else if closest_zip = "02495" then RES_CODE_HCV = 207;
+else if closest_zip = "02056" then RES_CODE_HCV = 208;
+else if closest_zip = "01247" then RES_CODE_HCV = 209;
+else if closest_zip = "01845" then RES_CODE_HCV = 210;
+else if closest_zip = "02760" then RES_CODE_HCV = 211;
+else if closest_zip = "02761" then RES_CODE_HCV = 211;
+else if closest_zip = "02763" then RES_CODE_HCV = 211;
+else if closest_zip = "02739" then RES_CODE_HCV = 211;
+else if closest_zip = "01535" then RES_CODE_HCV = 212;
+else if closest_zip = "01864" then RES_CODE_HCV = 213;
+else if closest_zip = "01889" then RES_CODE_HCV = 213;
+else if closest_zip = "01053" then RES_CODE_HCV = 214;
+else if closest_zip = "01060" then RES_CODE_HCV = 214;
+else if closest_zip = "01061" then RES_CODE_HCV = 214;
+else if closest_zip = "01062" then RES_CODE_HCV = 214;
+else if closest_zip = "01063" then RES_CODE_HCV = 214;
+else if closest_zip = "01532" then RES_CODE_HCV = 215;
+else if closest_zip = "01534" then RES_CODE_HCV = 216;
+else if closest_zip = "01588" then RES_CODE_HCV = 216;
+else if closest_zip = "01360" then RES_CODE_HCV = 217;
+else if closest_zip = "02712" then RES_CODE_HCV = 218;
+else if closest_zip = "02766" then RES_CODE_HCV = 218;
+else if closest_zip = "02018" then RES_CODE_HCV = 219;
+else if closest_zip = "02061" then RES_CODE_HCV = 219;
+else if closest_zip = "02062" then RES_CODE_HCV = 220;
+else if closest_zip = "02557" then RES_CODE_HCV = 221;
+else if closest_zip = "01068" then RES_CODE_HCV = 222;
+else if closest_zip = "01364" then RES_CODE_HCV = 223;
+else if closest_zip = "02643" then RES_CODE_HCV = 224;
+else if closest_zip = "02653" then RES_CODE_HCV = 224;
+else if closest_zip = "02662" then RES_CODE_HCV = 223;
+else if closest_zip = "01029" then RES_CODE_HCV = 225;
+else if closest_zip = "01253" then RES_CODE_HCV = 225;
+else if closest_zip = "01537" then RES_CODE_HCV = 226;
+else if closest_zip = "01540" then RES_CODE_HCV = 226;
+else if closest_zip = "01009" then RES_CODE_HCV = 227;
+else if closest_zip = "01069" then RES_CODE_HCV = 227;
+else if closest_zip = "01079" then RES_CODE_HCV = 227;
+else if closest_zip = "01080" then RES_CODE_HCV = 227;
+else if closest_zip = "01612" then RES_CODE_HCV = 228;
+else if closest_zip = "01960" then RES_CODE_HCV = 229;
+else if closest_zip = "01961" then RES_CODE_HCV = 229;
+else if closest_zip = "01964" then RES_CODE_HCV = 229;
+else if closest_zip = "01002" then RES_CODE_HCV = 230;
+else if closest_zip = "02327" then RES_CODE_HCV = 231;
+else if closest_zip = "02358" then RES_CODE_HCV = 231;
+else if closest_zip = "02359" then RES_CODE_HCV = 231;
+else if closest_zip = "01463" then RES_CODE_HCV = 232;
+else if closest_zip = "01235" then RES_CODE_HCV = 233;
+else if closest_zip = "01366" then RES_CODE_HCV = 234;
+else if closest_zip = "01201" then RES_CODE_HCV = 236;
+else if closest_zip = "01202" then RES_CODE_HCV = 236;
+else if closest_zip = "01203" then RES_CODE_HCV = 236;
+else if closest_zip = "01070" then RES_CODE_HCV = 237;
+else if closest_zip = "02762" then RES_CODE_HCV = 238;
+else if closest_zip = "02345" then RES_CODE_HCV = 239;
+else if closest_zip = "02360" then RES_CODE_HCV = 239;
+else if closest_zip = "02361" then RES_CODE_HCV = 239;
+else if closest_zip = "02362" then RES_CODE_HCV = 239;
+else if closest_zip = "02363" then RES_CODE_HCV = 239;
+else if closest_zip = "02381" then RES_CODE_HCV = 239;
+else if closest_zip = "02367" then RES_CODE_HCV = 240;
+else if closest_zip = "01517" then RES_CODE_HCV = 241;
+else if closest_zip = "01541" then RES_CODE_HCV = 241;
+else if closest_zip = "02657" then RES_CODE_HCV = 242;
+else if closest_zip = "02169" then RES_CODE_HCV = 243;
+else if closest_zip = "02170" then RES_CODE_HCV = 243;
+else if closest_zip = "02171" then RES_CODE_HCV = 243;
+else if closest_zip = "02269" then RES_CODE_HCV = 243;
+else if closest_zip = "02368" then RES_CODE_HCV = 244;
+else if closest_zip = "02767" then RES_CODE_HCV = 245;
+else if closest_zip = "02768" then RES_CODE_HCV = 245;
+else if closest_zip = "01867" then RES_CODE_HCV = 246;
+else if closest_zip = "02769" then RES_CODE_HCV = 247;
+else if closest_zip = "02151" then RES_CODE_HCV = 248;
+else if closest_zip = "01254" then RES_CODE_HCV = 249;
+else if closest_zip = "02770" then RES_CODE_HCV = 250;
+else if closest_zip = "02370" then RES_CODE_HCV = 251;
+else if closest_zip = "01966" then RES_CODE_HCV = 252;
+else if closest_zip = "01367" then RES_CODE_HCV = 253;
+else if closest_zip = "01969" then RES_CODE_HCV = 254;
+else if closest_zip = "01368" then RES_CODE_HCV = 255;
+else if closest_zip = "01071" then RES_CODE_HCV = 256;
+else if closest_zip = "01097" then RES_CODE_HCV = 256;
+else if closest_zip = "01543" then RES_CODE_HCV = 257;
+else if closest_zip = "01970" then RES_CODE_HCV = 258;
+else if closest_zip = "01971" then RES_CODE_HCV = 258;
+else if closest_zip = "01952" then RES_CODE_HCV = 259;
+else if closest_zip = "01255" then RES_CODE_HCV = 260;
+else if closest_zip = "02537" then RES_CODE_HCV = 261;
+else if closest_zip = "02542" then RES_CODE_HCV = 261;
+else if closest_zip = "02563" then RES_CODE_HCV = 261;
+else if closest_zip = "02644" then RES_CODE_HCV = 261;
+else if closest_zip = "01906" then RES_CODE_HCV = 262;
+else if closest_zip = "01256" then RES_CODE_HCV = 263;
+else if closest_zip = "02040" then RES_CODE_HCV = 264;
+else if closest_zip = "02055" then RES_CODE_HCV = 264;
+else if closest_zip = "02060" then RES_CODE_HCV = 264;
+else if closest_zip = "02066" then RES_CODE_HCV = 264;
+else if closest_zip = "02771" then RES_CODE_HCV = 265;
+else if closest_zip = "02067" then RES_CODE_HCV = 266;
+else if closest_zip = "01222" then RES_CODE_HCV = 267;
+else if closest_zip = "01257" then RES_CODE_HCV = 267;
+else if closest_zip = "01370" then RES_CODE_HCV = 268;
+else if closest_zip = "01770" then RES_CODE_HCV = 269;
+else if closest_zip = "01464" then RES_CODE_HCV = 270;
+else if closest_zip = "01545" then RES_CODE_HCV = 271;
+else if closest_zip = "01546" then RES_CODE_HCV = 271;
+else if closest_zip = "01072" then RES_CODE_HCV = 272;
+else if closest_zip = "02725" then RES_CODE_HCV = 273;
+else if closest_zip = "02726" then RES_CODE_HCV = 273;
+else if closest_zip = "02143" then RES_CODE_HCV = 274;
+else if closest_zip = "02144" then RES_CODE_HCV = 274;
+else if closest_zip = "02145" then RES_CODE_HCV = 274;
+else if closest_zip = "01075" then RES_CODE_HCV = 275;
+else if closest_zip = "01073" then RES_CODE_HCV = 276;
+else if closest_zip = "01745" then RES_CODE_HCV = 277;
+else if closest_zip = "01772" then RES_CODE_HCV = 277;
+else if closest_zip = "01550" then RES_CODE_HCV = 278;
+else if closest_zip = "01077" then RES_CODE_HCV = 279;
+else if closest_zip = "01562" then RES_CODE_HCV = 280;
+else if closest_zip = "01101" then RES_CODE_HCV = 281;
+else if closest_zip = "01102" then RES_CODE_HCV = 281;
+else if closest_zip = "01103" then RES_CODE_HCV = 281;
+else if closest_zip = "01104" then RES_CODE_HCV = 281;
+else if closest_zip = "01105" then RES_CODE_HCV = 281;
+else if closest_zip = "01107" then RES_CODE_HCV = 281;
+else if closest_zip = "01108" then RES_CODE_HCV = 281;
+else if closest_zip = "01109" then RES_CODE_HCV = 281;
+else if closest_zip = "01111" then RES_CODE_HCV = 281;
+else if closest_zip = "01114" then RES_CODE_HCV = 281;
+else if closest_zip = "01115" then RES_CODE_HCV = 281;
+else if closest_zip = "01118" then RES_CODE_HCV = 281;
+else if closest_zip = "01119" then RES_CODE_HCV = 281;
+else if closest_zip = "01128" then RES_CODE_HCV = 281;
+else if closest_zip = "01129" then RES_CODE_HCV = 281;
+else if closest_zip = "01133" then RES_CODE_HCV = 281;
+else if closest_zip = "01138" then RES_CODE_HCV = 281;
+else if closest_zip = "01139" then RES_CODE_HCV = 281;
+else if closest_zip = "01144" then RES_CODE_HCV = 281;
+else if closest_zip = "01151" then RES_CODE_HCV = 281;
+else if closest_zip = "01152" then RES_CODE_HCV = 281;
+else if closest_zip = "01199" then RES_CODE_HCV = 281;
+else if closest_zip = "01564" then RES_CODE_HCV = 282;
+else if closest_zip = "01229" then RES_CODE_HCV = 283;
+else if closest_zip = "01262" then RES_CODE_HCV = 283;
+else if closest_zip = "01263" then RES_CODE_HCV = 283;
+else if closest_zip = "02180" then RES_CODE_HCV = 284;
+else if closest_zip = "02072" then RES_CODE_HCV = 285;
+else if closest_zip = "01775" then RES_CODE_HCV = 286;
+else if closest_zip = "01518" then RES_CODE_HCV = 287;
+else if closest_zip = "01566" then RES_CODE_HCV = 287;
+else if closest_zip = "01776" then RES_CODE_HCV = 288;
+else if closest_zip = "01375" then RES_CODE_HCV = 289;
+else if closest_zip = "01526" then RES_CODE_HCV = 290;
+else if closest_zip = "01590" then RES_CODE_HCV = 290;
+else if closest_zip = "01907" then RES_CODE_HCV = 291;
+else if closest_zip = "02777" then RES_CODE_HCV = 292;
+else if closest_zip = "02718" then RES_CODE_HCV = 293;
+else if closest_zip = "02780" then RES_CODE_HCV = 293;
+else if closest_zip = "01436" then RES_CODE_HCV = 294;
+else if closest_zip = "01438" then RES_CODE_HCV = 294;
+else if closest_zip = "01468" then RES_CODE_HCV = 294;
+else if closest_zip = "01876" then RES_CODE_HCV = 295;
+else if closest_zip = "02568" then RES_CODE_HCV = 296;
+else if closest_zip = "02573" then RES_CODE_HCV = 296;
+else if closest_zip = "01983" then RES_CODE_HCV = 298;
+else if closest_zip = "01469" then RES_CODE_HCV = 299;
+else if closest_zip = "01474" then RES_CODE_HCV = 299;
+else if closest_zip = "02652" then RES_CODE_HCV = 300;
+else if closest_zip = "02666" then RES_CODE_HCV = 300;
+else if closest_zip = "01879" then RES_CODE_HCV = 301;
+else if closest_zip = "01264" then RES_CODE_HCV = 302;
+else if closest_zip = "01568" then RES_CODE_HCV = 303;
+else if closest_zip = "01525" then RES_CODE_HCV = 304;
+else if closest_zip = "01538" then RES_CODE_HCV = 304;
+else if closest_zip = "01569" then RES_CODE_HCV = 304;
+else if closest_zip = "01880" then RES_CODE_HCV = 305;
+else if closest_zip = "01081" then RES_CODE_HCV = 306;
+else if closest_zip = "02032" then RES_CODE_HCV = 307;
+else if closest_zip = "02071" then RES_CODE_HCV = 307;
+else if closest_zip = "02081" then RES_CODE_HCV = 307;
+else if closest_zip = "02154" then RES_CODE_HCV = 308;
+else if closest_zip = "02254" then RES_CODE_HCV = 308;
+else if closest_zip = "02451" then RES_CODE_HCV = 308;
+else if closest_zip = "02452" then RES_CODE_HCV = 308;
+else if closest_zip = "02453" then RES_CODE_HCV = 308;
+else if closest_zip = "02454" then RES_CODE_HCV = 308;
+else if closest_zip = "02455" then RES_CODE_HCV = 308;
+else if closest_zip = "01082" then RES_CODE_HCV = 309;
+else if closest_zip = "02538" then RES_CODE_HCV = 310;
+else if closest_zip = "02558" then RES_CODE_HCV = 310;
+else if closest_zip = "02571" then RES_CODE_HCV = 310;
+else if closest_zip = "02576" then RES_CODE_HCV = 310;
+else if closest_zip = "01083" then RES_CODE_HCV = 311;
+else if closest_zip = "01092" then RES_CODE_HCV = 311;
+else if closest_zip = "01378" then RES_CODE_HCV = 312;
+else if closest_zip = "01223" then RES_CODE_HCV = 313;
+else if closest_zip = "02172" then RES_CODE_HCV = 314;
+else if closest_zip = "02272" then RES_CODE_HCV = 314;
+else if closest_zip = "02277" then RES_CODE_HCV = 314;
+else if closest_zip = "02471" then RES_CODE_HCV = 314;
+else if closest_zip = "02472" then RES_CODE_HCV = 314;
+else if closest_zip = "01778" then RES_CODE_HCV = 315;
+else if closest_zip = "01570" then RES_CODE_HCV = 316;
+else if closest_zip = "02157" then RES_CODE_HCV = 317;
+else if closest_zip = "02181" then RES_CODE_HCV = 317;
+else if closest_zip = "02457" then RES_CODE_HCV = 317;
+else if closest_zip = "02481" then RES_CODE_HCV = 317;
+else if closest_zip = "02482" then RES_CODE_HCV = 317;
+else if closest_zip = "02663" then RES_CODE_HCV = 318;
+else if closest_zip = "02667" then RES_CODE_HCV = 318;
+else if closest_zip = "01379" then RES_CODE_HCV = 319;
+else if closest_zip = "01380" then RES_CODE_HCV = 319;
+else if closest_zip = "01984" then RES_CODE_HCV = 320;
+else if closest_zip = "01539" then RES_CODE_HCV = 321;
+else if closest_zip = "01583" then RES_CODE_HCV = 321;
+else if closest_zip = "02379" then RES_CODE_HCV = 322;
+else if closest_zip = "01585" then RES_CODE_HCV = 323;
+else if closest_zip = "01985" then RES_CODE_HCV = 324;
+else if closest_zip = "01089" then RES_CODE_HCV = 113;
+else if closest_zip = "01090" then RES_CODE_HCV = 113;
+else if closest_zip = "01236" then RES_CODE_HCV = 325;
+else if closest_zip = "01266" then RES_CODE_HCV = 326;
+else if closest_zip = "02575" then RES_CODE_HCV = 327;
+else if closest_zip = "01580" then RES_CODE_HCV = 328;
+else if closest_zip = "01581" then RES_CODE_HCV = 328;
+else if closest_zip = "01582" then RES_CODE_HCV = 328;
+else if closest_zip = "01085" then RES_CODE_HCV = 329;
+else if closest_zip = "01086" then RES_CODE_HCV = 329;
+else if closest_zip = "01886" then RES_CODE_HCV = 330;
+else if closest_zip = "01027" then RES_CODE_HCV = 331;
+else if closest_zip = "01473" then RES_CODE_HCV = 332;
+else if closest_zip = "02193" then RES_CODE_HCV = 333;
+else if closest_zip = "02493" then RES_CODE_HCV = 333;
+else if closest_zip = "02790" then RES_CODE_HCV = 334;
+else if closest_zip = "02791" then RES_CODE_HCV = 334;
+else if closest_zip = "02090" then RES_CODE_HCV = 335;
+else if closest_zip = "02188" then RES_CODE_HCV = 336;
+else if closest_zip = "02189" then RES_CODE_HCV = 336;
+else if closest_zip = "02190" then RES_CODE_HCV = 336;
+else if closest_zip = "02191" then RES_CODE_HCV = 336;
+else if closest_zip = "01093" then RES_CODE_HCV = 337;
+else if closest_zip = "01373" then RES_CODE_HCV = 337;
+else if closest_zip = "02382" then RES_CODE_HCV = 338;
+else if closest_zip = "01095" then RES_CODE_HCV = 339;
+else if closest_zip = "01039" then RES_CODE_HCV = 340;
+else if closest_zip = "01267" then RES_CODE_HCV = 341;
+else if closest_zip = "01887" then RES_CODE_HCV = 342;
+else if closest_zip = "01475" then RES_CODE_HCV = 343;
+else if closest_zip = "01477" then RES_CODE_HCV = 343;
+else if closest_zip = "01890" then RES_CODE_HCV = 344;
+else if closest_zip = "01270" then RES_CODE_HCV = 345;
+else if closest_zip = "02152" then RES_CODE_HCV = 346;
+else if closest_zip = "01801" then RES_CODE_HCV = 347;
+else if closest_zip = "01806" then RES_CODE_HCV = 347;
+else if closest_zip = "01807" then RES_CODE_HCV = 347;
+else if closest_zip = "01808" then RES_CODE_HCV = 347;
+else if closest_zip = "01813" then RES_CODE_HCV = 347;
+else if closest_zip = "01814" then RES_CODE_HCV = 347;
+else if closest_zip = "01815" then RES_CODE_HCV = 347;
+else if closest_zip = "01888" then RES_CODE_HCV = 347;
+else if closest_zip = "01601" then RES_CODE_HCV = 348;
+else if closest_zip = "01602" then RES_CODE_HCV = 348;
+else if closest_zip = "01603" then RES_CODE_HCV = 348;
+else if closest_zip = "01604" then RES_CODE_HCV = 348;
+else if closest_zip = "01605" then RES_CODE_HCV = 348;
+else if closest_zip = "01606" then RES_CODE_HCV = 348;
+else if closest_zip = "01607" then RES_CODE_HCV = 348;
+else if closest_zip = "01608" then RES_CODE_HCV = 348;
+else if closest_zip = "01609" then RES_CODE_HCV = 348;
+else if closest_zip = "01610" then RES_CODE_HCV = 348;
+else if closest_zip = "01613" then RES_CODE_HCV = 348;
+else if closest_zip = "01614" then RES_CODE_HCV = 348;
+else if closest_zip = "01615" then RES_CODE_HCV = 348;
+else if closest_zip = "01653" then RES_CODE_HCV = 348;
+else if closest_zip = "01654" then RES_CODE_HCV = 348;
+else if closest_zip = "01655" then RES_CODE_HCV = 348;
+else if closest_zip = "01098" then RES_CODE_HCV = 349;
+else if closest_zip = "02070" then RES_CODE_HCV = 350;
+else if closest_zip = "02093" then RES_CODE_HCV = 350;
+else if closest_zip = "02664" then RES_CODE_HCV = 351;
+else if closest_zip = "02673" then RES_CODE_HCV = 351;
+else if closest_zip = "02675" then RES_CODE_HCV = 351;
+else if missing(closest_zip) then RES_CODE_HCV  = 999;
+    end;
 run;
 
 data FINAL_COHORT;
    set FINAL_COHORT;
-	if MED_PROV_CITY in (1,2,3,5,7,8,9,10,14,16,17,18,20,23,25,26,30,31,
+	if RES_CODE_HCV in (1,2,3,5,7,8,9,10,14,16,17,18,20,23,25,26,30,31,
 	32,35,36,40,42,44,46,48,49,50,52,56,57,61,65,67,71,72,73,75,79,
 	80,82,83,85,87,88,93,94,95,96,97,99,100,101,103,105,107,110,115,
 	116,119,122,123,126,128,131,133,134,136,137,138,139,141,142,144,
@@ -1919,7 +2733,7 @@ data FINAL_COHORT;
 	317,320,321,325,328,329,330,333,334,335,336,338,339,342,344,
 	346,347,348,350,351) then rural=0;
 	
-	else if MED_PROV_CITY in (4,11,12,13,19,21,22,24,27,28,33,34,37,38,39,
+	else if RES_CODE_HCV in (4,11,12,13,19,21,22,24,27,28,33,34,37,38,39,
 	41,43,45,51,54,55,58,59,60,64,68,69,70,74,76,77,78,81,84,86,92,
 	102,108,111,112,117,118,120,125,127,132,135,140,143,147,148,154,
 	157,169,173,179,183,191,194,200,205,212,222,224,227,228,230,240,
@@ -1927,7 +2741,7 @@ data FINAL_COHORT;
 	287,289,290,294,297,299,303,306,309,311,313,322,323,324,331,332,
 	337,340, 343,345,349) then rural =1;
 	
-	else if MED_PROV_CITY in (6,104,15,29,47,53,62,63,66,89,90,91,98,106,
+	else if RES_CODE_HCV in (6,104,15,29,47,53,62,63,66,89,90,91,98,106,
 	109,113,114,121,124,129,130,150,152,156,190,192,193,195,197,202,
 	203,204,209,217,221,223,225,233,234,235,237,242,253,260,267,268,
 	283,296,300,302,312,318,319,326,327,341) then rural =2;
@@ -1938,7 +2752,7 @@ data FINAL_COHORT;
     if rural = 0 then rural_group = 'Urban';
     else if rural = 1 then rural_group = 'Rural';
     else if rural = 2 then rural_group = 'Rural';
-    else rural_group = 'NA/Unknown';
+    else rural_group = 'Unknown';
 run;
 
 data FINAL_COHORT;
@@ -2022,9 +2836,9 @@ run;
 %Table1Freqs(OCCUPATION_CODE, flagf.);
 %Table1Freqs(EVER_MOUD, flagf.);
 %Table1Freqs(INSURANCE_CAT);
-%Table1Freqs(LD_PAY, ld_pay_fmt.);
+/* %Table1Freqs(LD_PAY, ld_pay_fmt.);
 %Table1Freqs(KOTELCHUCK);
-%Table1Freqs(prenat_site);
+%Table1Freqs(prenat_site); */
 %Table1Freqs(rural_group);
 
 /* ==================================== */
@@ -2094,9 +2908,9 @@ run;
 %Table1Freqs(OCCUPATION_CODE, flagf.);
 %Table1Freqs(EVER_MOUD, flagf.);
 %Table1Freqs(INSURANCE_CAT);
-%Table1Freqs(LD_PAY, ld_pay_fmt.);
+/* %Table1Freqs(LD_PAY, ld_pay_fmt.);
 %Table1Freqs(KOTELCHUCK, kotel_fmt.);
-%Table1Freqs(prenat_site, prenat_site_fmt.);
+%Table1Freqs(prenat_site, prenat_site_fmt.); */
 %Table1Freqs(rural_group);
 
 %macro Table1Freqs(var, format);
@@ -2129,9 +2943,9 @@ run;
 %Table1Freqs(OCCUPATION_CODE, flagf.);
 %Table1Freqs(EVER_MOUD, flagf.);
 %Table1Freqs(INSURANCE_CAT);
-%Table1Freqs(LD_PAY, ld_pay_fmt.);
+/* %Table1Freqs(LD_PAY, ld_pay_fmt.);
 %Table1Freqs(KOTELCHUCK);
-%Table1Freqs(prenat_site);
+%Table1Freqs(prenat_site); */
 %Table1Freqs(rural_group);
 
 %macro Table1Freqs(var, format);
@@ -2164,9 +2978,9 @@ run;
 %Table1Freqs(OCCUPATION_CODE, flagf.);
 %Table1Freqs(EVER_MOUD, flagf.);
 %Table1Freqs(INSURANCE_CAT);
-%Table1Freqs(LD_PAY, ld_pay_fmt.);
+/* %Table1Freqs(LD_PAY, ld_pay_fmt.);
 %Table1Freqs(KOTELCHUCK);
-%Table1Freqs(prenat_site);
+%Table1Freqs(prenat_site); */
 %Table1Freqs(rural_group);
 
 %macro Table2Linkage(var, ref=);
@@ -2192,10 +3006,10 @@ run;
 %Table2Linkage(IDU_EVIDENCE, ref ='0');
 %Table2Linkage(OCCUPATION_CODE, ref ='0');
 %Table2Linkage(EVER_MOUD, ref ='0');
-%Table2Linkage(INSURANCE_CAT, ref ='Public');
-%Table2Linkage(LD_PAY, ref ='1');
+%Table2Linkage(INSURANCE_CAT, ref ='Commercial');
+/* %Table2Linkage(LD_PAY, ref ='1');
 %Table2Linkage(KOTELCHUCK, ref ='3');
-%Table2Linkage(prenat_site, ref ='1');
+%Table2Linkage(prenat_site, ref ='1'); */
 %Table2Linkage(rural_group, ref ='Urban');
 %Table2Linkage(EVENT_YEAR_HCV, ref ='2017');
 
@@ -2222,10 +3036,10 @@ run;
 %Table2Treatment(IDU_EVIDENCE, ref ='0');
 %Table2Treatment(OCCUPATION_CODE, ref ='0');
 %Table2Treatment(EVER_MOUD, ref ='0');
-%Table2Treatment(INSURANCE_CAT, ref ='Public');
-%Table2Treatment(LD_PAY, ref ='1');
+%Table2Treatment(INSURANCE_CAT, ref ='Commercial');
+/* %Table2Treatment(LD_PAY, ref ='1');
 %Table2Treatment(KOTELCHUCK, ref ='3');
-%Table2Treatment(prenat_site, ref ='1');
+%Table2Treatment(prenat_site, ref ='1'); */
 %Table2Treatment(rural_group, ref ='Urban');
 %Table2Treatment(EVENT_YEAR_HCV, ref ='2017');
 title;
@@ -2238,181 +3052,181 @@ run;
 /* TO CHOOSE ONE: Multivariable Logistic Regression for Linkage to Care */
 title "Table 2, MV";
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE HOMELESS_HISTORY_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE OTHER_SUBSTANCE_USE EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0') OTHER_SUBSTANCE_USE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVENT_YEAR_HCV (ref='2017');
     model HCV_PRIMARY_DIAG(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag OTHER_SUBSTANCE_USE EDUCATION_GROUP HOMELESS_HISTORY_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 
 /* TO CHOOSE ONE: Multivariable Logistic Regression for DAA Start */
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVER_INCARCERATED (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVER_INCARCERATED (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') mental_health_diag (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE mental_health_diag / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EVENT_YEAR_HCV (ref='2017');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVER_INCARCERATED (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVER_INCARCERATED (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVENT_YEAR_HCV / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') mental_health_diag (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') mental_health_diag (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP mental_health_diag / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVER_INCARCERATED (ref='0') mental_health_diag (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVER_INCARCERATED (ref='0') mental_health_diag (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVER_INCARCERATED mental_health_diag / dist=binary link=logit solution oddsratio;
 run;
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017') mental_health_diag (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') EVENT_YEAR_HCV (ref='2017') mental_health_diag (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP EVENT_YEAR_HCV mental_health_diag / dist=binary link=logit solution oddsratio;
 run;
 
 
 proc glimmix data=FINAL_HCV_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Public') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVER_INCARCERATED (ref='0') mental_health_diag (ref='0');
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') EVER_MOUD (ref='0') IDU_EVIDENCE (ref='0') EDUCATION_GROUP (ref='HS or less') HOMELESS_HISTORY_GROUP (ref='No') EVER_INCARCERATED (ref='0') mental_health_diag (ref='0');
     model DAA_START_INDICATOR(event='1') = FINAL_RE INSURANCE_CAT EVER_MOUD IDU_EVIDENCE EDUCATION_GROUP HOMELESS_HISTORY_GROUP EVER_INCARCERATED mental_health_diag / dist=binary link=logit solution oddsratio;
 run;
 title;
@@ -2451,6 +3265,32 @@ proc sql;
     from all_births as a
     left join infants as b
     on a.BIRTH_LINK_ID = b.BIRTH_LINK_ID;
+quit;
+
+data fetal_deaths_renamed;
+    set PHDFETAL.FETALDEATH;
+    rename ID = MATERNAL_ID
+           GESTATIONAL_AGE_FD = GESTATIONAL_AGE
+           FETAL_DEATH_MONTH = MONTH_BIRTH
+           FETAL_DEATH_YEAR = YEAR_BIRTH
+           MOTHER_AGE_FD = AGE_BIRTH;
+run;
+
+proc sql;
+    create table merged_births_infants as
+    select 
+        a.MATERNAL_ID, 
+        a.MONTH_BIRTH, 
+        a.YEAR_BIRTH, 
+        a.GESTATIONAL_AGE
+    from merged_births_infants as a
+    union all
+    select 
+        put(b.MATERNAL_ID, $10.), 
+        b.MONTH_BIRTH, 
+        b.YEAR_BIRTH,
+        b.GESTATIONAL_AGE
+    from fetal_deaths_renamed as b;
 quit;
 
 data pregnancy_flags;
