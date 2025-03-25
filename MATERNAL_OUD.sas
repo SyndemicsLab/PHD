@@ -312,6 +312,15 @@ DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
 	ELSE oud_cm_ed_diag = 0;
 RUN;
 
+PROC SQL;
+    CREATE TABLE casemix_ed_diag AS
+    SELECT a.ID, a.ED_ID, a.ED_ADMIT_YEAR, b.oud_cm_ed_diag
+    FROM PHDCM.ED AS a
+    RIGHT JOIN casemix_ed_diag AS b
+    ON a.ED_ID = b.ED_ID
+    WHERE a.ED_ADMIT_YEAR IN &year;
+QUIT;
+
 /* ED_PROC */
 
 DATA casemix_ed_proc (KEEP= oud_cm_ed_proc ED_ID);
@@ -399,6 +408,15 @@ DATA hd_diag (KEEP= HD_ID oud_hd_diag);
 	ELSE oud_hd_diag = 0;
 RUN;
 
+PROC SQL;
+    CREATE TABLE hd_diag AS
+    SELECT a.ID, a.HD_ID, a.HD_ADMIT_YEAR, b.oud_hd_diag
+    FROM PHDCM.HD AS a
+    RIGHT JOIN hd_diag AS b
+    ON a.HD_ID = b.HD_ID
+    WHERE a.HD_ADMIT_YEAR IN &year;
+QUIT;
+
 /* HD PROC DATA */
 
 DATA hd_proc(KEEP= HD_ID oud_hd_proc);
@@ -475,9 +493,10 @@ DATA oo (KEEP= ID oud_oo year_oo month_oo);
     ARRAY vars2 {*} OO_DIAG1-OO_DIAG16 OO_PROC1-OO_PROC4 OO_CPT1-OO_CPT10 OO_PRINCIPALEXTERNAL_CAUSECODE;
     
     DO k = 1 TO dim(vars2);
-        IF SUBSTR(VNAME(vars2[k]), 1) = 'OO_PROC' THEN 
+        IF SUBSTR(VNAME(vars2[k]), 1) IN ('OO_PROC', 'OO_CPT') THEN DO;
             IF vars2[k] IN &PROC THEN 
                 cnt_oud_oo = cnt_oud_oo + 1;
+   END;
             ELSE IF vars2[k] IN &ICD THEN 
                 cnt_oud_oo = cnt_oud_oo + 1;
     END;
@@ -827,11 +846,27 @@ QUIT;
 /* 12. Add Pregancy Covariates  */
 /*==============================*/
 
-DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH);
-	SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH
-							WHERE= (YEAR_BIRTH IN &year));
-	BIRTH_INDICATOR = 1;
+DATA all_births (keep = ID BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH);
+   SET PHDBIRTH.BIRTH_MOM (KEEP = ID YEAR_BIRTH AGE_BIRTH
+                            WHERE= (YEAR_BIRTH IN &year));
+   BIRTH_INDICATOR = 1;
+RUN;
+
+data fetal_deaths_renamed;
+    set PHDFETAL.FETALDEATH;
+    rename FETAL_DEATH_YEAR = YEAR_BIRTH
+    	   MOTHER_AGE_FD = AGE_BIRTH;
 run;
+
+DATA fetal_deaths_renamed (keep = ID BIRTH_INDICATOR YEAR_BIRTH AGE_BIRTH);
+   SET fetal_deaths_renamed (KEEP = ID YEAR_BIRTH AGE_BIRTH
+                            WHERE= (YEAR_BIRTH IN &year));
+   BIRTH_INDICATOR = 1;
+RUN;
+
+DATA all_births;
+   SET all_births fetal_deaths_renamed;
+RUN;
 
 proc SQL;
 CREATE TABLE births AS
@@ -864,16 +899,22 @@ SET oud_preg;
 run;
 
 title "Summary stats: Number of Deliveries per Mom";
-proc means data=oud_preg mean median std;
+proc means data=oud_preg mean median std min max q1 q3;
     var TOTAL_BIRTHS;
 run;
 
-/*===================================================*/
-/* Part 2: Summary Stats: MOUD and Overdoses         */
-/*===================================================*/
+/*=====================================*/
+/* Part 2: Summary Stats: MOUD         */
+/*=====================================*/
+
+/*==============================*/
+/* 1.  Import data/demographics */
+/*==============================*/
+/* This section processes the MOUD dataset, merges it with demographic, age group, and birth data. Individual MOUD episodes are numbered so that each episode is 
+assigned a unique identifier combining the patient ID and episode number. */
 
 DATA moud;
-    SET PHDSPINE.MOUD;
+    SET PHDSPINE.MOUD3;
 RUN;
 
 PROC SORT data=moud;
@@ -927,6 +968,13 @@ DATA moud_demo;
 
     episode_id = catx("_", ID, episode_num);
 RUN;
+
+/*=====================================*/
+/* 2. Filter, Deduplicate, and Refine  */
+/*=====================================*/
+/* This section sorts the MOUD dataset by episode ID, filters for records starting in 2014 or later, 
+   and retains only individuals present in the `oud_distinct` dataset. It then defines start and end dates 
+   for each episode, removes short episodes, ensures uniqueness, and resolves overlapping treatment periods. */
 
 PROC SORT data=moud_demo; 
     BY episode_id;
@@ -995,6 +1043,13 @@ DATA moud_demo;
     drop diff;
 
 RUN;
+
+/*===============================================*/
+/* 3. Summary Statistics for MOUD Participants  */
+/*===============================================*/
+/* This section calculates the number of unique individuals who experienced MOUD overall and 
+   stratifies them by pregnancy status, race/ethnicity, and age at OUD diagnosis. It also 
+   generates frequency distributions of MOUD types overall and stratified by these demographics. */
 
 title "Number of persons that experienced MOUD";
 PROC SQL;
@@ -1074,6 +1129,13 @@ proc freq data=moud_demo;
 run;
 title;
 
+/*=======================================*/
+/* 4. Identify MOUD Initiation Events   */
+/*=======================================*/
+/* This section creates a dataset identifying individuals who initiated MOUD, 
+   assigning a flag (`moud_start = 1`). It then integrates this information 
+   into the `oud_preg` dataset to indicate whether each individual had a MOUD start. */
+
 PROC SQL;                    
     CREATE TABLE moud_starts AS
     SELECT ID,
@@ -1091,20 +1153,29 @@ end as moud_start
 from oud_preg;
 quit;
 
+/*========================================*/
+/* 5. Calculate MOUD Episode Durations   */
+/*========================================*/
+/* This section calculates the length of each MOUD episode and categorizes 
+   them into duration groups (<6 months, 6-12 months, 1-2 years, and 2+ years). 
+   It then summarizes the number of episodes per individual, stratified by 
+   pregnancy status, race/ethnicity, and age group. */
+
 data episode_length;
     set moud_demo;
 
     episode_length = end_date - start_date;
 
-    episode_0months = 0;
+    episode_1month = 0;
     episode_6months = 0;
     episode_12months = 0;
     episode_24months = 0;
 
-    if episode_length < 180 then episode_0months = 1;
-    if episode_length >= 180 and episode_length < 365 then episode_6months = 1; /* 6 months */
-    if episode_length >= 365 and episode_length < 730 then episode_12months = 1; /* 1 year */
-    if episode_length >= 730 then episode_24months = 1; /* 2 years */
+    if episode_length < 30 then episode_1months = 1; /* 0-1 month */
+    else if episode_length >= 30 and episode_length < 180 then episode_6months = 1; /* 2-6 months */
+    else if episode_length >= 180 and episode_length < 365 then episode_12months = 1; /* 6-12 months */
+    else if episode_length >= 365 and episode_length < 730 then episode_24months = 1; /* 1-2 years */
+    else if episode_length >= 730 then episode_24months = 1; /* 2+ years */
 run;
 
 proc sql;
@@ -1124,56 +1195,71 @@ proc sql;
     from episode_counts;
 quit;
 
+/*========================================*/
+/* 6. Summary Statistics for MOUD Episodes */
+/*========================================*/
+/* This section calculates summary statistics for the number of MOUD episodes 
+   per person and the duration of MOUD episodes. Statistics include mean, 
+   median, and standard deviation. Results are further stratified by 
+   pregnancy status, race/ethnicity, and age group. */
+
 title "Summary stats: Mean number of MOUD episodes per person";
-proc means data=episode_counts mean median std;
+proc means data=episode_counts mean median std min max q1 q3;
     var num_episodes;
 run;
 
 title "Summary stats: Mean number of MOUD episodes per person by BIRTH_INDICATOR";
-proc means data=episode_counts mean median std;
+proc means data=episode_counts mean median std min max q1 q3;
     class BIRTH_INDICATOR;
     var num_episodes;
 run;
 
 title "Summary stats: Mean number of MOUD episodes per person by FINAL_RE";
-proc means data=episode_counts mean median std;
+proc means data=episode_counts mean median std min max q1 q3;
     class FINAL_RE;
     var num_episodes;
 run;
 
 title "Summary stats: Mean number of MOUD episodes per person by Age at OUD Diagnosis";
-proc means data=episode_counts mean median std;
+proc means data=episode_counts mean median std min max q1 q3;
     class age_grp_five;
     var num_episodes;
 run;
 
 title "Summary stats: MOUD episode duration (days)";
-proc means data=episode_length mean median std;
+proc means data=episode_length mean median std min max q1 q3;
     var episode_length;
 run;
 
 title "Summary stats: MOUD episode duration (days) by BIRTH_INDICATOR";
-proc means data=episode_length mean median std;
+proc means data=episode_length mean median std min max q1 q3;
     class BIRTH_INDICATOR;
     var episode_length;
 run;
 
 title "Summary stats: MOUD episode duration (days) by FINAL_RE";
-proc means data=episode_length mean median std;
+proc means data=episode_length mean median std min max q1 q3;
     class FINAL_RE;
     var episode_length;
 run;
 
 title "Summary stats: MOUD episode duration (days) by Age at OUD Diagnosis";
-proc means data=episode_length mean median std;
+proc means data=episode_length mean median std min max q1 q3;
     class age_grp_five;
     var episode_length;
 run;
 
+/*===============================================*/
+/* 7. Aggregating MOUD Episodes and Validation  */
+/*===============================================*/
+/* This section aggregates the duration-based classification of MOUD episodes 
+   per individual, merges the episode counts into the pregnancy dataset, 
+   and performs validation checks to ensure consistency in episode classification. */
+
 proc sql;
     create table aggregated_episode as
     select ID,
-           sum(episode_0months) as episode_0months_sum,
+           sum(episode_1months) as episode_1months_sum,
            sum(episode_6months) as episode_6months_sum,
            sum(episode_12months) as episode_12months_sum,
            sum(episode_24months) as episode_24months_sum
@@ -1196,11 +1282,18 @@ run;
 data check_moud_count;
     set moud_preg;
     
-    MOUD_Sum = sum(episode_0months_sum, episode_6months_sum, episode_12months_sum, episode_24months_sum);
+    MOUD_Sum = sum(episode_1months_sum, episode_6months_sum, episode_12months_sum, episode_24months_sum);
 
     if MOUD_Sum = num_episodes then MOUD_Match = 1;
     else MOUD_Match = 0;
 run;
+
+/*===============================================*/
+/* 8. Validation and Distribution of MOUD Retention */
+/*===============================================*/
+/* This section validates that the sum of MOUD episode duration categories 
+   matches the total number of MOUD episodes per person. It also provides 
+   an aggregated summary of MOUD retention across different duration thresholds. */
 
 title "Check that the sum of MOUD_duration variables = number MOUD episodes";
 proc freq data=check_moud_count;
@@ -1211,13 +1304,20 @@ title;
 title "Distribution of MOUD retention";
 data check_moud_count;
    set check_moud_count;
-   total_moud_episodes = sum(of episode_0months_sum episode_6months_sum episode_12months_sum episode_24months_sum);
+   total_moud_episodes = sum(of episode_1months_sum episode_6months_sum episode_12months_sum episode_24months_sum);
 run;
 
 proc means data=check_moud_count sum;
-   var episode_0months_sum episode_6months_sum episode_12months_sum episode_24months_sum total_moud_episodes;
+   var episode_1months_sum episode_6months_sum episode_12months_sum episode_24months_sum total_moud_episodes;
 run;
 title;
+
+/*================================================*/
+/* 9. Processing Overdose Data and Merging Demographics */
+/*================================================*/
+/* This section processes the overdose dataset, filters it for data from 2014 onwards, 
+   merges with the MOUD pregnancy data, and joins additional demographic information 
+   (including race, birth indicator, age group, and final_re) from related datasets. */
 
 DATA overdose_spine (KEEP=ID OD_YEAR OD_RACE OD_COUNT OD_AGE OD_DATE FATAL_OD_DEATH);
     SET PHDSPINE.OVERDOSE;
@@ -1261,6 +1361,12 @@ PROC SQL;
     LEFT JOIN oud
     ON overdose_spine.ID = oud.ID;
 QUIT;
+
+/*==============================================*/
+/* 10. Overdose Summary and Counts by Demographics */
+/*==============================================*/
+/* This section calculates and displays the number of unique IDs that experienced an overdose,
+   stratified by BIRTH_INDICATOR, FINAL_RE, and age group. */
 
 title "Number of persons that experienced overdose";
 PROC SQL;
@@ -1308,6 +1414,13 @@ QUIT;
 PROC PRINT DATA=overdose_summary;
     TITLE 'Number of Unique IDs that Experienced Overdoses by Age at OUD Diagnosis';
 RUN;
+
+/*====================================================*/
+/* 11. Overdose Flag Summary and Counts by Demographics */
+/*====================================================*/
+/* This section generates and summarizes overdose data by creating an "overdose flag" based on the fatality status,
+   and then stratifies this data by key demographic factors including pregnancy status, race/ethnicity, and age at OUD diagnosis. 
+   The summary statistics for overdose counts per person are also calculated, both overall and stratified by pregnancy status. */
 
 proc sort data=overdose_spine;
    by ID OD_DATE;
@@ -1375,15 +1488,22 @@ proc sql;
  quit;
  
  title "Summary stats: Overdose counts per person";
- proc means data=overdose_counts mean median std;
+ proc means data=overdose_counts mean median std min max q1 q3;
     var OD_Count;
  run;
  
- proc means data=overdose_counts mean median std;
+ proc means data=overdose_counts mean median std min max q1 q3;
     class BIRTH_INDICATOR;
     var OD_Count;
  run;
  
+ /*==========================================================*/
+/* 12. MOUD Episodes and Overdose During/After MOUD           */
+/*==========================================================*/
+/* This section processes the MOUD start and end dates for each individual, and identifies episodes of overdose during and after MOUD treatment. 
+The array is necessary to pivot from episode-level to person-level data to allow the calculation of overdose occurrences during the treatment period, 
+within 30 days after treatment, or with no MOUD treatment. */
+
  PROC SORT data=moud_demo (KEEP= ID DATE_START_MOUD DATE_END_MOUD);
    by ID DATE_START_MOUD;
  RUN;
@@ -1413,37 +1533,67 @@ proc sql;
    IF a;  
  RUN;
  
- DATA moud_od_demo;
+DATA moud_od_demo;
     SET moud_od_demo;
-    by ID;
+    BY ID;
 
-    array MOUD_START (*) DATE_START_MOUD_:; 
-    array MOUD_END (*) DATE_END_MOUD_:;
+    ARRAY MOUD_START (*) DATE_START_MOUD_:;
+    ARRAY MOUD_END (*) DATE_END_MOUD_:;
 
-    num_moud_episodes = dim(MOUD_START);
+    num_moud_episodes = DIM(MOUD_START);
 
-    retain OD_during_MOUD OD_after_MOUD OD_no_MOUD;
+    RETAIN OD_during_MOUD OD_after_MOUD OD_no_MOUD OD_COUNT_CHECK;
 
-    IF first.ID THEN DO;
+    IF FIRST.ID THEN DO;
         OD_during_MOUD = 0;  
-        OD_after_MOUD = 0; 
-        OD_no_MOUD = 0; 
+        OD_after_MOUD = 0;  
+        OD_no_MOUD = 0;  
+        OD_COUNT_CHECK = 0; /*  This variable is to check the total N ODs per person since OD_COUNT is persistent through whole OD table, while we filter to 2014-2022 */
     END;
-    
+
     DO i = 1 TO num_moud_episodes;
-        IF OD_DATE >= MOUD_START(i) AND OD_DATE <= MOUD_END(i) THEN DO;
-            OD_during_MOUD + 1; 
+        /* Case 1: Both MOUD_START(i) and MOUD_END(i) are present */
+        IF NOT MISSING(MOUD_START(i)) AND NOT MISSING(MOUD_END(i)) THEN DO;
+            IF OD_DATE >= MOUD_START(i) AND OD_DATE <= MOUD_END(i) THEN DO;
+                OD_during_MOUD + 1;
+                OD_COUNT_CHECK + 1;
+            END;
+            ELSE IF OD_DATE > MOUD_END(i) AND OD_DATE <= MOUD_END(i) + 30 THEN DO;
+                OD_after_MOUD + 1;
+                OD_COUNT_CHECK + 1;
+            END;
         END;
 
-        IF OD_DATE > MOUD_END(i) AND OD_DATE <= MOUD_END(i) + 30 THEN DO;
-            OD_after_MOUD + 1;
+        /* Case 2: MOUD_END(i) is present, but MOUD_START(i) is missing */
+        ELSE IF MISSING(MOUD_START(i)) AND NOT MISSING(MOUD_END(i)) THEN DO;
+            IF OD_DATE <= MOUD_END(i) THEN DO;
+                OD_during_MOUD + 1;
+                OD_COUNT_CHECK + 1;
+            END;
+            ELSE IF OD_DATE > MOUD_END(i) AND OD_DATE <= MOUD_END(i) + 30 THEN DO;
+                OD_after_MOUD + 1;
+                OD_COUNT_CHECK + 1;
+            END;
         END;
-    END;
 
-    IF OD_during_MOUD = 0 AND OD_after_MOUD = 0 THEN OD_no_MOUD + 1;
+        /* Case 3: MOUD_START(i) is present, but MOUD_END(i) is missing */
+        ELSE IF NOT MISSING(MOUD_START(i)) AND MISSING(MOUD_END(i)) THEN DO;
+            IF OD_DATE >= MOUD_START(i) THEN DO;
+                OD_during_MOUD + 1;
+                OD_COUNT_CHECK + 1;
+            END;
+        END;
+		END;
+      
+    IF OD_during_MOUD = . THEN OD_during_MOUD = 0;
+    IF OD_after_MOUD = . THEN OD_after_MOUD = 0;
+
+    IF OD_during_MOUD = 0 AND OD_after_MOUD = 0 THEN DO;
+    OD_no_MOUD + 1;
+    OD_COUNT_CHECK + 1;
+    END; 
 
     DROP i;
-
 RUN;
 
 proc sql;
@@ -1453,7 +1603,8 @@ proc sql;
         max(OD_COUNT) as TOTAL_OD_COUNT,
         max(OD_during_MOUD) as N_OD_during_MOUD,
         max(OD_after_MOUD) as N_OD_after_MOUD,
-        max(OD_no_MOUD) as N_OD_no_MOUD
+        max(OD_no_MOUD) as N_OD_no_MOUD,
+        max(OD_COUNT_CHECK) as OD_COUNT_CHECK
     from moud_od_demo
     group by ID;
 quit;
@@ -1473,13 +1624,15 @@ QUIT;
 DATA moud_preg;
 SET moud_preg;
 IF TOTAL_OD_COUNT = . THEN DO;
-	TOTAL_OD_COUNT = 0;
+    TOTAL_OD_COUNT = 0;
     N_OD_no_MOUD = 0;
     N_OD_during_MOUD = 0;
     N_OD_after_MOUD = 0;
+    OD_COUNT_CHECK = 0;
 END;
+RUN;
 
-data check_od_count;
+DATA check_od_count;
     set moud_preg;
 
     if missing(N_OD_no_MOUD) then N_OD_no_MOUD = 0;
@@ -1490,12 +1643,23 @@ data check_od_count;
 
     if OD_Sum = TOTAL_OD_COUNT then OD_Match = 1;
     else OD_Match = 0;
+    
+    if OD_COUNT_CHECK = OD_Sum then OD_COUNT_MATCH = 1;
+    else OD_COUNT_MATCH = 0;
+
+RUN;
+
+/*==========================================================*/
+/* 14. Overdose Validation and Distribution Analysis          */
+/*==========================================================*/
+/* This section validates that the sum of overdose occurrences (during, after, and without MOUD treatment) matches the total overdose count. The frequency distribution of OD_Match is checked, 
+   and summary statistics for overdose counts are calculated to examine the distribution of overdoses relative to MOUD treatment status. */
+
+title "Check that the sum of OD_during_MOUD variables = TOTAL_OD_COUNT and OD_COUNT_CHECK consistency";
+proc freq data=check_od_count;
+   tables OD_Match OD_COUNT_MATCH;
 run;
- 
- title "Check that the sum of OD_during_MOUD variables = TOTAL_OD_COUNT";
- proc freq data=check_od_count;
-    tables OD_Match;
- run;
+title;
  
 title "Distribution of OD relative to MOUD";
 data check_od_count;
@@ -1568,15 +1732,15 @@ select distinct FINAL_COHORT.ID,
        case
            when prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ECODE) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ADM_DIAGNOSIS) > 0 or
-                prxmatch('/^V(6|20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD1) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD1) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD2) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD3) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD4) > 0 or
-                prxmatch('/^E(88|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD5) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD5) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD6) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD7) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD8) > 0 or
-                prxmatch('/^E(0|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD9) > 0 or
+                prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD9) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD10) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD11) > 0 or
                 prxmatch('/^F(20|21|22|23|24|25|28|29|30|31|32|33|34|39)/', apcd.MED_ICD12) > 0 or
@@ -1855,70 +2019,91 @@ proc sort data=FINAL_COHORT;
     by ID oud_year oud_month;
 run;
 
-proc sort data=PHDAPCD.MOUD_MEDICAL;
-    by ID MED_FROM_DATE_YEAR MED_FROM_DATE_MONTH;
+DATA apcd;
+    SET PHDAPCD.ME_MTH;
+RUN;
+
+proc sort data=apcd;
+    by ID ME_MEM_YEAR ME_MEM_MONTH;
 run;
 
 data closest_insurance;
     length closest_past_type closest_future_type closest_type $2;
+    length closest_past_zip closest_future_zip closest_zip $10;
+    
     merge FINAL_COHORT (in=a)
-          PHDAPCD.MOUD_MEDICAL (in=b);
+          apcd (in=b);
     by ID;
     
-    if a;
+    if a;  /* Keep only records from FINAL_COHORT */
 
-    retain closest_past_date closest_past_type min_past_diff;
-    retain closest_future_date closest_future_type min_future_diff;
+    retain closest_past_date closest_past_type closest_past_zip min_past_diff;
+    retain closest_future_date closest_future_type closest_future_zip min_future_diff;
     retain found_exact_match;
 
     if first.ID then do;
         closest_past_date = .;
         closest_past_type = "";
+        closest_past_zip = "";
         min_past_diff = .;
+        
         closest_future_date = .;
         closest_future_type = "";
+        closest_future_zip = "";
         min_future_diff = .;
-        found_exact_match = 0;
+        
+        found_exact_match = 0;  /* Flag to track exact match */
     end;
 
-    if MED_FROM_DATE_YEAR = oud_year and MED_FROM_DATE_MONTH = oud_month then do;
-        if found_exact_match = 0 then do; 
-            closest_type = MED_INSURANCE_TYPE;
-            found_exact_match = 1;
+    /* If claim is from the exact same month/year, take the first one and stop searching */
+    if ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH = EVENT_MONTH_HCV then do;
+        if found_exact_match = 0 then do; /* Take only the first claim */
+            closest_type = ME_INSURANCE_PRODUCT;
+            closest_zip = RES_ZIP_APCD_ME;
+            found_exact_match = 1; /* Prevent processing past/future claims */
             output;
         end;
     end;
 
+    /* Only process past/future claims if no exact match was found */
     else if found_exact_match = 0 then do;
-        if MED_FROM_DATE_YEAR < oud_year or (MED_FROM_DATE_YEAR = oud_year and MED_FROM_DATE_MONTH < oud_month) then do;
-            past_diff = (oud_year - MED_FROM_DATE_YEAR) * 12 + (oud_month - MED_FROM_DATE_MONTH);
+        /* Identify the closest past claim */
+        if ME_MEM_YEAR < EVENT_YEAR_HCV or (ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH < EVENT_MONTH_HCV) then do;
+            past_diff = (EVENT_YEAR_HCV - ME_MEM_YEAR) * 12 + (EVENT_MONTH_HCV - ME_MEM_MONTH);
             if min_past_diff = . or past_diff < min_past_diff then do;
                 min_past_diff = past_diff;
-                closest_past_date = MED_FROM_DATE;
-                closest_past_type = MED_INSURANCE_TYPE;
+                closest_past_date = ME_MEM_YEAR * 100 + ME_MEM_MONTH; /* Just for comparison */
+                closest_past_type = ME_INSURANCE_PRODUCT;
+                closest_past_zip = RES_ZIP_APCD_ME;
             end;
         end;
 
+        /* Identify the closest future claim */
         else do;
-            future_diff = (MED_FROM_DATE_YEAR - oud_year) * 12 + (MED_FROM_DATE_MONTH - oud_month);
+            future_diff = (ME_MEM_YEAR - EVENT_YEAR_HCV) * 12 + (ME_MEM_MONTH - EVENT_MONTH_HCV);
             if min_future_diff = . or future_diff < min_future_diff then do;
                 min_future_diff = future_diff;
-                closest_future_date = MED_FROM_DATE;
-                closest_future_type = MED_INSURANCE_TYPE;
+                closest_future_date = ME_MEM_YEAR * 100 + ME_MEM_MONTH; /* Just for comparison */
+                closest_future_type = ME_INSURANCE_PRODUCT;
+                closest_future_zip = RES_ZIP_APCD_ME;
             end;
         end;
     end;
 
     if last.ID and found_exact_match = 0 then do;
+        /* Ensure only one claim per ID */
         if min_past_diff ne . then do;
             closest_date = closest_past_date;
             closest_type = closest_past_type;
+            closest_zip = closest_past_zip;
         end;
         else do;
             closest_date = closest_future_date;
             closest_type = closest_future_type;
+            closest_zip = closest_future_zip;
         end;
         
+        /* Prevent duplicates by outputting only once per ID */
         if closest_type ne "" then output;
     end;
 
@@ -1926,7 +2111,7 @@ run;
 
 data final_output;
     set closest_insurance;
-    keep ID oud_year oud_month closest_type;
+    keep ID EVENT_YEAR_HCV EVENT_MONTH_HCV closest_type closest_zip;
 run;
 
 proc sort data=final_output;
@@ -1935,19 +2120,828 @@ run;
 
 data FINAL_COHORT;
     merge FINAL_COHORT (in=a)
-          final_output (keep=ID closest_type rename=(closest_type=INSURANCE));
+          final_output (keep=ID closest_type closest_zip
+                       rename=(closest_type=INSURANCE));
     by ID;
     if a;
 run;
 
+/* Recategorize zip into town/city code for OUD cohort (HCV cohort has direct pull from HEPC dataset) */
+data FINAL_COHORT;
+   set FINAL_COHORT;
+     if not missing(closest_zip) then do;
+	 if closest_zip = "02351" then RES_CODE = 1;
+else if closest_zip = "01718" then RES_CODE = 2;
+else if closest_zip = "01720" then RES_CODE = 2;
+else if closest_zip = "02743" then RES_CODE = 3;
+else if closest_zip = "01220" then RES_CODE = 4;
+else if closest_zip = "01001" then RES_CODE = 5;
+else if closest_zip = "01030" then RES_CODE = 5;
+else if closest_zip = "01230" then RES_CODE = 6;
+else if closest_zip = "01913" then RES_CODE = 7;
+else if closest_zip = "01003" then RES_CODE = 8;
+else if closest_zip = "01004" then RES_CODE = 8;
+else if closest_zip = "01059" then RES_CODE = 8;
+else if closest_zip = "01810" then RES_CODE = 9;
+else if closest_zip = "01812" then RES_CODE = 9;
+else if closest_zip = "01899" then RES_CODE = 9;
+else if closest_zip = "02174" then RES_CODE = 10;
+else if closest_zip = "02175" then RES_CODE = 10;
+else if closest_zip = "02474" then RES_CODE = 10;
+else if closest_zip = "02475" then RES_CODE = 10;
+else if closest_zip = "02476" then RES_CODE = 10;
+else if closest_zip = "01430" then RES_CODE = 11;
+else if closest_zip = "01466" then RES_CODE = 11;
+else if closest_zip = "01431" then RES_CODE = 12;
+else if closest_zip = "01330" then RES_CODE = 13;
+else if closest_zip = "01721" then RES_CODE = 14;
+else if closest_zip = "01331" then RES_CODE = 15;
+else if closest_zip = "02703" then RES_CODE = 16;
+else if closest_zip = "02760" then RES_CODE = 16;
+else if closest_zip = "02763" then RES_CODE = 16;
+else if closest_zip = "01501" then RES_CODE = 17;
+else if closest_zip = "02322" then RES_CODE = 18;
+else if closest_zip = "01432" then RES_CODE = 19;
+else if closest_zip = "01433" then RES_CODE = 19;
+else if closest_zip = "02601" then RES_CODE = 20;
+else if closest_zip = "02630" then RES_CODE = 20;
+else if closest_zip = "02632" then RES_CODE = 20;
+else if closest_zip = "02634" then RES_CODE = 20;
+else if closest_zip = "02635" then RES_CODE = 20;
+else if closest_zip = "02636" then RES_CODE = 20;
+else if closest_zip = "02637" then RES_CODE = 20;
+else if closest_zip = "02647" then RES_CODE = 20;
+else if closest_zip = "02648" then RES_CODE = 20;
+else if closest_zip = "02655" then RES_CODE = 20;
+else if closest_zip = "02668" then RES_CODE = 20;
+else if closest_zip = "02672" then RES_CODE = 20;
+else if closest_zip = "01005" then RES_CODE = 21;
+else if closest_zip = "01074" then RES_CODE = 21;
+else if closest_zip = "01223" then RES_CODE = 22;
+else if closest_zip = "01730" then RES_CODE = 23;
+else if closest_zip = "01731" then RES_CODE = 23;
+else if closest_zip = "01007" then RES_CODE = 24;
+else if closest_zip = "02019" then RES_CODE = 25;
+else if closest_zip = "02178" then RES_CODE = 26;
+else if closest_zip = "02179" then RES_CODE = 26;
+else if closest_zip = "02478" then RES_CODE = 26;
+else if closest_zip = "02479" then RES_CODE = 26;
+else if closest_zip = "02779" then RES_CODE = 27;
+else if closest_zip = "01503" then RES_CODE = 28;
+else if closest_zip = "01337" then RES_CODE = 29;
+else if closest_zip = "01915" then RES_CODE = 30;
+else if closest_zip = "01965" then RES_CODE = 30;
+else if closest_zip = "01821" then RES_CODE = 31;
+else if closest_zip = "01822" then RES_CODE = 31;
+else if closest_zip = "01862" then RES_CODE = 31;
+else if closest_zip = "01865" then RES_CODE = 31;
+else if closest_zip = "01866" then RES_CODE = 31;
+else if closest_zip = "01504" then RES_CODE = 32;
+else if closest_zip = "01008" then RES_CODE = 33;
+else if closest_zip = "01740" then RES_CODE = 34;
+else if closest_zip = "02101" then RES_CODE = 35;
+else if closest_zip = "02102" then RES_CODE = 35;
+else if closest_zip = "02103" then RES_CODE = 35;
+else if closest_zip = "02104" then RES_CODE = 35;
+else if closest_zip = "02105" then RES_CODE = 35;
+else if closest_zip = "02106" then RES_CODE = 35;
+else if closest_zip = "02107" then RES_CODE = 35;
+else if closest_zip = "02108" then RES_CODE = 35;
+else if closest_zip = "02109" then RES_CODE = 35;
+else if closest_zip = "02110" then RES_CODE = 35;
+else if closest_zip = "02111" then RES_CODE = 35;
+else if closest_zip = "02112" then RES_CODE = 35;
+else if closest_zip = "02113" then RES_CODE = 35;
+else if closest_zip = "02114" then RES_CODE = 35;
+else if closest_zip = "02115" then RES_CODE = 35;
+else if closest_zip = "02116" then RES_CODE = 35;
+else if closest_zip = "02117" then RES_CODE = 35;
+else if closest_zip = "02118" then RES_CODE = 35;
+else if closest_zip = "02119" then RES_CODE = 35;
+else if closest_zip = "02120" then RES_CODE = 35;
+else if closest_zip = "02121" then RES_CODE = 35;
+else if closest_zip = "02122" then RES_CODE = 35;
+else if closest_zip = "02123" then RES_CODE = 35;
+else if closest_zip = "02124" then RES_CODE = 35;
+else if closest_zip = "02125" then RES_CODE = 35;
+else if closest_zip = "02126" then RES_CODE = 35;
+else if closest_zip = "02127" then RES_CODE = 35;
+else if closest_zip = "02128" then RES_CODE = 35;
+else if closest_zip = "02129" then RES_CODE = 35;
+else if closest_zip = "02130" then RES_CODE = 35;
+else if closest_zip = "02131" then RES_CODE = 35;
+else if closest_zip = "02132" then RES_CODE = 35;
+else if closest_zip = "02133" then RES_CODE = 35;
+else if closest_zip = "02134" then RES_CODE = 35;
+else if closest_zip = "02135" then RES_CODE = 35;
+else if closest_zip = "02136" then RES_CODE = 35;
+else if closest_zip = "02137" then RES_CODE = 35;
+else if closest_zip = "02163" then RES_CODE = 35;
+else if closest_zip = "02196" then RES_CODE = 35;
+else if closest_zip = "02199" then RES_CODE = 35;
+else if closest_zip = "02201" then RES_CODE = 35;
+else if closest_zip = "02202" then RES_CODE = 35;
+else if closest_zip = "02203" then RES_CODE = 35;
+else if closest_zip = "02204" then RES_CODE = 35;
+else if closest_zip = "02205" then RES_CODE = 35;
+else if closest_zip = "02206" then RES_CODE = 35;
+else if closest_zip = "02207" then RES_CODE = 35;
+else if closest_zip = "02208" then RES_CODE = 35;
+else if closest_zip = "02209" then RES_CODE = 35;
+else if closest_zip = "02210" then RES_CODE = 35;
+else if closest_zip = "02211" then RES_CODE = 35;
+else if closest_zip = "02212" then RES_CODE = 35;
+else if closest_zip = "02215" then RES_CODE = 35;
+else if closest_zip = "02216" then RES_CODE = 35;
+else if closest_zip = "02217" then RES_CODE = 35;
+else if closest_zip = "02222" then RES_CODE = 35;
+else if closest_zip = "02241" then RES_CODE = 35;
+else if closest_zip = "02266" then RES_CODE = 35;
+else if closest_zip = "02293" then RES_CODE = 35;
+else if closest_zip = "02295" then RES_CODE = 35;
+else if closest_zip = "02297" then RES_CODE = 35;
+else if closest_zip = "02562" then RES_CODE = 36;
+else if closest_zip = "02532" then RES_CODE = 36;
+else if closest_zip = "02534" then RES_CODE = 36;
+else if closest_zip = "02553" then RES_CODE = 36;
+else if closest_zip = "02559" then RES_CODE = 36;
+else if closest_zip = "02561" then RES_CODE = 36;
+else if closest_zip = "01719" then RES_CODE = 37;
+else if closest_zip = "01885" then RES_CODE = 38;
+else if closest_zip = "01921" then RES_CODE = 38;
+else if closest_zip = "01505" then RES_CODE = 39;
+else if closest_zip = "02184" then RES_CODE = 40;
+else if closest_zip = "02185" then RES_CODE = 40;
+else if closest_zip = "02631" then RES_CODE = 41;
+else if closest_zip = "02324" then RES_CODE = 42;
+else if closest_zip = "02325" then RES_CODE = 42;
+else if closest_zip = "01010" then RES_CODE = 43;
+else if closest_zip = "02301" then RES_CODE = 44;
+else if closest_zip = "02302" then RES_CODE = 44;
+else if closest_zip = "02303" then RES_CODE = 44;
+else if closest_zip = "02304" then RES_CODE = 44;
+else if closest_zip = "02401" then RES_CODE = 44;
+else if closest_zip = "02402" then RES_CODE = 44;
+else if closest_zip = "02403" then RES_CODE = 44;
+else if closest_zip = "02404" then RES_CODE = 44;
+else if closest_zip = "02405" then RES_CODE = 44;
+else if closest_zip = "01506" then RES_CODE = 45;
+else if closest_zip = "02146" then RES_CODE = 46;
+else if closest_zip = "02147" then RES_CODE = 46;
+else if closest_zip = "02445" then RES_CODE = 46;
+else if closest_zip = "02446" then RES_CODE = 46;
+else if closest_zip = "02447" then RES_CODE = 46;
+else if closest_zip = "02467" then RES_CODE = 46;
+else if closest_zip = "01338" then RES_CODE = 47;
+else if closest_zip = "01803" then RES_CODE = 48;
+else if closest_zip = "01805" then RES_CODE = 48;
+else if closest_zip = "02138" then RES_CODE = 49;
+else if closest_zip = "02139" then RES_CODE = 49;
+else if closest_zip = "02140" then RES_CODE = 49;
+else if closest_zip = "02141" then RES_CODE = 49;
+else if closest_zip = "02142" then RES_CODE = 49;
+else if closest_zip = "02238" then RES_CODE = 49;
+else if closest_zip = "02239" then RES_CODE = 49;
+else if closest_zip = "02021" then RES_CODE = 50;
+else if closest_zip = "01741" then RES_CODE = 51;
+else if closest_zip = "02330" then RES_CODE = 52;
+else if closest_zip = "02355" then RES_CODE = 52;
+else if closest_zip = "02366" then RES_CODE = 52;
+else if closest_zip = "01339" then RES_CODE = 53;
+else if closest_zip = "01507" then RES_CODE = 54;
+else if closest_zip = "01508" then RES_CODE = 54;
+else if closest_zip = "01509" then RES_CODE = 54;
+else if closest_zip = "02633" then RES_CODE = 55;
+else if closest_zip = "02650" then RES_CODE = 55;
+else if closest_zip = "02659" then RES_CODE = 55;
+else if closest_zip = "02669" then RES_CODE = 55;
+else if closest_zip = "01824" then RES_CODE = 56;
+else if closest_zip = "01863" then RES_CODE = 56;
+else if closest_zip = "02150" then RES_CODE = 57;
+else if closest_zip = "01225" then RES_CODE = 58;
+else if closest_zip = "01011" then RES_CODE = 59;
+else if closest_zip = "01050" then RES_CODE = 143;
+else if closest_zip = "01012" then RES_CODE = 60;
+else if closest_zip = "01026" then RES_CODE = 60;
+else if closest_zip = "01084" then RES_CODE = 60;
+else if closest_zip = "01013" then RES_CODE = 61;
+else if closest_zip = "01014" then RES_CODE = 61;
+else if closest_zip = "01020" then RES_CODE = 61;
+else if closest_zip = "01021" then RES_CODE = 61;
+else if closest_zip = "01022" then RES_CODE = 61;
+else if closest_zip = "02535" then RES_CODE = 62;
+else if closest_zip = "02552" then RES_CODE = 62;
+else if closest_zip = "01247" then RES_CODE = 63;
+else if closest_zip = "01510" then RES_CODE = 64;
+else if closest_zip = "02025" then RES_CODE = 65;
+else if closest_zip = "01340" then RES_CODE = 66;
+else if closest_zip = "01369" then RES_CODE = 66;
+else if closest_zip = "01742" then RES_CODE = 67;
+else if closest_zip = "01341" then RES_CODE = 68;
+else if closest_zip = "01226" then RES_CODE = 70;
+else if closest_zip = "01227" then RES_CODE = 70;
+else if closest_zip = "01923" then RES_CODE = 71;
+else if closest_zip = "01937" then RES_CODE = 71;
+else if closest_zip = "02714" then RES_CODE = 72;
+else if closest_zip = "02747" then RES_CODE = 72;
+else if closest_zip = "02748" then RES_CODE = 72;
+else if closest_zip = "02026" then RES_CODE = 73;
+else if closest_zip = "02027" then RES_CODE = 73;
+else if closest_zip = "01342" then RES_CODE = 74;
+else if closest_zip = "02638" then RES_CODE = 75;
+else if closest_zip = "02639" then RES_CODE = 75;
+else if closest_zip = "02641" then RES_CODE = 75;
+else if closest_zip = "02660" then RES_CODE = 75;
+else if closest_zip = "02670" then RES_CODE = 75;
+else if closest_zip = "02715" then RES_CODE = 76;
+else if closest_zip = "02754" then RES_CODE = 76;
+else if closest_zip = "02764" then RES_CODE = 76;
+else if closest_zip = "01516" then RES_CODE = 77;
+else if closest_zip = "02030" then RES_CODE = 78;
+else if closest_zip = "01826" then RES_CODE = 79;
+else if closest_zip = "01571" then RES_CODE = 80;
+else if closest_zip = "01827" then RES_CODE = 81;
+else if closest_zip = "02331" then RES_CODE = 82;
+else if closest_zip = "02332" then RES_CODE = 82;
+else if closest_zip = "02333" then RES_CODE = 83;
+else if closest_zip = "02337" then RES_CODE = 83;
+else if closest_zip = "01515" then RES_CODE = 84;
+else if closest_zip = "01028" then RES_CODE = 85;
+else if closest_zip = "02642" then RES_CODE = 86;
+else if closest_zip = "02651" then RES_CODE = 86;
+else if closest_zip = "01027" then RES_CODE = 87;
+else if closest_zip = "02334" then RES_CODE = 88;
+else if closest_zip = "02356" then RES_CODE = 88;
+else if closest_zip = "02357" then RES_CODE = 88;
+else if closest_zip = "02375" then RES_CODE = 88;
+else if closest_zip = "02539" then RES_CODE = 89;
+else if closest_zip = "01252" then RES_CODE = 90;
+else if closest_zip = "01344" then RES_CODE = 91;
+else if closest_zip = "01929" then RES_CODE = 92;
+else if closest_zip = "02149" then RES_CODE = 93;
+else if closest_zip = "02719" then RES_CODE = 94;
+else if closest_zip = "02720" then RES_CODE = 95;
+else if closest_zip = "02721" then RES_CODE = 95;
+else if closest_zip = "02722" then RES_CODE = 95;
+else if closest_zip = "02723" then RES_CODE = 95;
+else if closest_zip = "02724" then RES_CODE = 95;
+else if closest_zip = "02536" then RES_CODE = 96;
+else if closest_zip = "02540" then RES_CODE = 96;
+else if closest_zip = "02541" then RES_CODE = 96;
+else if closest_zip = "02543" then RES_CODE = 96;
+else if closest_zip = "02556" then RES_CODE = 96;
+else if closest_zip = "02565" then RES_CODE = 96;
+else if closest_zip = "02574" then RES_CODE = 96;
+else if closest_zip = "01420" then RES_CODE = 97;
+else if closest_zip = "01343" then RES_CODE = 98;
+else if closest_zip = "02035" then RES_CODE = 99;
+else if closest_zip = "01701" then RES_CODE = 100;
+else if closest_zip = "01702" then RES_CODE = 100;
+else if closest_zip = "01703" then RES_CODE = 100;
+else if closest_zip = "01705" then RES_CODE = 100;
+else if closest_zip = "02038" then RES_CODE = 101;
+else if closest_zip = "02702" then RES_CODE = 102;
+else if closest_zip = "02717" then RES_CODE = 102;
+else if closest_zip = "01440" then RES_CODE = 103;
+else if closest_zip = "01441" then RES_CODE = 103;
+else if closest_zip = "02535" then RES_CODE = 104;
+else if closest_zip = "01833" then RES_CODE = 105;
+else if closest_zip = "01354" then RES_CODE = 106;
+else if closest_zip = "01376" then RES_CODE = 192;
+else if closest_zip = "01930" then RES_CODE = 107;
+else if closest_zip = "01931" then RES_CODE = 107;
+else if closest_zip = "01032" then RES_CODE = 108;
+else if closest_zip = "01096" then RES_CODE = 108;
+else if closest_zip = "02713" then RES_CODE = 109;
+else if closest_zip = "01519" then RES_CODE = 110;
+else if closest_zip = "01536" then RES_CODE = 110;
+else if closest_zip = "01560" then RES_CODE = 110;
+else if closest_zip = "01033" then RES_CODE = 111;
+else if closest_zip = "01034" then RES_CODE = 112;
+else if closest_zip = "01230" then RES_CODE = 113;
+else if closest_zip = "01244" then RES_CODE = 203;
+else if closest_zip = "01301" then RES_CODE = 114;
+else if closest_zip = "01302" then RES_CODE = 114;
+else if closest_zip = "01450" then RES_CODE = 115;
+else if closest_zip = "01470" then RES_CODE = 115;
+else if closest_zip = "01471" then RES_CODE = 115;
+else if closest_zip = "01472" then RES_CODE = 115;
+else if closest_zip = "01834" then RES_CODE = 116;
+else if closest_zip = "01035" then RES_CODE = 117;
+else if closest_zip = "02338" then RES_CODE = 118;
+else if closest_zip = "01936" then RES_CODE = 119;
+else if closest_zip = "01982" then RES_CODE = 119;
+else if closest_zip = "01036" then RES_CODE = 120;
+else if closest_zip = "01201" then RES_CODE = 121;
+else if closest_zip = "02339" then RES_CODE = 122;
+else if closest_zip = "02340" then RES_CODE = 122;
+else if closest_zip = "02341" then RES_CODE = 123;
+else if closest_zip = "02350" then RES_CODE = 123;
+else if closest_zip = "01031" then RES_CODE = 124;
+else if closest_zip = "01037" then RES_CODE = 124;
+else if closest_zip = "01094" then RES_CODE = 124;
+else if closest_zip = "01434" then RES_CODE = 125;
+else if closest_zip = "01451" then RES_CODE = 125;
+else if closest_zip = "01467" then RES_CODE = 125;
+else if closest_zip = "02645" then RES_CODE = 126;
+else if closest_zip = "02646" then RES_CODE = 126;
+else if closest_zip = "02661" then RES_CODE = 126;
+else if closest_zip = "02671" then RES_CODE = 126;
+else if closest_zip = "01038" then RES_CODE = 127;
+else if closest_zip = "01066" then RES_CODE = 127;
+else if closest_zip = "01088" then RES_CODE = 127;
+else if closest_zip = "01830" then RES_CODE = 128;
+else if closest_zip = "01831" then RES_CODE = 128;
+else if closest_zip = "01832" then RES_CODE = 128;
+else if closest_zip = "01835" then RES_CODE = 128;
+else if closest_zip = "01339" then RES_CODE = 128;
+else if closest_zip = "01070" then RES_CODE = 129;
+else if closest_zip = "01346" then RES_CODE = 130;
+else if closest_zip = "02043" then RES_CODE = 131;
+else if closest_zip = "02044" then RES_CODE = 131;
+else if closest_zip = "01226" then RES_CODE = 132;
+else if closest_zip = "02343" then RES_CODE = 133;
+else if closest_zip = "01520" then RES_CODE = 134;
+else if closest_zip = "01522" then RES_CODE = 134;
+else if closest_zip = "01521" then RES_CODE = 135;
+else if closest_zip = "01746" then RES_CODE = 136;
+else if closest_zip = "01040" then RES_CODE = 137;
+else if closest_zip = "01041" then RES_CODE = 137;
+else if closest_zip = "01747" then RES_CODE = 138;
+else if closest_zip = "01748" then RES_CODE = 139;
+else if closest_zip = "01784" then RES_CODE = 139;
+else if closest_zip = "01452" then RES_CODE = 140;
+else if closest_zip = "01749" then RES_CODE = 141;
+else if closest_zip = "02045" then RES_CODE = 142;
+else if closest_zip = "01050" then RES_CODE = 143;
+else if closest_zip = "01938" then RES_CODE = 144;
+else if closest_zip = "02364" then RES_CODE = 145;
+else if closest_zip = "02347" then RES_CODE = 146;
+else if closest_zip = "01523" then RES_CODE = 147;
+else if closest_zip = "01561" then RES_CODE = 147;
+else if closest_zip = "01224" then RES_CODE = 148;
+else if closest_zip = "01237" then RES_CODE = 148;
+else if closest_zip = "01840" then RES_CODE = 149;
+else if closest_zip = "01841" then RES_CODE = 149;
+else if closest_zip = "01842" then RES_CODE = 149;
+else if closest_zip = "01843" then RES_CODE = 149;
+else if closest_zip = "01238" then RES_CODE = 150;
+else if closest_zip = "01260" then RES_CODE = 150;
+else if closest_zip = "01524" then RES_CODE = 151;
+else if closest_zip = "01542" then RES_CODE = 151;
+else if closest_zip = "01611" then RES_CODE = 151;
+else if closest_zip = "01240" then RES_CODE = 152;
+else if closest_zip = "01242" then RES_CODE = 152;
+else if closest_zip = "01453" then RES_CODE = 153;
+else if closest_zip = "01054" then RES_CODE = 154;
+else if closest_zip = "02173" then RES_CODE = 155;
+else if closest_zip = "02420" then RES_CODE = 155;
+else if closest_zip = "02421" then RES_CODE = 155;
+else if closest_zip = "01301" then RES_CODE = 156;
+else if closest_zip = "01773" then RES_CODE = 157;
+else if closest_zip = "01460" then RES_CODE = 158;
+else if closest_zip = "01106" then RES_CODE = 159;
+else if closest_zip = "01116" then RES_CODE = 159;
+else if closest_zip = "01850" then RES_CODE = 160;
+else if closest_zip = "01851" then RES_CODE = 160;
+else if closest_zip = "01852" then RES_CODE = 160;
+else if closest_zip = "01853" then RES_CODE = 160;
+else if closest_zip = "01854" then RES_CODE = 160;
+else if closest_zip = "01056" then RES_CODE = 161;
+else if closest_zip = "01462" then RES_CODE = 162;
+else if closest_zip = "01901" then RES_CODE = 163;
+else if closest_zip = "01902" then RES_CODE = 163;
+else if closest_zip = "01903" then RES_CODE = 163;
+else if closest_zip = "01904" then RES_CODE = 163;
+else if closest_zip = "01905" then RES_CODE = 163;
+else if closest_zip = "01910" then RES_CODE = 163;
+else if closest_zip = "01940" then RES_CODE = 164;
+else if closest_zip = "02148" then RES_CODE = 165;
+else if closest_zip = "01944" then RES_CODE = 166;
+else if closest_zip = "02031" then RES_CODE = 167;
+else if closest_zip = "02048" then RES_CODE = 167;
+else if closest_zip = "01945" then RES_CODE = 168;
+else if closest_zip = "01947" then RES_CODE = 168;
+else if closest_zip = "02738" then RES_CODE = 169;
+else if closest_zip = "01752" then RES_CODE = 170;
+else if closest_zip = "02020" then RES_CODE = 171;
+else if closest_zip = "02041" then RES_CODE = 171;
+else if closest_zip = "02047" then RES_CODE = 264;
+else if closest_zip = "02050" then RES_CODE = 171;
+else if closest_zip = "02051" then RES_CODE = 171;
+else if closest_zip = "02059" then RES_CODE = 171;
+else if closest_zip = "02065" then RES_CODE = 171;
+else if closest_zip = "02649" then RES_CODE = 172;
+else if closest_zip = "02739" then RES_CODE = 173;
+else if closest_zip = "01754" then RES_CODE = 174;
+else if closest_zip = "02052" then RES_CODE = 175;
+else if closest_zip = "02153" then RES_CODE = 176;
+else if closest_zip = "02155" then RES_CODE = 176;
+else if closest_zip = "02156" then RES_CODE = 176;
+else if closest_zip = "02053" then RES_CODE = 177;
+else if closest_zip = "02176" then RES_CODE = 178;
+else if closest_zip = "02177" then RES_CODE = 178;
+else if closest_zip = "01756" then RES_CODE = 179;
+else if closest_zip = "01860" then RES_CODE = 180;
+else if closest_zip = "01844" then RES_CODE = 181;
+else if closest_zip = "02344" then RES_CODE = 182;
+else if closest_zip = "02346" then RES_CODE = 182;
+else if closest_zip = "02348" then RES_CODE = 182;
+else if closest_zip = "02349" then RES_CODE = 182;
+else if closest_zip = "01243" then RES_CODE = 183;
+else if closest_zip = "01949" then RES_CODE = 184;
+else if closest_zip = "01757" then RES_CODE = 185;
+else if closest_zip = "01527" then RES_CODE = 186;
+else if closest_zip = "01586" then RES_CODE = 186;
+else if closest_zip = "02054" then RES_CODE = 187;
+else if closest_zip = "01529" then RES_CODE = 188;
+else if closest_zip = "02186" then RES_CODE = 189;
+else if closest_zip = "02187" then RES_CODE = 189;
+else if closest_zip = "01350" then RES_CODE = 190;
+else if closest_zip = "01057" then RES_CODE = 191;
+else if closest_zip = "01347" then RES_CODE = 192;
+else if closest_zip = "01349" then RES_CODE = 192;
+else if closest_zip = "01351" then RES_CODE = 192;
+else if closest_zip = "01245" then RES_CODE = 193;
+else if closest_zip = "01050" then RES_CODE = 194;
+else if closest_zip = "01258" then RES_CODE = 195;
+else if closest_zip = "01908" then RES_CODE = 196;
+else if closest_zip = "02554" then RES_CODE = 197;
+else if closest_zip = "02564" then RES_CODE = 197;
+else if closest_zip = "02584" then RES_CODE = 197;
+else if closest_zip = "01760" then RES_CODE = 198;
+else if closest_zip = "02192" then RES_CODE = 199;
+else if closest_zip = "02194" then RES_CODE = 199;
+else if closest_zip = "02492" then RES_CODE = 199;
+else if closest_zip = "02494" then RES_CODE = 199;
+else if closest_zip = "01220" then RES_CODE = 200;
+else if closest_zip = "02740" then RES_CODE = 201;
+else if closest_zip = "02741" then RES_CODE = 201;
+else if closest_zip = "02742" then RES_CODE = 201;
+else if closest_zip = "02744" then RES_CODE = 201;
+else if closest_zip = "02745" then RES_CODE = 201;
+else if closest_zip = "02746" then RES_CODE = 201;
+else if closest_zip = "01531" then RES_CODE = 202;
+else if closest_zip = "01259" then RES_CODE = 203;
+else if closest_zip = "01355" then RES_CODE = 204;
+else if closest_zip = "01922" then RES_CODE = 205;
+else if closest_zip = "01951" then RES_CODE = 205;
+else if closest_zip = "01950" then RES_CODE = 206;
+else if closest_zip = "02158" then RES_CODE = 207;
+else if closest_zip = "02159" then RES_CODE = 207;
+else if closest_zip = "02160" then RES_CODE = 207;
+else if closest_zip = "02161" then RES_CODE = 207;
+else if closest_zip = "02162" then RES_CODE = 207;
+else if closest_zip = "02164" then RES_CODE = 207;
+else if closest_zip = "02165" then RES_CODE = 207;
+else if closest_zip = "02166" then RES_CODE = 207;
+else if closest_zip = "02167" then RES_CODE = 207;
+else if closest_zip = "02168" then RES_CODE = 207;
+else if closest_zip = "02195" then RES_CODE = 207;
+else if closest_zip = "02258" then RES_CODE = 207;
+else if closest_zip = "02456" then RES_CODE = 207;
+else if closest_zip = "02458" then RES_CODE = 207;
+else if closest_zip = "02459" then RES_CODE = 207;
+else if closest_zip = "02460" then RES_CODE = 207;
+else if closest_zip = "02461" then RES_CODE = 207;
+else if closest_zip = "02462" then RES_CODE = 207;
+else if closest_zip = "02464" then RES_CODE = 207;
+else if closest_zip = "02465" then RES_CODE = 207;
+else if closest_zip = "02466" then RES_CODE = 207;
+else if closest_zip = "02468" then RES_CODE = 207;
+else if closest_zip = "02495" then RES_CODE = 207;
+else if closest_zip = "02056" then RES_CODE = 208;
+else if closest_zip = "01247" then RES_CODE = 209;
+else if closest_zip = "01845" then RES_CODE = 210;
+else if closest_zip = "02760" then RES_CODE = 211;
+else if closest_zip = "02761" then RES_CODE = 211;
+else if closest_zip = "02763" then RES_CODE = 211;
+else if closest_zip = "02739" then RES_CODE = 211;
+else if closest_zip = "01535" then RES_CODE = 212;
+else if closest_zip = "01864" then RES_CODE = 213;
+else if closest_zip = "01889" then RES_CODE = 213;
+else if closest_zip = "01053" then RES_CODE = 214;
+else if closest_zip = "01060" then RES_CODE = 214;
+else if closest_zip = "01061" then RES_CODE = 214;
+else if closest_zip = "01062" then RES_CODE = 214;
+else if closest_zip = "01063" then RES_CODE = 214;
+else if closest_zip = "01532" then RES_CODE = 215;
+else if closest_zip = "01534" then RES_CODE = 216;
+else if closest_zip = "01588" then RES_CODE = 216;
+else if closest_zip = "01360" then RES_CODE = 217;
+else if closest_zip = "02712" then RES_CODE = 218;
+else if closest_zip = "02766" then RES_CODE = 218;
+else if closest_zip = "02018" then RES_CODE = 219;
+else if closest_zip = "02061" then RES_CODE = 219;
+else if closest_zip = "02062" then RES_CODE = 220;
+else if closest_zip = "02557" then RES_CODE = 221;
+else if closest_zip = "01068" then RES_CODE = 222;
+else if closest_zip = "01364" then RES_CODE = 223;
+else if closest_zip = "02643" then RES_CODE = 224;
+else if closest_zip = "02653" then RES_CODE = 224;
+else if closest_zip = "02662" then RES_CODE = 223;
+else if closest_zip = "01029" then RES_CODE = 225;
+else if closest_zip = "01253" then RES_CODE = 225;
+else if closest_zip = "01537" then RES_CODE = 226;
+else if closest_zip = "01540" then RES_CODE = 226;
+else if closest_zip = "01009" then RES_CODE = 227;
+else if closest_zip = "01069" then RES_CODE = 227;
+else if closest_zip = "01079" then RES_CODE = 227;
+else if closest_zip = "01080" then RES_CODE = 227;
+else if closest_zip = "01612" then RES_CODE = 228;
+else if closest_zip = "01960" then RES_CODE = 229;
+else if closest_zip = "01961" then RES_CODE = 229;
+else if closest_zip = "01964" then RES_CODE = 229;
+else if closest_zip = "01002" then RES_CODE = 230;
+else if closest_zip = "02327" then RES_CODE = 231;
+else if closest_zip = "02358" then RES_CODE = 231;
+else if closest_zip = "02359" then RES_CODE = 231;
+else if closest_zip = "01463" then RES_CODE = 232;
+else if closest_zip = "01235" then RES_CODE = 233;
+else if closest_zip = "01366" then RES_CODE = 234;
+else if closest_zip = "01201" then RES_CODE = 236;
+else if closest_zip = "01202" then RES_CODE = 236;
+else if closest_zip = "01203" then RES_CODE = 236;
+else if closest_zip = "01070" then RES_CODE = 237;
+else if closest_zip = "02762" then RES_CODE = 238;
+else if closest_zip = "02345" then RES_CODE = 239;
+else if closest_zip = "02360" then RES_CODE = 239;
+else if closest_zip = "02361" then RES_CODE = 239;
+else if closest_zip = "02362" then RES_CODE = 239;
+else if closest_zip = "02363" then RES_CODE = 239;
+else if closest_zip = "02381" then RES_CODE = 239;
+else if closest_zip = "02367" then RES_CODE = 240;
+else if closest_zip = "01517" then RES_CODE = 241;
+else if closest_zip = "01541" then RES_CODE = 241;
+else if closest_zip = "02657" then RES_CODE = 242;
+else if closest_zip = "02169" then RES_CODE = 243;
+else if closest_zip = "02170" then RES_CODE = 243;
+else if closest_zip = "02171" then RES_CODE = 243;
+else if closest_zip = "02269" then RES_CODE = 243;
+else if closest_zip = "02368" then RES_CODE = 244;
+else if closest_zip = "02767" then RES_CODE = 245;
+else if closest_zip = "02768" then RES_CODE = 245;
+else if closest_zip = "01867" then RES_CODE = 246;
+else if closest_zip = "02769" then RES_CODE = 247;
+else if closest_zip = "02151" then RES_CODE = 248;
+else if closest_zip = "01254" then RES_CODE = 249;
+else if closest_zip = "02770" then RES_CODE = 250;
+else if closest_zip = "02370" then RES_CODE = 251;
+else if closest_zip = "01966" then RES_CODE = 252;
+else if closest_zip = "01367" then RES_CODE = 253;
+else if closest_zip = "01969" then RES_CODE = 254;
+else if closest_zip = "01368" then RES_CODE = 255;
+else if closest_zip = "01071" then RES_CODE = 256;
+else if closest_zip = "01097" then RES_CODE = 256;
+else if closest_zip = "01543" then RES_CODE = 257;
+else if closest_zip = "01970" then RES_CODE = 258;
+else if closest_zip = "01971" then RES_CODE = 258;
+else if closest_zip = "01952" then RES_CODE = 259;
+else if closest_zip = "01255" then RES_CODE = 260;
+else if closest_zip = "02537" then RES_CODE = 261;
+else if closest_zip = "02542" then RES_CODE = 261;
+else if closest_zip = "02563" then RES_CODE = 261;
+else if closest_zip = "02644" then RES_CODE = 261;
+else if closest_zip = "01906" then RES_CODE = 262;
+else if closest_zip = "01256" then RES_CODE = 263;
+else if closest_zip = "02040" then RES_CODE = 264;
+else if closest_zip = "02055" then RES_CODE = 264;
+else if closest_zip = "02060" then RES_CODE = 264;
+else if closest_zip = "02066" then RES_CODE = 264;
+else if closest_zip = "02771" then RES_CODE = 265;
+else if closest_zip = "02067" then RES_CODE = 266;
+else if closest_zip = "01222" then RES_CODE = 267;
+else if closest_zip = "01257" then RES_CODE = 267;
+else if closest_zip = "01370" then RES_CODE = 268;
+else if closest_zip = "01770" then RES_CODE = 269;
+else if closest_zip = "01464" then RES_CODE = 270;
+else if closest_zip = "01545" then RES_CODE = 271;
+else if closest_zip = "01546" then RES_CODE = 271;
+else if closest_zip = "01072" then RES_CODE = 272;
+else if closest_zip = "02725" then RES_CODE = 273;
+else if closest_zip = "02726" then RES_CODE = 273;
+else if closest_zip = "02143" then RES_CODE = 274;
+else if closest_zip = "02144" then RES_CODE = 274;
+else if closest_zip = "02145" then RES_CODE = 274;
+else if closest_zip = "01075" then RES_CODE = 275;
+else if closest_zip = "01073" then RES_CODE = 276;
+else if closest_zip = "01745" then RES_CODE = 277;
+else if closest_zip = "01772" then RES_CODE = 277;
+else if closest_zip = "01550" then RES_CODE = 278;
+else if closest_zip = "01077" then RES_CODE = 279;
+else if closest_zip = "01562" then RES_CODE = 280;
+else if closest_zip = "01101" then RES_CODE = 281;
+else if closest_zip = "01102" then RES_CODE = 281;
+else if closest_zip = "01103" then RES_CODE = 281;
+else if closest_zip = "01104" then RES_CODE = 281;
+else if closest_zip = "01105" then RES_CODE = 281;
+else if closest_zip = "01107" then RES_CODE = 281;
+else if closest_zip = "01108" then RES_CODE = 281;
+else if closest_zip = "01109" then RES_CODE = 281;
+else if closest_zip = "01111" then RES_CODE = 281;
+else if closest_zip = "01114" then RES_CODE = 281;
+else if closest_zip = "01115" then RES_CODE = 281;
+else if closest_zip = "01118" then RES_CODE = 281;
+else if closest_zip = "01119" then RES_CODE = 281;
+else if closest_zip = "01128" then RES_CODE = 281;
+else if closest_zip = "01129" then RES_CODE = 281;
+else if closest_zip = "01133" then RES_CODE = 281;
+else if closest_zip = "01138" then RES_CODE = 281;
+else if closest_zip = "01139" then RES_CODE = 281;
+else if closest_zip = "01144" then RES_CODE = 281;
+else if closest_zip = "01151" then RES_CODE = 281;
+else if closest_zip = "01152" then RES_CODE = 281;
+else if closest_zip = "01199" then RES_CODE = 281;
+else if closest_zip = "01564" then RES_CODE = 282;
+else if closest_zip = "01229" then RES_CODE = 283;
+else if closest_zip = "01262" then RES_CODE = 283;
+else if closest_zip = "01263" then RES_CODE = 283;
+else if closest_zip = "02180" then RES_CODE = 284;
+else if closest_zip = "02072" then RES_CODE = 285;
+else if closest_zip = "01775" then RES_CODE = 286;
+else if closest_zip = "01518" then RES_CODE = 287;
+else if closest_zip = "01566" then RES_CODE = 287;
+else if closest_zip = "01776" then RES_CODE = 288;
+else if closest_zip = "01375" then RES_CODE = 289;
+else if closest_zip = "01526" then RES_CODE = 290;
+else if closest_zip = "01590" then RES_CODE = 290;
+else if closest_zip = "01907" then RES_CODE = 291;
+else if closest_zip = "02777" then RES_CODE = 292;
+else if closest_zip = "02718" then RES_CODE = 293;
+else if closest_zip = "02780" then RES_CODE = 293;
+else if closest_zip = "01436" then RES_CODE = 294;
+else if closest_zip = "01438" then RES_CODE = 294;
+else if closest_zip = "01468" then RES_CODE = 294;
+else if closest_zip = "01876" then RES_CODE = 295;
+else if closest_zip = "02568" then RES_CODE = 296;
+else if closest_zip = "02573" then RES_CODE = 296;
+else if closest_zip = "01983" then RES_CODE = 298;
+else if closest_zip = "01469" then RES_CODE = 299;
+else if closest_zip = "01474" then RES_CODE = 299;
+else if closest_zip = "02652" then RES_CODE = 300;
+else if closest_zip = "02666" then RES_CODE = 300;
+else if closest_zip = "01879" then RES_CODE = 301;
+else if closest_zip = "01264" then RES_CODE = 302;
+else if closest_zip = "01568" then RES_CODE = 303;
+else if closest_zip = "01525" then RES_CODE = 304;
+else if closest_zip = "01538" then RES_CODE = 304;
+else if closest_zip = "01569" then RES_CODE = 304;
+else if closest_zip = "01880" then RES_CODE = 305;
+else if closest_zip = "01081" then RES_CODE = 306;
+else if closest_zip = "02032" then RES_CODE = 307;
+else if closest_zip = "02071" then RES_CODE = 307;
+else if closest_zip = "02081" then RES_CODE = 307;
+else if closest_zip = "02154" then RES_CODE = 308;
+else if closest_zip = "02254" then RES_CODE = 308;
+else if closest_zip = "02451" then RES_CODE = 308;
+else if closest_zip = "02452" then RES_CODE = 308;
+else if closest_zip = "02453" then RES_CODE = 308;
+else if closest_zip = "02454" then RES_CODE = 308;
+else if closest_zip = "02455" then RES_CODE = 308;
+else if closest_zip = "01082" then RES_CODE = 309;
+else if closest_zip = "02538" then RES_CODE = 310;
+else if closest_zip = "02558" then RES_CODE = 310;
+else if closest_zip = "02571" then RES_CODE = 310;
+else if closest_zip = "02576" then RES_CODE = 310;
+else if closest_zip = "01083" then RES_CODE = 311;
+else if closest_zip = "01092" then RES_CODE = 311;
+else if closest_zip = "01378" then RES_CODE = 312;
+else if closest_zip = "01223" then RES_CODE = 313;
+else if closest_zip = "02172" then RES_CODE = 314;
+else if closest_zip = "02272" then RES_CODE = 314;
+else if closest_zip = "02277" then RES_CODE = 314;
+else if closest_zip = "02471" then RES_CODE = 314;
+else if closest_zip = "02472" then RES_CODE = 314;
+else if closest_zip = "01778" then RES_CODE = 315;
+else if closest_zip = "01570" then RES_CODE = 316;
+else if closest_zip = "02157" then RES_CODE = 317;
+else if closest_zip = "02181" then RES_CODE = 317;
+else if closest_zip = "02457" then RES_CODE = 317;
+else if closest_zip = "02481" then RES_CODE = 317;
+else if closest_zip = "02482" then RES_CODE = 317;
+else if closest_zip = "02663" then RES_CODE = 318;
+else if closest_zip = "02667" then RES_CODE = 318;
+else if closest_zip = "01379" then RES_CODE = 319;
+else if closest_zip = "01380" then RES_CODE = 319;
+else if closest_zip = "01984" then RES_CODE = 320;
+else if closest_zip = "01539" then RES_CODE = 321;
+else if closest_zip = "01583" then RES_CODE = 321;
+else if closest_zip = "02379" then RES_CODE = 322;
+else if closest_zip = "01585" then RES_CODE = 323;
+else if closest_zip = "01985" then RES_CODE = 324;
+else if closest_zip = "01089" then RES_CODE = 113;
+else if closest_zip = "01090" then RES_CODE = 113;
+else if closest_zip = "01236" then RES_CODE = 325;
+else if closest_zip = "01266" then RES_CODE = 326;
+else if closest_zip = "02575" then RES_CODE = 327;
+else if closest_zip = "01580" then RES_CODE = 328;
+else if closest_zip = "01581" then RES_CODE = 328;
+else if closest_zip = "01582" then RES_CODE = 328;
+else if closest_zip = "01085" then RES_CODE = 329;
+else if closest_zip = "01086" then RES_CODE = 329;
+else if closest_zip = "01886" then RES_CODE = 330;
+else if closest_zip = "01027" then RES_CODE = 331;
+else if closest_zip = "01473" then RES_CODE = 332;
+else if closest_zip = "02193" then RES_CODE = 333;
+else if closest_zip = "02493" then RES_CODE = 333;
+else if closest_zip = "02790" then RES_CODE = 334;
+else if closest_zip = "02791" then RES_CODE = 334;
+else if closest_zip = "02090" then RES_CODE = 335;
+else if closest_zip = "02188" then RES_CODE = 336;
+else if closest_zip = "02189" then RES_CODE = 336;
+else if closest_zip = "02190" then RES_CODE = 336;
+else if closest_zip = "02191" then RES_CODE = 336;
+else if closest_zip = "01093" then RES_CODE = 337;
+else if closest_zip = "01373" then RES_CODE = 337;
+else if closest_zip = "02382" then RES_CODE = 338;
+else if closest_zip = "01095" then RES_CODE = 339;
+else if closest_zip = "01039" then RES_CODE = 340;
+else if closest_zip = "01267" then RES_CODE = 341;
+else if closest_zip = "01887" then RES_CODE = 342;
+else if closest_zip = "01475" then RES_CODE = 343;
+else if closest_zip = "01477" then RES_CODE = 343;
+else if closest_zip = "01890" then RES_CODE = 344;
+else if closest_zip = "01270" then RES_CODE = 345;
+else if closest_zip = "02152" then RES_CODE = 346;
+else if closest_zip = "01801" then RES_CODE = 347;
+else if closest_zip = "01806" then RES_CODE = 347;
+else if closest_zip = "01807" then RES_CODE = 347;
+else if closest_zip = "01808" then RES_CODE = 347;
+else if closest_zip = "01813" then RES_CODE = 347;
+else if closest_zip = "01814" then RES_CODE = 347;
+else if closest_zip = "01815" then RES_CODE = 347;
+else if closest_zip = "01888" then RES_CODE = 347;
+else if closest_zip = "01601" then RES_CODE = 348;
+else if closest_zip = "01602" then RES_CODE = 348;
+else if closest_zip = "01603" then RES_CODE = 348;
+else if closest_zip = "01604" then RES_CODE = 348;
+else if closest_zip = "01605" then RES_CODE = 348;
+else if closest_zip = "01606" then RES_CODE = 348;
+else if closest_zip = "01607" then RES_CODE = 348;
+else if closest_zip = "01608" then RES_CODE = 348;
+else if closest_zip = "01609" then RES_CODE = 348;
+else if closest_zip = "01610" then RES_CODE = 348;
+else if closest_zip = "01613" then RES_CODE = 348;
+else if closest_zip = "01614" then RES_CODE = 348;
+else if closest_zip = "01615" then RES_CODE = 348;
+else if closest_zip = "01653" then RES_CODE = 348;
+else if closest_zip = "01654" then RES_CODE = 348;
+else if closest_zip = "01655" then RES_CODE = 348;
+else if closest_zip = "01098" then RES_CODE = 349;
+else if closest_zip = "02070" then RES_CODE = 350;
+else if closest_zip = "02093" then RES_CODE = 350;
+else if closest_zip = "02664" then RES_CODE = 351;
+else if closest_zip = "02673" then RES_CODE = 351;
+else if closest_zip = "02675" then RES_CODE = 351;
+else if missing(closest_zip) then RES_CODE  = 999;
+    end;
+run;
+
+data FINAL_COHORT;
+   set FINAL_COHORT;
+	if RES_CODE in (1,2,3,5,7,8,9,10,14,16,17,18,20,23,25,26,30,31,
+	32,35,36,40,42,44,46,48,49,50,52,56,57,61,65,67,71,72,73,75,79,
+	80,82,83,85,87,88,93,94,95,96,97,99,100,101,103,105,107,110,115,
+	116,119,122,123,126,128,131,133,134,136,137,138,139,141,142,144,
+	145,146,149,151,153,155,158,159,160,161,162,163,164,165,166,167,
+	168,170,171,172,174,175,176,177,178,180,181,182,184,185,186,187,
+	188,189,196,198,199,201,206,207,208,210,211,213,214,215,216,218,
+	219,220,226,229,231,232,236,238,239,243,244,245,246,248,251,252,
+	258,259,261,262,264,265,266,271,273,274,275,277,278,280,281,284,
+	285,288,291,292,293,295,298,301,304,305,307,308,310,314,315,316,
+	317,320,321,325,328,329,330,333,334,335,336,338,339,342,344,
+	346,347,348,350,351) then rural=0;
+	
+	else if RES_CODE in (4,11,12,13,19,21,22,24,27,28,33,34,37,38,39,
+	41,43,45,51,54,55,58,59,60,64,68,69,70,74,76,77,78,81,84,86,92,
+	102,108,111,112,117,118,120,125,127,132,135,140,143,147,148,154,
+	157,169,173,179,183,191,194,200,205,212,222,224,227,228,230,240,
+	241,247,249,250,254,255,256,257,263,269,270,272,276,279,282,286,
+	287,289,290,294,297,299,303,306,309,311,313,322,323,324,331,332,
+	337,340, 343,345,349) then rural =1;
+	
+	else if RES_CODE in (6,104,15,29,47,53,62,63,66,89,90,91,98,106,
+	109,113,114,121,124,129,130,150,152,156,190,192,193,195,197,202,
+	203,204,209,217,221,223,225,233,234,235,237,242,253,260,267,268,
+	283,296,300,302,312,318,319,326,327,341) then rural =2;
+run;
+
 data FINAL_COHORT;
     set FINAL_COHORT;
-    length INSURANCE_CAT $10.;
-    if INSURANCE in ('12', '13', '14', '15', 'CE', 'CI', 'HM') then INSURANCE_CAT = 'Private';
-    else if INSURANCE in ('16', '20, 21', '30', 'HN', 'IC', 'MA', 'MB', 'MC', 'MD', 'MO', 'MP', 'MS', 'QM', 'SC') then INSURANCE_CAT = 'Public';
-    else INSURANCE_CAT = 'Other';
- run;
+    if rural = 0 then rural_group = 'Urban';
+    else if rural = 1 then rural_group = 'Rural';
+    else if rural = 2 then rural_group = 'Rural';
+    else rural_group = 'Unknown';
+run;
 
+data FINAL_COHORT;
+   set FINAL_COHORT;
+   length INSURANCE_CAT $10.;
+   if INSURANCE = 1 then INSURANCE_CAT = 'Commercial';
+   else if INSURANCE = 2 then INSURANCE_CAT = 'Medicaid';
+   else if INSURANCE = 3 then INSURANCE_CAT = 'Medicare';
+   else INSURANCE_CAT = 'Other/Missing';
+run;
  
 proc format;
     value flagf
@@ -1980,7 +2974,7 @@ run;
 
 data FINAL_COHORT;
     set FINAL_COHORT;
-    agegrp_num = input(agegrp, 8.); /* Convert character to numeric */
+    agegrp_num = input(agegrp, 8.);
 run;
 
 proc means data=FINAL_COHORT;
@@ -2014,10 +3008,13 @@ run;
 %Table1Freqs(EDUCATION_GROUP);
 %Table1Freqs(HIV_DIAG, flagf.);
 %Table1Freqs(CONFIRMED_HCV_INDICATOR, hcv_reportf.);
+%Table1Freqs(iji_diag, flagf.);
+%Table1Freqs(EVER_IDU_HCV, flagf.);
 %Table1Freqs(IDU_EVIDENCE, flagf.);
 %Table1Freqs(MENTAL_HEALTH_DIAG, flagf.);
 %Table1Freqs(OTHER_SUBSTANCE_USE, flagf.);
 %Table1Freqs(INSURANCE_CAT);
+%Table1Freqs(rural_group);
 
 %macro Table1StrataFreqs(var, format);
     title "Table 1, Stratified by BIRTH_INDICATOR";
@@ -2043,10 +3040,90 @@ run;
 %Table1StrataFreqs(EDUCATION_GROUP);
 %Table1StrataFreqs(HIV_DIAG, flagf.);
 %Table1StrataFreqs(CONFIRMED_HCV_INDICATOR, hcv_reportf.);
+%Table1StrataFreqs(iji_diag, flagf.);
+%Table1StrataFreqs(EVER_IDU_HCV, flagf.);
 %Table1StrataFreqs(IDU_EVIDENCE, flagf.);
 %Table1StrataFreqs(MENTAL_HEALTH_DIAG, flagf.);
 %Table1StrataFreqs(OTHER_SUBSTANCE_USE, flagf.);
 %Table1StrataFreqs(INSURANCE_CAT);
+%Table1StrataFreqs(rural_group);
+
+PROC SQL;
+    CREATE TABLE FINAL_COHORT AS 
+    SELECT A.*, 
+           CASE WHEN EXISTS (SELECT 1 FROM moud_starts B WHERE A.ID = B.ID) 
+                THEN 1 ELSE 0 
+           END AS EVER_MOUD
+    FROM FINAL_COHORT A;
+QUIT;
+
+DATA FINAL_COHORT;
+SET FINAL_COHORT;
+	IF EVER_MOUD = . THEN EVER_MOUD = 0;
+run;
+
+
+%macro Table2MOUD(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model EVER_MOUD(event='1') = &var / dist=binary link=logit solution oddsratio;
+	run;
+%mend;
+
+%Table2MOUD(FINAL_RE, ref ='1');
+%Table2MOUD(agegrp_num, ref ='3');
+%Table2MOUD(EVER_INCARCERATED, ref ='0');
+%Table2MOUD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2MOUD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2MOUD(EDUCATION_GROUP, ref ='HS or less');
+%Table2MOUD(HIV_DIAG, ref ='0');
+%Table2MOUD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2MOUD(IJI_DIAG, ref ='0');
+%Table2MOUD(EVER_IDU_HCV, ref ='0');
+%Table2MOUD(IDU_EVIDENCE, ref ='0');
+%Table2MOUD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2MOUD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2MOUD(INSURANCE_CAT, ref ='Commercial');
+%Table2MOUD(rural_group, ref ='Urban');
+
+proc sql;
+    create table FINAL_COHORT as
+    select 
+        FINAL_COHORT.*, 
+        (case when od.ID is not null then 1 else 0 end) as EVER_OD
+    from FINAL_COHORT
+    left join 
+        (select distinct ID 
+         from PHDSPINE.OVERDOSE 
+         where OD_YEAR >= 2014) as od
+    on FINAL_COHORT.ID = od.ID;
+quit;
+
+%macro Table2OD(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model EVER_OD(event='1') = &var / dist=binary link=logit solution oddsratio;
+	run;
+%mend;
+
+%Table2OD(FINAL_RE, ref ='1');
+%Table2OD(agegrp_num, ref ='3');
+%Table2OD(EVER_INCARCERATED, ref ='0');
+%Table2OD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2OD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2OD(EDUCATION_GROUP, ref ='HS or less');
+%Table2OD(HIV_DIAG, ref ='0');
+%Table2OD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2OD(IJI_DIAG, ref ='0');
+%Table2OD(EVER_IDU_HCV, ref ='0');
+%Table2OD(IDU_EVIDENCE, ref ='0');
+%Table2OD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2OD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2OD(INSURANCE_CAT, ref ='Commercial');
+%Table2OD(rural_group, ref ='Urban');
+title;
 
 PROC SQL;
     SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
@@ -2056,6 +3133,170 @@ QUIT;
 
 %put Number of unique Infant IDs in FINAL_COHORT table: &num_unique_ids;
 
+%macro ChiSquareTest(var1, var2);
+    title "Chi-Square Test between &var1 and &var2";
+    proc freq data=FINAL_COHORT;
+        tables &var1*(&var2) / chisq nopercent nocol;
+    run;
+    title;
+%mend;
+
+%ChiSquareTest(EVER_INCARCERATED, HOMELESS_HISTORY_GROUP);
+%ChiSquareTest(EVER_INCARCERATED, CONFIRMED_HCV_INDICATOR);
+%ChiSquareTest(EVER_INCARCERATED, IDU_EVIDENCE);
+%ChiSquareTest(EVER_INCARCERATED, OTHER_SUBSTANCE_USE);
+%ChiSquareTest(HOMELESS_HISTORY_GROUP, CONFIRMED_HCV_INDICATOR);
+%ChiSquareTest(HOMELESS_HISTORY_GROUP, IDU_EVIDENCE);
+%ChiSquareTest(HOMELESS_HISTORY_GROUP, OTHER_SUBSTANCE_USE);
+%ChiSquareTest(CONFIRMED_HCV_INDICATOR, IDU_EVIDENCE);
+%ChiSquareTest(CONFIRMED_HCV_INDICATOR, OTHER_SUBSTANCE_USE);
+%ChiSquareTest(IDU_EVIDENCE, OTHER_SUBSTANCE_USE);
+
+title "Table 2, MV";
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+
+
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+title;
+
 /*===============================*/
 /*  Part 4: Calculate MOUD Rates */
 /*===============================*/
@@ -2064,7 +3305,7 @@ QUIT;
 	Characterize and model the differecnes between pregnant and non-pregnant women's 
 	initiation and cessation of opioid use disorder treatment (MOUD) episodes
 
-    This portion of the code processes the `PHDSPINE.MOUD` dataset by first sorting and 
+    This portion of the code processes the `PHDSPINE.MOUD3` dataset by first sorting and 
     creating a unique `episode_id` for each treatment episode based on treatment start and end dates, 
     with episodes being flagged when a significant gap is detected between consecutive treatment episodes. 
     It also merges treatment episode data, calculates start and end months/years, removes short treatment 
@@ -2076,7 +3317,7 @@ QUIT;
 /*======================*/
 
 DATA moud;
-    SET PHDSPINE.MOUD;
+    SET PHDSPINE.MOUD3;
 RUN;
 
 PROC SORT DATA=moud;
@@ -2190,7 +3431,7 @@ RUN;
 
 data moud;
     set moud;
-    where DATE_END_YEAR_MOUD >= 2014;
+    where DATE_START_YEAR_MOUD >= 2014;
 run;
 
 PROC SQL;
@@ -2264,6 +3505,32 @@ proc sql;
     from all_births as a
     left join infants as b
     on a.BIRTH_LINK_ID = b.BIRTH_LINK_ID;
+quit;
+
+data fetal_deaths_renamed;
+    set PHDFETAL.FETALDEATH;
+    rename ID = MATERNAL_ID
+           GESTATIONAL_AGE_FD = GESTATIONAL_AGE
+           FETAL_DEATH_MONTH = MONTH_BIRTH
+           FETAL_DEATH_YEAR = YEAR_BIRTH
+           MOTHER_AGE_FD = AGE_BIRTH;
+run;
+
+proc sql;
+    create table merged_births_infants as
+    select 
+        a.MATERNAL_ID, 
+        a.MONTH_BIRTH, 
+        a.YEAR_BIRTH, 
+        a.GESTATIONAL_AGE
+    from merged_births_infants as a
+    union all
+    select 
+        put(b.MATERNAL_ID, $10.), 
+        b.MONTH_BIRTH, 
+        b.YEAR_BIRTH,
+        b.GESTATIONAL_AGE
+    from fetal_deaths_renamed as b;
 quit;
 
 data pregnancy_flags;
@@ -2390,12 +3657,36 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	                else . end as pregnancy_start_month,
 	           case when b.pregnancy_start_year is not null then b.pregnancy_start_year 
 	                else . end as pregnancy_start_year
-	    from moud_table a
+	    from moud_table a /* Original MOUD data */
 	    left join pregnancy_flags b
 	    on a.ID = b.ID 
 	       and a.month = b.month 
 	       and a.year = b.year;
 	quit;
+	
+	proc sort data=moud_table;
+	by ID year month;
+	run;
+	
+    proc sql;
+        create table pregnancy_summary as 
+        select ID, 
+            min(pregnancy_start_month) as first_preg_month, 
+            min(pregnancy_start_year) as first_preg_year
+        from pregnancy_flags
+        group by ID;
+    quit;
+
+    proc sql;
+        create table moud_table as 
+        select a.*, 
+            coalesce(b.first_preg_month, .) as first_preg_month, 
+            coalesce(b.first_preg_year, .) as first_preg_year,
+            case when b.ID is not null then 1 else 0 end as has_pregnancy
+        from moud_table a
+        left join pregnancy_summary b
+        on a.ID = b.ID;
+    quit;
 	
 	/* Create a summary dataset with a flag indicating whether a month overlaps with the MOUD episode */
     data moud_summary;
@@ -2425,17 +3716,17 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	run;
 
     proc sort data=moud_summary;
-        by ID year month;
+        by episode_id year month;
     run;
 
     /* Create moud initiation flag */
     data moud_table;
         set moud_summary;
-        by ID year month;
+        by episode_id year month;
 
         retain moud_init lag_moud_flag;
         
-        if first.ID then do;
+        if first.episode_id then do;
             moud_init = 0;
             lag_moud_flag = .;
         end;
@@ -2449,38 +3740,41 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 
         lag_moud_flag = moud_flag;
 
-        keep ID EPISODE_ID DATE_START_MONTH_MOUD DATE_START_YEAR_MOUD DATE_END_MONTH_MOUD DATE_END_YEAR_MOUD pregnancy_start_month pregnancy_start_year month year moud_flag moud_init preg_flag;
     run;
     
 	proc sort data=moud_table;
 	    by episode_id year month;
 	run;
 	
-	/* Create a dataset to group by whether a MOUD was initiated before, during, or after pregnancy */
 	data moud_spine_preg;
 	    set moud_table;
 	    by episode_id year month;
-	    	    
+	
 	    moud_start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
 	    pregnancy_start_month_year = mdy(pregnancy_start_month, 1, pregnancy_start_year);
-	    
-	    target_month_year = mdy(month, 1, year);
-	    
-	    if first.episode_id then moud_start_group = .; 
-	    
+	    first_preg_start_month_year = mdy(first_preg_month, 1, first_preg_year);
+	
+	    if first.episode_id then do;
+	        if moud_init ne 1 then moud_start_group = .; 
+	    end;
+	
 	    if moud_init = 1 then do;
+	        if missing(pregnancy_start_month_year) and has_pregnancy = 1 then do;
+	            pregnancy_start_month_year = first_preg_start_month_year;
+	        end;
+	
 	        if moud_start_month_year < pregnancy_start_month_year then 
-	            moud_start_group = 1; /* MOUD initiation occurred before pregnancy */
+	            moud_start_group = 1; /* MOUD initiation before pregnancy */
 	        else if preg_flag = 1 then 
-	            moud_start_group = 2; /* MOUD initiation occurred during pregnancy */
+	            moud_start_group = 2; /* MOUD initiation during pregnancy */
 	        else if moud_start_month_year > pregnancy_start_month_year and preg_flag ne 1 then
-	            moud_start_group = 3; /* MOUD initiation occurred after pregnancy */
+	            moud_start_group = 3; /* MOUD initiation after pregnancy */
 	        else
-	            moud_start_group = .;
+	            moud_start_group = .; 
 	    end;
 	    else moud_start_group = .;
 	
-	    keep episode_id ID year month moud_init preg_flag moud_start_group pregnancy_start_month pregnancy_start_year;
+	    keep episode_id ID year month moud_init preg_flag moud_start_group pregnancy_start_month pregnancy_start_year has_pregnancy first_preg_month first_preg_year;
 	run;
 	
 	proc sort data=moud_table;
@@ -2503,6 +3797,28 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	    ) as b
 	    on a.EPISODE_ID = b.EPISODE_ID;
 	quit;
+
+    title "MOUD Duration Sum Stats";
+    proc sql;
+        create table duration_means as
+        SELECT distinct episode_id, moud_duration, preg_flag
+        from moud_table
+        where moud_duration is not missing and moud_duration ne 0;
+	quit;
+
+	proc means data=duration_means sum mean median std min max q1 q3;
+	    var moud_duration;
+	run;
+	
+	proc sort data=duration_means;
+	    by preg_flag;
+	run;
+	
+	proc means data=duration_means sum mean median std min max q1 q3;
+	    by preg_flag;
+	    var moud_duration;
+	run;
+    title;
     
     /* Create moud cessation variable */
 	data MOUD_TABLE;
@@ -2645,7 +3961,8 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
     PROC SQL;
         CREATE TABLE PREPARED_DATA AS
         SELECT a.*, 
-               cov.IJI_DIAG, 
+               cov.IJI_DIAG,
+               cov.OTHER_SUBSTANCE_USE,
                cov.IDU_EVIDENCE
         FROM PREPARED_DATA AS a
         LEFT JOIN FINAL_COHORT AS cov 
@@ -2727,6 +4044,18 @@ data PERIOD_SUMMARY_FINAL;
     else HOMELESS_HISTORY_GROUP = 'Unknown';
 run;
 
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          cov.INSURANCE_CAT, 
+          cov.OTHER_SUBSTANCE_USE,
+          cov.rural_group,
+          cov.HCV_SEROPOSITIVE_INDICATOR
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN FINAL_COHORT AS cov 
+   ON a.ID = cov.ID;
+QUIT;
+
 proc sql;
 create table PERIOD_SUMMARY_FINAL as select *,
 case
@@ -2758,26 +4087,6 @@ DATA PERIOD_SUMMARY_FINAL;
 		    
     age_grp = PUT(age, age_grps_five.); 
 RUN;
-
-proc sql;
-    create table FILT_PREPARED_DATA as
-    SELECT *
-    from PREPARED_DATA
-    where moud_flag = 1;
-quit;
-
-proc means data=FILT_PREPARED_DATA mean median min max std;
-   var moud_duration;
-run;
-
-proc sort data=FILT_PREPARED_DATA;
-	by group;
-run;
-
-proc means data=FILT_PREPARED_DATA mean median min max std;
-	by group;
-    var moud_duration;
-run;
 
 /* ods exclude CensoredSummary;
 title "Cox Proportional Hazard by Pregnancy Group";
@@ -2826,7 +4135,7 @@ proc sql;
 quit;
 
 title "Summary statistics for Overall Follow-up Time";
-proc means data=summed_data mean std min max q1 median q3;
+proc means data=summed_data mean median std min max q1 q3;
     var total_person_time_cessation;
 run;
 
@@ -2874,8 +4183,11 @@ quit;
 %calculate_rates(EDUCATION, 'Moud Cessation by Pregnancy Group, Stratified by EDUCATION');
 %calculate_rates(HOMELESS_HISTORY_GROUP, 'Moud Cessation by Pregnancy Group, Stratified by HOMELESS_HISTORY_GROUP');
 %calculate_rates(EVER_INCARCERATED, 'Moud Cessation by Pregnancy Group, Stratified by EVER_INCARCERATED');
-%calculate_rates(FOREIGN_BORN, 'Moud Cessation by Pregnancy Group, Stratified by FOREIGN_BORN');
 %calculate_rates(IDU_EVIDENCE, 'Moud Cessation by Pregnancy Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(INSURANCE_CAT, 'Moud Cessation by Pregnancy Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HCV_SEROPOSITIVE_INDICATOR, 'Moud Cessation by Pregnancy Group, Stratified by HCV_SEROPOSITIVE_INDICATOR');
+%calculate_rates(OTHER_SUBSTANCE_USE, 'Moud Cessation by Pregnancy Group, Stratified by OTHER_SUBSTANCE_USE');
+%calculate_rates(rural_group, 'Moud Cessation by Pregnancy Group, Stratified by rural_group');
 title;
 
 /*=================================================================*/
@@ -2900,13 +4212,10 @@ quit;
 proc sql;
     create table PREPARED_DATA as
     select a.*, 
-           coalesce(b.moud_flag, 0) as moud_flag,
-           coalesce(c.moud_start_group, 0) as moud_start_group 
+           coalesce(b.moud_start_group, 0) as moud_start_group
     from PREPARED_DATA a
-    left join PREPARED_DATA b 
-    on a.ID = b.ID and a.month = b.month and a.year = b.year
-    left join moud_spine_preg c
-    on a.ID = c.ID and a.month = c.month and a.year = c.year;
+    left join moud_spine_preg b 
+    on a.ID = b.ID and a.month = b.month and a.year = b.year;
 quit;
 
 proc sql;
@@ -2955,6 +4264,18 @@ PROC SQL;
    FROM PERIOD_SUMMARY_FINAL AS a
    LEFT JOIN PHDSPINE.DEMO AS demographics 
    ON a.ID = demographics.ID;
+QUIT;
+
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          cov.INSURANCE_CAT,
+          cov.OTHER_SUBSTANCE_USE,
+          cov.rural_group,
+          cov.HCV_SEROPOSITIVE_INDICATOR
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN FINAL_COHORT AS cov 
+   ON a.ID = cov.ID;
 QUIT;
 
 proc sql;
@@ -3048,8 +4369,11 @@ quit;
 %calculate_rates(EDUCATION, 'Moud Cessation by moud_start_group Group, Stratified by EDUCATION');
 %calculate_rates(HOMELESS_HISTORY_GROUP, 'Moud Cessation by moud_start_group Group, Stratified by HOMELESS_HISTORY');
 %calculate_rates(EVER_INCARCERATED, 'Moud Cessation by moud_start_group Group, Stratified by EVER_INCARCERATED');
-%calculate_rates(FOREIGN_BORN, 'Moud Cessation by moud_start_group Group, Stratified by FOREIGN_BORN');
 %calculate_rates(IDU_EVIDENCE, 'Moud Cessation by moud_start_group Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(INSURANCE_CAT, 'Moud Cessation by moud_start_group Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HCV_SEROPOSITIVE_INDICATOR, 'Moud Cessation by moud_start_group Group, Stratified by HCV_SEROPOSITIVE_INDICATOR');
+%calculate_rates(OTHER_SUBSTANCE_USE, 'Moud Cessation by moud_start_group Group, Stratified by OTHER_SUBSTANCE_USE');
+%calculate_rates(rural_group, 'Moud Cessation by moud_start_group Group, Stratified by rural_group');
 title;
 
 /*============================================*/
@@ -3106,41 +4430,54 @@ proc sql;
     order by ID, YEAR, MONTH;
 quit;
 
-data PREPARED_DATA;
+data PREPARED_DATA; 
     set PREPARED_DATA;
     by ID year month;
 
-    retain censor_init eligible_init censor_reinit moud_reinit eligible_reinit moud_primaryinit;
+    retain censor_init eligible_init moud_reinit eligible_reinit moud_primaryinit flag_reset_reinit;
 
     if first.ID then do;
         eligible_init = 1; 
         censor_init = 0;
-        censor_reinit = 0;   
         moud_reinit = 0; 
         eligible_reinit = 0;  
         moud_primaryinit = 0;
+        flag_reset_reinit = 0;
     end;
 
-    if moud_init = 1 then censor_init = 1;
-    
-    if censor_init = 1 then eligible_init = 0;
+    /* Reset eligible_reinit if the previous month had a flagged reinitiation */
+    if flag_reset_reinit = 1 then do;
+        eligible_reinit = 0;
+        flag_reset_reinit = 0; /* Reset the flag after applying */
+    end;
 
-    if moud_init = 1 and lag(eligible_init) = 0 and moud_reinit = 0 then do;
-        censor_reinit = 1;
-        moud_reinit = 1; 
+    /* Flag primary initiation only once for the first instance of moud_init = 1 */
+    if moud_init = 1 and eligible_init = 1 then do;
+        moud_primaryinit = 1;  /* Set primary initiation flag */
+        censor_init = 1;       /* Mark as censored after primary initiation */
     end;
     
-    if moud_init = 0 then moud_reinit = 0;
-
+    else if moud_init = 0 then moud_primaryinit = 0;
+    
+    if censor_init = 1 and not (moud_init = 1) then do;
+        eligible_init = 0;     /* Prevent further flagging for primary init */
+    end;
+    
+    /* After moud_cessation = 1, mark as eligible for re-initiation */
     if moud_cessation = 1 then eligible_reinit = 1;
 
-    if moud_reinit = 1 then eligible_reinit = 0;
-
-    if moud_init = 1 and lag(eligible_init) = 1 and moud_primaryinit = 0 then do;
-        moud_primaryinit = 1; 
+    /* Flag re-initiation only if eligible_reinit = 1 and moud_init = 1 occurs again */
+    if moud_init = 1 and eligible_reinit = 1 and moud_primaryinit = 0 then do;
+        moud_reinit = 1;       /* Set re-initiation flag */
+        flag_reset_reinit = 1; /* Set flag to reset eligible_reinit next month */
     end;
     
-    if moud_init = 0 then moud_primaryinit = 0;
+    else if moud_init = 0 then moud_reinit = 0;
+
+    if moud_cessation = 1 and moud_reinit = 1 then do;
+	    eligible_reinit = 1;
+	    flag_reset_reinit = 0;
+    end;
 
 run;
 
@@ -3156,13 +4493,13 @@ proc sql;
 quit;
 	
 proc sql;
-   create table PERIOD_SUMMARY as
-   select ID,
-          group,
-          sum(moud_primaryinit) as moud_primaryinit,
-          sum(moud_reinit) as moud_reinit
-   from PREPARED_DATA
-   group by ID, group;
+    create table PERIOD_SUMMARY as
+    select ID,
+           group,
+           sum(moud_primaryinit) as moud_primaryinit,
+           sum(moud_reinit) as moud_reinit
+    from PREPARED_DATA
+    group by ID, group;
 quit;
 	
 proc sort data=PERSON_TIME;
@@ -3201,6 +4538,18 @@ data PERIOD_SUMMARY_FINAL;
     else if 1 <= HOMELESS_EVER <= 5 then HOMELESS_HISTORY_GROUP = 'Yes';
     else HOMELESS_HISTORY_GROUP = 'Unknown';
 run;
+
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          cov.INSURANCE_CAT,
+          cov.OTHER_SUBSTANCE_USE,
+          cov.rural_group,
+          cov.HCV_SEROPOSITIVE_INDICATOR
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN FINAL_COHORT AS cov 
+   ON a.ID = cov.ID;
+QUIT;
 
 proc sql;
 create table PERIOD_SUMMARY_FINAL as select *,
@@ -3247,9 +4596,20 @@ proc sql;
 quit;
 
 title "Summary statistics for Overall Follow-up Time";
-proc means data=summed_data mean std min max q1 median q3;
+proc means data=summed_data mean median std min max q1 q3;
     var total_person_time_init total_person_time_reinit;
 run;
+
+title 'Moud Initiation and Reinitiation, Overall';
+proc sql;
+    select 
+        sum(moud_primaryinit) as moud_primaryinit,
+        sum(eligible_init) as eligible_init,
+        sum(moud_reinit) as moud_reinit,
+        sum(eligible_reinit) as eligible_reinit
+    from PERIOD_SUMMARY_FINAL;
+quit;
+title;
 
 title 'Moud Initiation by Pregnancy Group, Overall';
 proc sql;
@@ -3301,19 +4661,11 @@ quit;
 %calculate_rates(EDUCATION, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by EDUCATION');
 %calculate_rates(HOMELESS_HISTORY_GROUP, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by HOMELESS_HISTORY_GROUP');
 %calculate_rates(EVER_INCARCERATED, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by EVER_INCARCERATED');
-%calculate_rates(FOREIGN_BORN, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by FOREIGN_BORN');
 %calculate_rates(IDU_EVIDENCE, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by IDU_EVIDENCE');
-title;
-
-title 'Moud Initiation and Reinitiation, Overall';
-proc sql;
-    select 
-        sum(moud_primaryinit) as moud_primaryinit,
-        sum(eligible_init) as eligible_init,
-        sum(moud_reinit) as moud_reinit,
-        sum(eligible_reinit) as eligible_reinit
-    from PERIOD_SUMMARY_FINAL;
-quit;
+%calculate_rates(INSURANCE_CAT, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HCV_SEROPOSITIVE_INDICATOR, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by HCV_SEROPOSITIVE_INDICATOR');
+%calculate_rates(OTHER_SUBSTANCE_USE, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by OTHER_SUBSTANCE_USE');
+%calculate_rates(rural_group, 'Moud Initiation and Reinitiation by Pregnancy Group, Stratified by rural_group');
 title;
 
 /*===================================*/
@@ -3460,16 +4812,46 @@ data od_table;
     set od_table;
     by ID;
     
-    retain censor_fod 0; 
+    retain censor_fod 0 fod_month od_after_fod_count 0;
    
     if first.ID then do;
-      censor_fod = 0; 
+      censor_fod = 0;
+      fod_month = .; 
+      od_after_fod_count = 0; 
     end;
     
-    if fod_flag = 1 then censor_fod = 1; 
+
+    if fod_flag = 1 then do;
+        censor_fod = 1;
+        fod_month = month; 
+    end; 
     
-    if censor_fod = 1 and fod_flag = 0 then delete; 
-   
+
+    if censor_fod = 1 and od_flag = 1 and month > fod_month then od_after_fod_count + 1;
+
+run;
+
+proc sql;
+    create table max_counts as
+    select id, max(od_after_fod_count) as od_after_fod_max
+    from od_table
+    group by id;
+quit;
+
+proc summary data=max_counts;
+    var od_after_fod_max;
+    output out=sum_counts (drop=_type_ _freq_) sum=od_after_fod_max;
+run;
+
+proc print data=sum_counts;
+run;
+
+data od_table;
+    set od_table;
+    by ID;
+    
+    if censor_fod = 1 and fod_flag = 0 then delete;
+
 run;
 
 proc sql;
@@ -3604,9 +4986,9 @@ data prepared_data;
    
     if preg_flag = 1 then group = 1; /* Pregnant */
     else if preg_flag = 2 then group = 2; /* 0-6 months post-partum */
-    else if preg_flag = 3 then group = 2; /* 7-12 months post-partum */
-    else if preg_flag = 4 then group = 3; /* 13-18 months post-partum */
-    else if preg_flag = 5 then group = 3; /* 19-24 months post-partum */
+    else if preg_flag = 3 then group = 3; /* 7-12 months post-partum */
+    else if preg_flag = 4 then group = 4; /* 13-18 months post-partum */
+    else if preg_flag = 5 then group = 4; /* 19-24 months post-partum */
     else if preg_flag = 9999 then group = 0; /* Non-pregnant */
    
     /* Categorize individuals based on MOUD and post-treatment flags */
@@ -3767,6 +5149,18 @@ data PERIOD_SUMMARY_FINAL;
     else HOMELESS_HISTORY_GROUP = 'Unknown';
 run;
 
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          cov.INSURANCE_CAT,
+          cov.OTHER_SUBSTANCE_USE,
+          cov.rural_group,
+          cov.HCV_SEROPOSITIVE_INDICATOR
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN FINAL_COHORT AS cov 
+   ON a.ID = cov.ID;
+QUIT;
+
 proc sql;
 create table PERIOD_SUMMARY_FINAL as select *,
 case
@@ -3799,6 +5193,15 @@ DATA PERIOD_SUMMARY_FINAL;
     age_grp = PUT(age, age_grps_five.); 
 RUN;
 
+title 'Overdoses, Overall; Note: Fatal Overdoses counted in Non-fatal overdoses';
+proc sql;
+    select 
+        sum(overdoses) as overdoses,
+        sum(fatal_overdoses) as fatal_overdoses,
+        sum(person_time) as total_person_time
+    from PERIOD_SUMMARY_FINAL;
+quit;
+
 title 'Overdoses by Pregnancy Group, Overall';
 proc sql;
     select 
@@ -3822,6 +5225,7 @@ title &mytitle;
 proc sql;
     select 
         group,
+        &group_by_vars,
         count(*) as total_n,
         sum(overdoses) as overdoses,
         sum(fatal_overdoses) as fatal_overdoses,
@@ -3842,8 +5246,11 @@ quit;
 %calculate_rates(EDUCATION, 'Overdoses by Pregnancy Group, Stratified by EDUCATION');
 %calculate_rates(HOMELESS_HISTORY_GROUP, 'Overdoses by Pregnancy Group, Stratified by HOMELESS_HISTORY_GROUP');
 %calculate_rates(EVER_INCARCERATED, 'Overdoses by Pregnancy Group, Stratified by EVER_INCARCERATED');
-%calculate_rates(FOREIGN_BORN, 'Overdoses by Pregnancy Group, Stratified by FOREIGN_BORN');
 %calculate_rates(IDU_EVIDENCE, 'Overdoses by Pregnancy Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(INSURANCE_CAT, 'Overdoses by Pregnancy Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HCV_SEROPOSITIVE_INDICATOR, 'Overdoses by Pregnancy Group, Stratified by HCV_SEROPOSITIVE_INDICATOR');
+%calculate_rates(OTHER_SUBSTANCE_USE, 'Overdoses by Pregnancy Group, Stratified by OTHER_SUBSTANCE_USE');
+%calculate_rates(rural_group, 'Overdoses by Pregnancy Group, Stratified by rural_group');
 title;
 
 /*==========================================*/
@@ -3923,6 +5330,19 @@ data PERIOD_SUMMARY_FINAL;
     else HOMELESS_HISTORY_GROUP = 'Unknown';
 run;
 
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          cov.INSURANCE_CAT,
+          cov.OTHER_SUBSTANCE_USE,
+          cov.rural_group,
+          cov.BIRTH_INDICATOR,
+          cov.HCV_SEROPOSITIVE_INDICATOR
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN FINAL_COHORT AS cov 
+   ON a.ID = cov.ID;
+QUIT;
+
 proc sql;
 create table PERIOD_SUMMARY_FINAL as select *,
 case
@@ -3999,15 +5419,199 @@ quit;
 %calculate_rates(EDUCATION, 'Overdoses by Treatment Group, Stratified by EDUCATION');
 %calculate_rates(HOMELESS_HISTORY_GROUP, 'Overdoses by Treatment Group, Stratified by HOMELESS_HISTORY_GROUP');
 %calculate_rates(EVER_INCARCERATED, 'Overdoses by Treatment Group, Stratified by EVER_INCARCERATED');
-%calculate_rates(FOREIGN_BORN, 'Overdoses by Treatment Group, Stratified by FOREIGN_BORN');
 %calculate_rates(IDU_EVIDENCE, 'Overdoses by Treatment Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(INSURANCE_CAT, 'Overdoses by Treatment Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HCV_SEROPOSITIVE_INDICATOR, 'Overdoses by Treatment Group, Stratified by HCV_SEROPOSITIVE_INDICATOR');
+%calculate_rates(OTHER_SUBSTANCE_USE, 'Overdoses by Treatment Group, Stratified by OTHER_SUBSTANCE_USE');
+%calculate_rates(rural_group, 'Overdoses by Treatment Group, Stratified by rural_group');
+%calculate_rates(BIRTH_INDICATOR, 'Overdoses by Treatment Group, Stratified by BIRTH_INDICATOR');
 title;
 
-title 'Overdoses, Overall';
+proc sql;
+    create table moud_spine_preg as
+    select distinct
+        ID,
+        month,
+        year,
+        max(moud_start_group) as moud_start_group  /* Keep maximum MOUD initiation during pregnancy flag */
+    from moud_spine_preg
+    group by ID, month, year;
+quit;
+
+proc sql;
+    create table PREPARED_DATA as
+    select a.*, 
+           coalesce(b.moud_start_group, 0) as moud_start_group
+    from PREPARED_DATA a
+    left join moud_spine_preg b 
+    on a.ID = b.ID and a.month = b.month and a.year = b.year;
+quit;
+
+proc sql;
+    create table PERSON_TIME as
+    select 
+        ID, 
+        moud_start_group,
+        count(month) as person_time
+    from PREPARED_DATA
+    group by ID, moud_start_group;
+quit;
+
+proc sql;
+   create table PERIOD_SUMMARY as
+   select ID,
+          moud_start_group,
+          sum(od_flag) as overdoses,
+          sum(fod_flag) as fatal_overdoses
+   from PREPARED_DATA
+   group by ID, moud_start_group;
+quit;
+
+proc sort data=PERSON_TIME;
+    by ID moud_start_group;
+run;
+	
+proc sort data=PERIOD_SUMMARY;
+    by ID moud_start_group;
+run;
+	
+data PERIOD_SUMMARY_FINAL;
+    merge PERIOD_SUMMARY
+          PERSON_TIME;
+    by ID moud_start_group;
+run;
+
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          demographics.FINAL_RE, 
+          demographics.FINAL_SEX,
+          demographics.EDUCATION,
+          demographics.EVER_INCARCERATED,
+          demographics.FOREIGN_BORN,
+          demographics.HOMELESS_EVER,
+          demographics.YOB
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN PHDSPINE.DEMO AS demographics 
+   ON a.ID = demographics.ID;
+QUIT;
+
+PROC SQL;
+   CREATE TABLE PERIOD_SUMMARY_FINAL AS
+   SELECT a.*, 
+          cov.INSURANCE_CAT,
+          cov.OTHER_SUBSTANCE_USE,
+          cov.rural_group,
+          cov.HCV_SEROPOSITIVE_INDICATOR
+   FROM PERIOD_SUMMARY_FINAL AS a
+   LEFT JOIN FINAL_COHORT AS cov 
+   ON a.ID = cov.ID;
+QUIT;
+
+proc sql;
+    create table PERIOD_SUMMARY_FINAL as
+    select a.*, b.BIRTH_INDICATOR
+    from PERIOD_SUMMARY_FINAL a
+    left join births b
+    on a.ID = b.ID;
+quit;
+
+PROC SQL;
+	CREATE TABLE PERIOD_SUMMARY_FINAL AS
+	SELECT DISTINCT *
+	FROM PERIOD_SUMMARY_FINAL
+	WHERE BIRTH_INDICATOR = 1;
+QUIT;
+
+data PERIOD_SUMMARY_FINAL;
+    length HOMELESS_HISTORY_GROUP $10;
+    set PERIOD_SUMMARY_FINAL;
+    if HOMELESS_EVER = 0 then HOMELESS_HISTORY_GROUP = 'No';
+    else if 1 <= HOMELESS_EVER <= 5 then HOMELESS_HISTORY_GROUP = 'Yes';
+    else HOMELESS_HISTORY_GROUP = 'Unknown';
+run;
+
+proc sql;
+create table PERIOD_SUMMARY_FINAL as select *,
+case
+when ID in (select ID from IJI_COHORT) then 1
+else 0
+end as IJI_DIAG
+from PERIOD_SUMMARY_FINAL;
+quit;
+		
+proc sql;
+    create table PERIOD_SUMMARY_FINAL as
+    select PERIOD_SUMMARY_FINAL.*,
+           hcv.EVER_IDU_HCV
+    from PERIOD_SUMMARY_FINAL
+    left join HCV_STATUS as hcv
+    on PERIOD_SUMMARY_FINAL.ID = hcv.ID;
+quit;
+		
+data PERIOD_SUMMARY_FINAL;
+    set PERIOD_SUMMARY_FINAL;
+    if EVER_IDU_HCV = 1 or IJI_DIAG = 1 then IDU_EVIDENCE = 1;
+    else IDU_EVIDENCE = 0;
+run;
+	
+DATA PERIOD_SUMMARY_FINAL;
+    SET PERIOD_SUMMARY_FINAL;
+		    
+	    /* Calculate the age using the current year dynamically */
+    age = YEAR(TODAY()) - YOB;
+		    
+	    /* Apply the format to create the age_grp variable */
+    age_grp = PUT(age, age_grps_five.); 
+RUN;
+
+title 'Overdoses by moud_start_group Group, Overall';
 proc sql;
     select 
+        moud_start_group,
+        count(*) as total_n,
         sum(overdoses) as overdoses,
         sum(fatal_overdoses) as fatal_overdoses,
-        sum(person_time) as total_person_time
-    from PERIOD_SUMMARY_FINAL;
+        sum(person_time) as total_person_time,
+        calculated overdoses / calculated total_person_time as overdoses_rate format=8.4,
+        (calculated overdoses - 1.96 * sqrt(calculated overdoses)) / calculated total_person_time as overdoses_rate_lower format=8.4,
+        (calculated overdoses + 1.96 * sqrt(calculated overdoses)) / calculated total_person_time as overdoses_rate_upper format=8.4,
+        calculated fatal_overdoses / calculated total_person_time as fatal_overdoses_rate format=8.4,
+        (calculated fatal_overdoses - 1.96 * sqrt(calculated fatal_overdoses)) / calculated total_person_time as fatal_overdoses_rate_lower format=8.4,
+        (calculated fatal_overdoses + 1.96 * sqrt(calculated fatal_overdoses)) / calculated total_person_time as fatal_overdoses_rate_upper format=8.4
+    from PERIOD_SUMMARY_FINAL
+    group by moud_start_group;
 quit;
+
+%macro calculate_rates(group_by_vars, mytitle);
+title &mytitle;
+proc sql;
+    select 
+        moud_start_group,
+        &group_by_vars,
+        count(*) as total_n,
+        sum(overdoses) as overdoses,
+        sum(fatal_overdoses) as fatal_overdoses,
+        sum(person_time) as total_person_time,
+        calculated overdoses / calculated total_person_time as overdoses_rate format=8.4,
+        (calculated overdoses - 1.96 * sqrt(calculated overdoses)) / calculated total_person_time as overdoses_rate_lower format=8.4,
+        (calculated overdoses + 1.96 * sqrt(calculated overdoses)) / calculated total_person_time as overdoses_rate_upper format=8.4,
+        calculated fatal_overdoses / calculated total_person_time as fatal_overdoses_rate format=8.4,
+        (calculated fatal_overdoses - 1.96 * sqrt(calculated fatal_overdoses)) / calculated total_person_time as fatal_overdoses_rate_lower format=8.4,
+        (calculated fatal_overdoses + 1.96 * sqrt(calculated fatal_overdoses)) / calculated total_person_time as fatal_overdoses_rate_upper format=8.4
+    from PERIOD_SUMMARY_FINAL
+    group by moud_start_group, &group_by_vars;
+quit;
+%mend calculate_rates;
+
+%calculate_rates(age_grp, 'Overdoses by moud_start_group Group, Stratified by Age');
+%calculate_rates(FINAL_RE, 'Overdoses by moud_start_group Group, Stratified by FINAL_RE');
+%calculate_rates(EDUCATION, 'Overdoses by moud_start_group Group, Stratified by EDUCATION');
+%calculate_rates(HOMELESS_HISTORY_GROUP, 'Overdoses by moud_start_group Group, Stratified by HOMELESS_HISTORY');
+%calculate_rates(EVER_INCARCERATED, 'Overdoses by moud_start_group Group, Stratified by EVER_INCARCERATED');
+%calculate_rates(IDU_EVIDENCE, 'Overdoses by moud_start_group Group, Stratified by IDU_EVIDENCE');
+%calculate_rates(INSURANCE_CAT, 'Overdoses by moud_start_group Group, Stratified by INSURANCE_CAT');
+%calculate_rates(HCV_SEROPOSITIVE_INDICATOR, 'Overdoses by moud_start_group Group, Stratified by HCV_SEROPOSITIVE_INDICATOR');
+%calculate_rates(OTHER_SUBSTANCE_USE, 'Overdoses by moud_start_group Group, Stratified by OTHER_SUBSTANCE_USE');
+%calculate_rates(rural_group, 'Overdoses by moud_start_group Group, Stratified by rural_group');
+title;
