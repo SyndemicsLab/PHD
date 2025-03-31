@@ -42,7 +42,7 @@ RUN;
 PROC SQL;
 	CREATE TABLE death_raw AS 
 	SELECT death.OPIOID_DEATH AS od_death, death.YEAR_DEATH AS year, death.MONTH_DEATH AS month,
-		   demo.YOB, demo.FINAL_RE, demo.FINAL_SEX
+		   demo.YOB, demo.FINAL_RE, demo.FINAL_SEX, demo.ID
 	FROM PHDDEATH.DEATH death
 	LEFT JOIN demographics demo ON death.ID = demo.ID;
 QUIT;
@@ -51,7 +51,7 @@ DATA death_raw;
     SET death_raw;
 
 	age_grp_five = put(year - YOB, age_grps_five.);
-	age_grp_ten = put(year - YOB, age_grps_twenty.);
+	age_grp_twenty = put(year - YOB, age_grps_twenty.);
 RUN;
 
 PROC SQL;
@@ -62,7 +62,7 @@ PROC SQL;
 	GROUP BY od_death, year;
 
 	CREATE TABLE death_monthly AS 
-	SELECT DISTICT od_death, year, month, 
+	SELECT DISTINCT od_death, year, month, 
 		   		   IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
 	FROM death_raw 
 	GROUP BY od_death, year, month;
@@ -86,7 +86,7 @@ PROC SQL;
 	GROUP BY od_death, year, FINAL_RE;
 
 	CREATE TABLE death_monthly_race AS 
-	SELECT DISTINCT od_death, year, month, FINAL_SEX,
+	SELECT DISTINCT od_death, year, month, FINAL_RE,
 		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
 	FROM death_raw
 	GROUP BY od_death, year, month, FINAL_RE;
