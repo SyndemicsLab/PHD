@@ -2070,6 +2070,13 @@ proc format;
     	5 = 'Other'
     	9 = 'Unknown';
 
+    VALUE age_grps
+		1 = '15-18'
+		2 = '19-25'
+		3 = '26-30'
+		4 = '31-35'
+		5 = '36-45';
+
 run;
 
 /* ================================= */
@@ -3018,6 +3025,16 @@ proc means data=FINAL_HCV_COHORT;
     output out=mean_age(drop=_TYPE_ _FREQ_) mean=mean_age;
 run;
 
+data FINAL_HCV_COHORT;
+	set FINAL_HCV_COHORT;
+	AGE_HCV  = put(AGE_HCV, age_grps_five.);
+run;
+
+DATA FINAL_HCV_COHORT;
+  SET FINAL_HCV_COHORT;
+    AGE_HCV_GRP = INPUT(AGE_HCV, best12.);
+RUN;
+
 /* ================================= */
 /* 10. TABLES 1 AND 2, HCV Cohort    */
 /* ================================= */
@@ -3030,6 +3047,7 @@ run;
     run;
 %mend;
 
+%Table1Freqs(AGE_HCV_GRP, age_grps.);
 %Table1Freqs(FINAL_RE, raceef.);
 %Table1Freqs(EVER_INCARCERATED, flagf.);
 %Table1Freqs(HOMELESS_HISTORY_GROUP);
@@ -3066,6 +3084,7 @@ run;
     run;
 %mend;
 
+%Table1Freqs(AGE_HCV_GRP, age_grps.);
 %Table1Freqs(FINAL_RE, raceef.);
 %Table1Freqs(EVER_INCARCERATED, flagf.);
 %Table1Freqs(HOMELESS_HISTORY_GROUP);
@@ -3102,6 +3121,7 @@ run;
     run;
 %mend;
 
+%Table1Freqs(AGE_HCV_GRP, age_grps.);
 %Table1Freqs(FINAL_RE, raceef.);
 %Table1Freqs(EVER_INCARCERATED, flagf.);
 %Table1Freqs(HOMELESS_HISTORY_GROUP);
@@ -3132,6 +3152,7 @@ run;
 	run;
 %mend;
 
+%Table2Linkage(AGE_HCV_GRP, ref ='3');
 %Table2Linkage(FINAL_RE, ref ='1');
 %Table2Linkage(EVER_INCARCERATED, ref ='0');
 %Table2Linkage(HOMELESS_HISTORY_GROUP, ref ='No');
@@ -3162,6 +3183,7 @@ run;
 	run;
 %mend;
 
+%Table2Treatment(AGE_HCV_GRP, ref ='3');
 %Table2Treatment(FINAL_RE, ref ='1');
 %Table2Treatment(EVER_INCARCERATED, ref ='0');
 %Table2Treatment(HOMELESS_HISTORY_GROUP, ref ='No');
@@ -4217,6 +4239,7 @@ run;
 proc sql;
     create table PERIOD_SUMMARY_FINAL as
     select PERIOD_SUMMARY.*,
+           cov.AGE_HCV_GRP,
            cov.FINAL_RE,
            cov.INSURANCE_CAT,
            cov.HOMELESS_HISTORY_GROUP,
@@ -4359,6 +4382,7 @@ proc sql;
 quit;
 %mend calculate_rates;
 
+%calculate_rates(AGE_HCV_GRP, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by AGE_HCV_GRP');
 %calculate_rates(FINAL_RE, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by FINAL_RE');
 %calculate_rates(INSURANCE_CAT, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by INSURANCE_CAT');
 %calculate_rates(HOMELESS_HISTORY_GROUP, 'Linkage and Treatment Starts by Pregnancy Group, Stratified by HOMELESS_HISTORY');

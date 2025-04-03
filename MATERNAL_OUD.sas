@@ -33,7 +33,7 @@ run;
 /*  	GLOBAL VARIABLES   	    */
 /*==============================*/
 %LET year = (2014:2022);
-%LET MOUD_leniency = 7;
+%LET MOUD_leniency = 30;
 %let today = %sysfunc(today(), date9.);
 %let formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 
@@ -910,8 +910,7 @@ run;
 /*==============================*/
 /* 1.  Import data/demographics */
 /*==============================*/
-/* This section processes the MOUD dataset, merges it with demographic, age group, and birth data. Individual MOUD episodes are numbered so that each episode is 
-assigned a unique identifier combining the patient ID and episode number. */
+/* This section processes the MOUD dataset, merges it with demographic, age group, and birth data. */
 
 DATA moud;
     SET PHDSPINE.MOUD3;
@@ -948,41 +947,119 @@ DATA moud_demo;
         IF BIRTH_INDICATOR = . THEN BIRTH_INDICATOR = 0;
 run;
 
+/*=====================================*/
+/* 2. Filter, Deduplicate, and Refine  */
+/*=====================================*/
+/* This section sorts the MOUD dataset by episode ID, type, and date. It defines start and end dates 
+   for each episode, removes short episodes, ensures uniqueness, and resolves overlapping treatment periods. Then,
+   it filters for records starting in 2014 or later, and retains only individuals present in the `oud_distinct` dataset */
+
+data moud_demo;
+    set moud_demo;
+    rename 
+        DATE_START_MOUD = start_date
+        DATE_END_MOUD = end_date
+        DATE_START_YEAR_MOUD = start_year
+        DATE_END_YEAR_MOUD = end_year
+        DATE_START_MONTH_MOUD = start_month
+        DATE_END_MONTH_MOUD = end_month;
+run;
+
 PROC SORT DATA=moud_demo;
-    BY ID TYPE_MOUD DATE_START_MOUD;
+    by ID TYPE_MOUD start_date;
 RUN;
 
 DATA moud_demo;
     SET moud_demo;
-    by ID TYPE_MOUD;
-    retain episode_num;
+    BY ID TYPE_MOUD;
+    RETAIN new_start_date new_end_date new_start_month new_start_year 
+           new_end_month new_end_year YOB FINAL_RE age_grp_five BIRTH_INDICATOR;
 
-    lag_date = lag(DATE_END_MOUD);
-    IF FIRST.TYPE_MOUD THEN lag_date = .;
-    IF FIRST.TYPE_MOUD THEN episode_num = 1;
-    
-    diff = DATE_START_MOUD - lag_date;
+    IF FIRST.ID OR FIRST.TYPE_MOUD THEN DO;
+        new_start_date = start_date;
+        new_start_month = start_month;
+        new_start_year = start_year;
 
-    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
+        new_end_date = end_date;
+        new_end_month = end_month;
+        new_end_year = end_year;
+    END;
+    ELSE DO;
+        diff_days = start_date - new_end_date;
 
-    episode_id = catx("_", ID, episode_num);
+        IF diff_days <= &MOUD_leniency THEN DO;
+            new_end_date = end_date;
+            new_end_month = end_month;
+            new_end_year = end_year;
+        END;
+        ELSE DO;
+            OUTPUT;
+            new_start_date = start_date;
+            new_start_month = start_month;
+            new_start_year = start_year;
+
+            new_end_date = end_date;
+            new_end_month = end_month;
+            new_end_year = end_year;
+        END;
+    END;
+    IF LAST.ID OR LAST.TYPE_MOUD THEN OUTPUT;
+
+
+    DROP diff_days start_date end_date start_month end_month start_year end_year;
 RUN;
 
-/*=====================================*/
-/* 2. Filter, Deduplicate, and Refine  */
-/*=====================================*/
-/* This section sorts the MOUD dataset by episode ID, filters for records starting in 2014 or later, 
-   and retains only individuals present in the `oud_distinct` dataset. It then defines start and end dates 
-   for each episode, removes short episodes, ensures uniqueness, and resolves overlapping treatment periods. */
+PROC SQL;
+ CREATE TABLE moud_demo 
+ AS SELECT DISTINCT * FROM moud_demo;
+QUIT;
 
-PROC SORT data=moud_demo; 
-    BY episode_id;
+PROC SORT data=moud_demo (KEEP= new_start_date new_start_month new_start_year
+					  			new_end_date new_end_month new_end_year 
+					  			ID FINAL_RE TYPE_MOUD YOB age_grp_five BIRTH_INDICATOR);
+    BY ID new_start_date;
+RUN;
+
+DATA moud_demo;
+    SET moud_demo;
+    BY ID;
+	
+	IF new_end_date - new_start_date < &MOUD_leniency THEN DELETE;
+	
+	IF FIRST.ID THEN diff = .; 
+	ELSE diff = new_start_date - lag(new_end_date);
+    IF new_end_date < lag(new_end_date) THEN temp_flag = 1;
+    ELSE temp_flag = 0;
+
+    IF first.ID THEN flag_mim = 0;
+    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
+    ELSE flag_mim = 0;
+
+    IF flag_mim = 1 THEN DELETE;
+
+RUN;
+
+PROC SORT data=moud_demo;
+    BY ID new_start_date;
 RUN;
 
 data moud_demo;
     set moud_demo;
-    where DATE_START_YEAR_MOUD >= 2014;
+    by ID;
+    if first.ID then episode_num = 1; 
+    else episode_num + 1;
+    episode_id = catx("_", ID, episode_num);
+run;
+
+proc sql;
+    select count(*) as missing_new_end_date
+    from moud_demo
+    where new_end_date is missing;
+quit;
+
+data moud_demo;
+    set moud_demo;
+    where new_start_year >= 2014;
 run;
 
 PROC SQL;
@@ -991,58 +1068,6 @@ PROC SQL;
     FROM moud_demo
     WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
 QUIT;
-
-DATA moud_demo; 
-    SET moud_demo;
-
-    by episode_id;
-    retain DATE_START_MOUD;
-
-    IF FIRST.episode_id THEN DO;
-        start_month = DATE_START_MONTH_MOUD;
-        start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD;
-    END;
-    IF LAST.episode_id THEN DO;
-        end_month = DATE_END_MONTH_MOUD;
-        end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
-    END;
-        
-   	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-RUN;
-
-PROC SORT data=moud_demo;
-    BY ID;
-RUN;
-
-PROC SQL;
- CREATE TABLE moud_demo 
- AS SELECT DISTINCT * FROM moud_demo;
-QUIT;
-
-DATA moud_demo;
-    SET moud_demo;
-    BY ID;
-	
-	IF end_date - start_date < &MOUD_leniency THEN DELETE;
-
-    LAG_ED = LAG(END_DATE);
-	
-	IF FIRST.ID THEN diff = .; 
-	ELSE diff = start_date - LAG_ED;
-    IF end_date < LAG_ED THEN temp_flag = 1;
-    ELSE temp_flag = 0;
-
-    IF first.ID THEN flag_mim = 0;
-    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
-    ELSE flag_mim = 0;
-
-    IF flag_mim = 1 THEN DELETE;
-    
-    drop diff;
-
-RUN;
 
 /*===============================================*/
 /* 3. Summary Statistics for MOUD Participants  */
@@ -1134,14 +1159,22 @@ title;
 /*=======================================*/
 /* This section creates a dataset identifying individuals who initiated MOUD, 
    assigning a flag (`moud_start = 1`). It then integrates this information 
-   into the `oud_preg` dataset to indicate whether each individual had a MOUD start. */
+   into the `oud_preg` dataset to indicate whether each individual had a MOUD start
+   We consider two MOUD start outcomes 1. EVER_MOUD which is simply and ID that exists in
+   the MOUD dataset. The other is indicated here, meaning they exist in the cleaned MOUD dataset. */
 
 PROC SQL;                    
     CREATE TABLE moud_starts AS
     SELECT ID,
            1 AS moud_start
     FROM moud_demo
-    ORDER BY start_month, start_year, TYPE_MOUD, ID;
+    ORDER BY new_start_month, new_start_year, TYPE_MOUD, ID;
+QUIT;
+
+PROC SQL;                    
+    CREATE TABLE moud_starts AS
+    SELECT DISTINCT *
+    FROM moud_starts;
 QUIT;
 
 proc sql;
@@ -1157,26 +1190,80 @@ quit;
 /* 5. Calculate MOUD Episode Durations   */
 /*========================================*/
 /* This section calculates the length of each MOUD episode and categorizes 
-   them into duration groups (<6 months, 6-12 months, 1-2 years, and 2+ years). 
-   It then summarizes the number of episodes per individual, stratified by 
+   them into duration groups (0-1 month, 2-6 months, 6-12 months, 1-2 years, 2+ years, and entire follow-up period). 
+   It then summarizes the number of episodes overall and per individual, stratified by 
    pregnancy status, race/ethnicity, and age group. */
 
 data episode_length;
     set moud_demo;
 
-    episode_length = end_date - start_date;
+    episode_length = new_end_date - new_start_date;
 
     episode_1month = 0;
     episode_6months = 0;
     episode_12months = 0;
     episode_24months = 0;
+    episode_gt24months = 0;
+    episode_full_followup = 0;
 
-    if episode_length < 30 then episode_1months = 1; /* 0-1 month */
-    else if episode_length >= 30 and episode_length < 180 then episode_6months = 1; /* 2-6 months */
-    else if episode_length >= 180 and episode_length < 365 then episode_12months = 1; /* 6-12 months */
-    else if episode_length >= 365 and episode_length < 730 then episode_24months = 1; /* 1-2 years */
-    else if episode_length >= 730 then episode_24months = 1; /* 2+ years */
+    if (new_start_year < 2014 or (new_start_year = 2014 and new_start_month <= 1)) and 
+       (new_end_year > 2022 or (new_end_year = 2022 and new_end_month >= 12)) then 
+        episode_full_followup = 1;
+    else do;
+        if episode_length < 30 then episode_1month = 1; /* 0-1 month */
+        else if episode_length >= 30 and episode_length < 180 then episode_6months = 1; /* 2-6 months */
+        else if episode_length >= 180 and episode_length < 365 then episode_12months = 1; /* 6-12 months */
+        else if episode_length >= 365 and episode_length < 730 then episode_24months = 1; /* 1-2 years */
+        else if episode_length >= 730 then episode_gt24months = 1; /* 2+ years */
+    end;
+
 run;
+
+title "Frequency Distribution of Episode Length";
+proc freq data=episode_length;
+    tables episode_1month episode_6months episode_12months 
+           episode_24months episode_gt24months episode_full_followup;
+run;
+
+proc sort data=episode_length;
+    by TYPE_MOUD;
+run;
+
+title "Frequency Distribution of Episode Length by MOUD Type";
+proc freq data=episode_length;
+    by TYPE_MOUD;
+    tables episode_1month episode_6months episode_12months 
+           episode_24months episode_gt24months episode_full_followup;
+run;
+title;
+
+proc sort data=episode_length;
+    by ID descending episode_length;
+run;
+
+data episode_length_personlvl;
+    set episode_length;
+    by ID;
+    if first.ID;
+run;	
+
+title "Frequency Distribution of Episode Length - Person-Level Data";
+proc freq data=episode_length_personlvl;
+    tables episode_1month episode_6months episode_12months 
+           episode_24months episode_gt24months episode_full_followup;
+run;
+
+proc sort data=episode_length_personlvl;
+    by TYPE_MOUD;
+run;
+
+title "Frequency Distribution of Episode Length by MOUD Type - Person-Level Data ";
+proc freq data=episode_length_personlvl;
+    by TYPE_MOUD;
+    tables episode_1month episode_6months episode_12months 
+           episode_24months episode_gt24months episode_full_followup;
+run;
+title;
 
 proc sql;
     create table episode_counts as
@@ -1194,14 +1281,6 @@ proc sql;
     select distinct ID, BIRTH_INDICATOR, FINAL_RE, age_grp_five, num_episodes
     from episode_counts;
 quit;
-
-/*========================================*/
-/* 6. Summary Statistics for MOUD Episodes */
-/*========================================*/
-/* This section calculates summary statistics for the number of MOUD episodes 
-   per person and the duration of MOUD episodes. Statistics include mean, 
-   median, and standard deviation. Results are further stratified by 
-   pregnancy status, race/ethnicity, and age group. */
 
 title "Summary stats: Mean number of MOUD episodes per person";
 proc means data=episode_counts mean median std min max q1 q3;
@@ -1259,10 +1338,12 @@ run;
 proc sql;
     create table aggregated_episode as
     select ID,
-           sum(episode_1months) as episode_1months_sum,
+           sum(episode_1month) as episode_1month_sum,
            sum(episode_6months) as episode_6months_sum,
            sum(episode_12months) as episode_12months_sum,
-           sum(episode_24months) as episode_24months_sum
+           sum(episode_24months) as episode_24months_sum,
+           sum(episode_gt24months) as episode_gt24months_sum,
+           sum(episode_full_followup) as episode_full_followup_sum
     from episode_length
     group by ID;
 quit;
@@ -1279,21 +1360,26 @@ data moud_preg;
     if a;
 run;
 
+data moud_preg;
+    set moud_preg;
+    
+    if episode_12months_sum > 0 or episode_24months_sum > 0 or 
+       episode_gt24months_sum > 0 or episode_full_followup_sum > 0 then
+        EVER_6MO = 1;
+    else
+        EVER_6MO = 0;
+run;
+
 data check_moud_count;
     set moud_preg;
     
-    MOUD_Sum = sum(episode_1months_sum, episode_6months_sum, episode_12months_sum, episode_24months_sum);
+    MOUD_Sum = sum(episode_1month_sum, episode_6months_sum, 
+                   episode_12months_sum, episode_24months_sum, 
+                   episode_gt24months_sum, episode_full_followup_sum);
 
     if MOUD_Sum = num_episodes then MOUD_Match = 1;
     else MOUD_Match = 0;
 run;
-
-/*===============================================*/
-/* 8. Validation and Distribution of MOUD Retention */
-/*===============================================*/
-/* This section validates that the sum of MOUD episode duration categories 
-   matches the total number of MOUD episodes per person. It also provides 
-   an aggregated summary of MOUD retention across different duration thresholds. */
 
 title "Check that the sum of MOUD_duration variables = number MOUD episodes";
 proc freq data=check_moud_count;
@@ -1301,23 +1387,11 @@ proc freq data=check_moud_count;
 run;
 title;
 
-title "Distribution of MOUD retention";
-data check_moud_count;
-   set check_moud_count;
-   total_moud_episodes = sum(of episode_1months_sum episode_6months_sum episode_12months_sum episode_24months_sum);
-run;
-
-proc means data=check_moud_count sum;
-   var episode_1months_sum episode_6months_sum episode_12months_sum episode_24months_sum total_moud_episodes;
-run;
-title;
-
 /*================================================*/
 /* 9. Processing Overdose Data and Merging Demographics */
 /*================================================*/
 /* This section processes the overdose dataset, filters it for data from 2014 onwards, 
-   merges with the MOUD pregnancy data, and joins additional demographic information 
-   (including race, birth indicator, age group, and final_re) from related datasets. */
+   merges with the MOUD pregnancy data, and joins additional demographic information. */
 
 DATA overdose_spine (KEEP=ID OD_YEAR OD_RACE OD_COUNT OD_AGE OD_DATE FATAL_OD_DEATH);
     SET PHDSPINE.OVERDOSE;
@@ -1438,95 +1512,95 @@ proc sql;
     from overdose_spine
  quit;
  
- data overdose_summary;
+data overdose_summary;
      set overdose_summary;
      OD_AGE = put(OD_AGE, age_grps_five.);
- run;
+run;
  
- title "Overall Distribution of Overdose Flag";
- proc freq data=overdose_summary;
+title "Overall Distribution of Overdose Flag";
+proc freq data=overdose_summary;
     tables overdose_flag;
- run;
+run;
  
- title "Overall Distribution of Overdose Flag Stratified by Pregnancy";
- proc sort data=overdose_summary;
+title "Overall Distribution of Overdose Flag Stratified by Pregnancy";
+proc sort data=overdose_summary;
      by BIRTH_INDICATOR;
- run;
+run;
  
- proc freq data=overdose_summary;
+proc freq data=overdose_summary;
      tables overdose_flag;
      by BIRTH_INDICATOR;
- run;
+run;
  
- proc sort data=overdose_summary;
+proc sort data=overdose_summary;
     by OD_RACE;
- run;
- 
- title "Distribution of Overdose Flag Stratified by Race/Ethnicity";
- proc freq data=overdose_summary;
+run;
+
+title "Distribution of Overdose Flag Stratified by Race/Ethnicity";
+proc freq data=overdose_summary;
     by OD_RACE;
     tables overdose_flag;
- run;
+run;
  
- proc sort data=overdose_summary;
+proc sort data=overdose_summary;
     by OD_AGE;
- run;
+run;
  
- title "Distribution of Overdose Flag Stratified by Age at OUD Diagnosis";
- proc freq data=overdose_summary;
+title "Distribution of Overdose Flag Stratified by Age at OUD Diagnosis";
+proc freq data=overdose_summary;
     by OD_AGE;
     tables overdose_flag;
- run;
+run;
  
- proc sql;
+proc sql;
     create table overdose_counts as
     select ID, 
     max(BIRTH_INDICATOR) as BIRTH_INDICATOR, 
     max(OD_Count) as OD_Count
     from overdose_spine
     group by ID;
- quit;
+quit;
  
- title "Summary stats: Overdose counts per person";
- proc means data=overdose_counts mean median std min max q1 q3;
+title "Summary stats: Overdose counts per person";
+proc means data=overdose_counts mean median std min max q1 q3;
     var OD_Count;
- run;
+run;
  
- proc means data=overdose_counts mean median std min max q1 q3;
+proc means data=overdose_counts mean median std min max q1 q3;
     class BIRTH_INDICATOR;
     var OD_Count;
- run;
+run;
  
- /*==========================================================*/
-/* 12. MOUD Episodes and Overdose During/After MOUD           */
+/*==========================================================*/
+/* 12. MOUD Episodes and Overdose During/After MOUD         */
 /*==========================================================*/
 /* This section processes the MOUD start and end dates for each individual, and identifies episodes of overdose during and after MOUD treatment. 
 The array is necessary to pivot from episode-level to person-level data to allow the calculation of overdose occurrences during the treatment period, 
 within 30 days after treatment, or with no MOUD treatment. */
 
- PROC SORT data=moud_demo (KEEP= ID DATE_START_MOUD DATE_END_MOUD);
-   by ID DATE_START_MOUD;
- RUN;
- 
- PROC TRANSPOSE data=moud_demo out=moud_demo_wide_start (KEEP = ID DATE_START_MOUD:) PREFIX=DATE_START_MOUD_;
-   BY ID;
-   VAR DATE_START_MOUD;
- RUN;
- 
- PROC SORT data=moud_demo (KEEP= ID DATE_START_MOUD DATE_END_MOUD);
-   by ID DATE_END_MOUD;
- RUN;
- 
- PROC TRANSPOSE data=moud_demo out=moud_demo_wide_end (KEEP = ID DATE_END_MOUD:) PREFIX=DATE_END_MOUD_;
-   BY ID;
-   VAR DATE_END_MOUD;
- RUN;
- 
- DATA moud_demo_final;
-   MERGE moud_demo_wide_start (IN=a) moud_demo_wide_end (IN=b);
-   BY ID;
- RUN;
- 
+PROC SORT data=moud_demo;
+  by ID new_start_date;
+RUN;
+
+PROC TRANSPOSE data=moud_demo out=moud_demo_wide_start (KEEP = ID new_start_date:) PREFIX=new_start_date_;
+  BY ID;
+  VAR new_start_date;
+RUN;
+
+PROC SORT data=moud_demo;
+  by ID new_end_date;
+RUN;
+
+PROC TRANSPOSE data=moud_demo out=moud_demo_wide_end (KEEP = ID new_end_date:) PREFIX=new_end_date_;
+  BY ID;
+  VAR new_end_date;
+RUN;
+
+DATA moud_demo_final;
+  MERGE moud_demo_wide_start (IN=a) moud_demo_wide_end (IN=b);
+  BY ID;
+RUN;
+
  DATA moud_od_demo;
    MERGE overdose_spine (IN=a) moud_demo_final (IN=b);
    BY ID;
@@ -1537,8 +1611,8 @@ DATA moud_od_demo;
     SET moud_od_demo;
     BY ID;
 
-    ARRAY MOUD_START (*) DATE_START_MOUD_:;
-    ARRAY MOUD_END (*) DATE_END_MOUD_:;
+    ARRAY MOUD_START (*) new_start_date_:;
+    ARRAY MOUD_END (*) new_end_date_:;
 
     num_moud_episodes = DIM(MOUD_START);
 
@@ -1548,7 +1622,7 @@ DATA moud_od_demo;
         OD_during_MOUD = 0;  
         OD_after_MOUD = 0;  
         OD_no_MOUD = 0;  
-        OD_COUNT_CHECK = 0; /*  This variable is to check the total N ODs per person since OD_COUNT is persistent through whole OD table, while we filter to 2014-2022 */
+        OD_COUNT_CHECK = 0; /*  This variable is to check the total N ODs per person since OD_COUNT is persistent through whole OD table, while we clean the table and filter short episodes */
     END;
 
     DO i = 1 TO num_moud_episodes;
@@ -1721,9 +1795,7 @@ data FINAL_COHORT;
     set FINAL_COHORT;
     if EDUCATION = 1 then EDUCATION_GROUP = 'HS or less';
     else if EDUCATION = 2 then EDUCATION_GROUP = '13+ years';
-    else if EDUCATION = 3 then EDUCATION_GROUP = 'Other';
-    else if EDUCATION = 10 then EDUCATION_GROUP = 'Other';
-    else EDUCATION_GROUP = 'Missing or Unknown';
+    else EDUCATION_GROUP = 'Other or Unknown';
 run;
 
 proc sql;
@@ -2030,12 +2102,13 @@ run;
 data closest_insurance;
     length closest_past_type closest_future_type closest_type $2;
     length closest_past_zip closest_future_zip closest_zip $10;
+    format closest_past_zip closest_future_zip closest_zip $5.;
     
     merge FINAL_COHORT (in=a)
           apcd (in=b);
     by ID;
     
-    if a;  /* Keep only records from FINAL_COHORT */
+    if a;
 
     retain closest_past_date closest_past_type closest_past_zip min_past_diff;
     retain closest_future_date closest_future_type closest_future_zip min_future_diff;
@@ -2052,15 +2125,15 @@ data closest_insurance;
         closest_future_zip = "";
         min_future_diff = .;
         
-        found_exact_match = 0;  /* Flag to track exact match */
+        found_exact_match = 0;
     end;
 
     /* If claim is from the exact same month/year, take the first one and stop searching */
     if ME_MEM_YEAR = EVENT_YEAR_HCV and ME_MEM_MONTH = EVENT_MONTH_HCV then do;
-        if found_exact_match = 0 then do; /* Take only the first claim */
+        if found_exact_match = 0 then do; 
             closest_type = ME_INSURANCE_PRODUCT;
             closest_zip = RES_ZIP_APCD_ME;
-            found_exact_match = 1; /* Prevent processing past/future claims */
+            found_exact_match = 1;
             output;
         end;
     end;
@@ -2072,7 +2145,7 @@ data closest_insurance;
             past_diff = (EVENT_YEAR_HCV - ME_MEM_YEAR) * 12 + (EVENT_MONTH_HCV - ME_MEM_MONTH);
             if min_past_diff = . or past_diff < min_past_diff then do;
                 min_past_diff = past_diff;
-                closest_past_date = ME_MEM_YEAR * 100 + ME_MEM_MONTH; /* Just for comparison */
+                closest_past_date = ME_MEM_YEAR * 100 + ME_MEM_MONTH; 
                 closest_past_type = ME_INSURANCE_PRODUCT;
                 closest_past_zip = RES_ZIP_APCD_ME;
             end;
@@ -2083,7 +2156,7 @@ data closest_insurance;
             future_diff = (ME_MEM_YEAR - EVENT_YEAR_HCV) * 12 + (ME_MEM_MONTH - EVENT_MONTH_HCV);
             if min_future_diff = . or future_diff < min_future_diff then do;
                 min_future_diff = future_diff;
-                closest_future_date = ME_MEM_YEAR * 100 + ME_MEM_MONTH; /* Just for comparison */
+                closest_future_date = ME_MEM_YEAR * 100 + ME_MEM_MONTH;
                 closest_future_type = ME_INSURANCE_PRODUCT;
                 closest_future_zip = RES_ZIP_APCD_ME;
             end;
@@ -2126,10 +2199,8 @@ data FINAL_COHORT;
     if a;
 run;
 
-/* Recategorize zip into town/city code for OUD cohort (HCV cohort has direct pull from HEPC dataset) */
 data FINAL_COHORT;
    set FINAL_COHORT;
-     if not missing(closest_zip) then do;
 	 if closest_zip = "02351" then RES_CODE = 1;
 else if closest_zip = "01718" then RES_CODE = 2;
 else if closest_zip = "01720" then RES_CODE = 2;
@@ -2894,7 +2965,6 @@ else if closest_zip = "02664" then RES_CODE = 351;
 else if closest_zip = "02673" then RES_CODE = 351;
 else if closest_zip = "02675" then RES_CODE = 351;
 else if missing(closest_zip) then RES_CODE  = 999;
-    end;
 run;
 
 data FINAL_COHORT;
@@ -2942,7 +3012,15 @@ data FINAL_COHORT;
    else if INSURANCE = 3 then INSURANCE_CAT = 'Medicare';
    else INSURANCE_CAT = 'Other/Missing';
 run;
- 
+
+data FINAL_COHORT;
+   set FINAL_COHORT;
+   if CONFIRMED_HCV_INDICATOR = 1 then CONFIRMED_HCV_INDICATOR = 1;
+   else if CONFIRMED_HCV_INDICATOR = 0 then CONFIRMED_HCV_INDICATOR = 2;
+   else if CONFIRMED_HCV_INDICATOR = . then CONFIRMED_HCV_INDICATOR = 0;
+   else CONFIRMED_HCV_INDICATOR = 999;
+run;
+
 proc format;
     value flagf
         0 = 'No'
@@ -2959,9 +3037,9 @@ proc format;
         99 = 'Not an MA resident';
     
     value hcv_reportf
-    	0 = "Probable"
+    	0 = "No Case Report"
     	1 = "Confirmed"
-    	. = "No Case Report";
+    	2 = "Probable";
     
     VALUE age_grps
 		1 = '15-18'
@@ -3048,20 +3126,18 @@ run;
 %Table1StrataFreqs(INSURANCE_CAT);
 %Table1StrataFreqs(rural_group);
 
-PROC SQL;
-    CREATE TABLE FINAL_COHORT AS 
-    SELECT A.*, 
-           CASE WHEN EXISTS (SELECT 1 FROM moud_starts B WHERE A.ID = B.ID) 
-                THEN 1 ELSE 0 
-           END AS EVER_MOUD
-    FROM FINAL_COHORT A;
-QUIT;
-
-DATA FINAL_COHORT;
-SET FINAL_COHORT;
-	IF EVER_MOUD = . THEN EVER_MOUD = 0;
-run;
-
+proc sql;
+    create table FINAL_COHORT as
+    select 
+        FINAL_COHORT.*, 
+        (case when moud.ID is not null then 1 else 0 end) as EVER_MOUD
+    from FINAL_COHORT
+    left join 
+        (select distinct ID 
+         from PHDSPINE.MOUD3 
+         where DATE_START_YEAR_MOUD >= 2014) as moud
+    on FINAL_COHORT.ID = moud.ID;
+quit;
 
 %macro Table2MOUD(var, ref=);
 	title "Table 2, Crude";
@@ -3084,7 +3160,41 @@ run;
 %Table2MOUD(IDU_EVIDENCE, ref ='0');
 %Table2MOUD(MENTAL_HEALTH_DIAG, ref ='0');
 %Table2MOUD(OTHER_SUBSTANCE_USE, ref ='0');
-%Table2MOUD(INSURANCE_CAT, ref ='Commercial');
+%Table2MOUD(INSURANCE_CAT, ref ='Medicaid');
+%Table2MOUD(rural_group, ref ='Urban');
+
+proc sql;
+    create table FINAL_COHORT as
+    select 
+        A.*, 
+        (case when B.ID is not null then 1 else 0 end) as EVER_MOUD_CLEAN
+    from FINAL_COHORT as A
+    left join moud_starts as B
+    on A.ID = B.ID;
+quit;
+
+%macro Table2MOUD(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model EVER_MOUD_CLEAN(event='1') = &var / dist=binary link=logit solution oddsratio;
+	run;
+%mend;
+
+%Table2MOUD(FINAL_RE, ref ='1');
+%Table2MOUD(agegrp_num, ref ='3');
+%Table2MOUD(EVER_INCARCERATED, ref ='0');
+%Table2MOUD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2MOUD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2MOUD(EDUCATION_GROUP, ref ='HS or less');
+%Table2MOUD(HIV_DIAG, ref ='0');
+%Table2MOUD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2MOUD(IJI_DIAG, ref ='0');
+%Table2MOUD(EVER_IDU_HCV, ref ='0');
+%Table2MOUD(IDU_EVIDENCE, ref ='0');
+%Table2MOUD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2MOUD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2MOUD(INSURANCE_CAT, ref ='Medicaid');
 %Table2MOUD(rural_group, ref ='Urban');
 
 proc sql;
@@ -3095,7 +3205,7 @@ proc sql;
     from FINAL_COHORT
     left join 
         (select distinct ID 
-         from PHDSPINE.OVERDOSE 
+         from PHDSPINE.OVERDOSE
          where OD_YEAR >= 2014) as od
     on FINAL_COHORT.ID = od.ID;
 quit;
@@ -3121,9 +3231,69 @@ quit;
 %Table2OD(IDU_EVIDENCE, ref ='0');
 %Table2OD(MENTAL_HEALTH_DIAG, ref ='0');
 %Table2OD(OTHER_SUBSTANCE_USE, ref ='0');
-%Table2OD(INSURANCE_CAT, ref ='Commercial');
+%Table2OD(INSURANCE_CAT, ref ='Medicaid');
 %Table2OD(rural_group, ref ='Urban');
-title;
+
+proc sql;
+    create table FINAL_COHORT as
+    select 
+        FINAL_COHORT.*, 
+        (case when fod.ID is not null then 1 else 0 end) as EVER_FOD
+    from FINAL_COHORT
+    left join 
+        (select distinct ID 
+         from PHDSPINE.OVERDOSE
+         where FATAL_OD_DEATH = 1) as fod
+    on FINAL_COHORT.ID = fod.ID;
+quit;
+
+%macro Table2OD(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model EVER_FOD(event='1') = &var / dist=binary link=logit solution oddsratio;
+	run;
+%mend;
+
+%Table2OD(FINAL_RE, ref ='1');
+%Table2OD(agegrp_num, ref ='3');
+%Table2OD(EVER_INCARCERATED, ref ='0');
+%Table2OD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2OD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2OD(EDUCATION_GROUP, ref ='HS or less');
+%Table2OD(HIV_DIAG, ref ='0');
+%Table2OD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2OD(IJI_DIAG, ref ='0');
+%Table2OD(EVER_IDU_HCV, ref ='0');
+%Table2OD(IDU_EVIDENCE, ref ='0');
+%Table2OD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2OD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2OD(INSURANCE_CAT, ref ='Medicaid');
+%Table2OD(rural_group, ref ='Urban');
+
+%macro Table26MO(var, ref=);
+	title "Table 2, Crude";
+	proc glimmix data=FINAL_COHORT noclprint noitprint;
+	        class &var (ref=&ref);
+	        model EVER_6MO(event='1') = &var / dist=binary link=logit solution oddsratio;
+	run;
+%mend;
+
+%Table26MO(FINAL_RE, ref ='1');
+%Table26MO(agegrp_num, ref ='3');
+%Table26MO(EVER_INCARCERATED, ref ='0');
+%Table26MO(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table26MO(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table26MO(EDUCATION_GROUP, ref ='HS or less');
+%Table26MO(HIV_DIAG, ref ='0');
+%Table26MO(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table26MO(IJI_DIAG, ref ='0');
+%Table26MO(EVER_IDU_HCV, ref ='0');
+%Table26MO(IDU_EVIDENCE, ref ='0');
+%Table26MO(MENTAL_HEALTH_DIAG, ref ='0');
+%Table26MO(OTHER_SUBSTANCE_USE, ref ='0');
+%Table26MO(INSURANCE_CAT, ref ='Medicaid');
+%Table26MO(rural_group, ref ='Urban');
 
 PROC SQL;
     SELECT COUNT(DISTINCT ID) AS Number_of_Unique_IDs
@@ -3152,151 +3322,6 @@ QUIT;
 %ChiSquareTest(CONFIRMED_HCV_INDICATOR, OTHER_SUBSTANCE_USE);
 %ChiSquareTest(IDU_EVIDENCE, OTHER_SUBSTANCE_USE);
 
-title "Table 2, MV";
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
-run;
-
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-
-
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-
-
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-proc glimmix data=FINAL_COHORT noclprint noitprint;
-    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Commercial') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
-    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
-run;
-title;
-
 /*===============================*/
 /*  Part 4: Calculate MOUD Rates */
 /*===============================*/
@@ -3312,172 +3337,45 @@ title;
     episodes based on the specified leniency, and eliminates any overlapping episodes. The dataset is then 
     cleaned for missing values and sorted for further analysis */
 
-/*======================*/
-/* 1. Pull MOUD Episode */
-/*======================*/
-
-DATA moud;
-    SET PHDSPINE.MOUD3;
-RUN;
-
-PROC SORT DATA=moud;
-    BY ID TYPE_MOUD DATE_START_MOUD;
-RUN;
-
-/*==========================*/
-/* 2. Creating Episode IDs  */
-/*==========================*/
-/* The goal of this step is to create a unique `episode_id` for each treatment episode 
-   based on the treatment start and end dates for each individual. The new episode ID 
-   will be used for further merging and analysis. */
-
-   DATA moud;
-    SET moud;
-    by ID TYPE_MOUD;
-    retain episode_num;
-    
-    lag_date = lag(DATE_END_MOUD);
-    IF FIRST.TYPE_MOUD THEN lag_date = .;
-    IF FIRST.TYPE_MOUD THEN episode_num = 1;
-    
-    diff = DATE_START_MOUD - lag_date;
-    
-    IF diff >= &MOUD_leniency THEN flag = 1; ELSE flag = 0;
-    IF flag = 1 THEN episode_num = episode_num + 1;
-    
-    episode_id = catx("_", ID, episode_num);
-RUN;
-
-PROC SORT data=moud; 
-    BY episode_id;
-RUN;
-
-/*==================================================*/
-/* 3. Merging Start and End Dates for Each Episode  */
-/*==================================================*/
-/* In this step, we retain the start and end dates of each treatment episode. 
-   The start date for each episode is taken from the first record in the episode, 
-   and the end date is taken from the last record. This allows us to capture the full 
-   duration of each treatment episode. */
-
-   DATA moud; 
-    SET moud;
-
-    by episode_id;
-    retain DATE_START_MOUD;
-    
-    IF FIRST.episode_id THEN DO;
-        start_month = DATE_START_MONTH_MOUD;
-        start_year = DATE_START_YEAR_MOUD;
-        start_date = DATE_START_MOUD;
-    END;
-    IF LAST.episode_id THEN DO;
-        end_month = DATE_END_MONTH_MOUD;
-        end_year = DATE_END_YEAR_MOUD;
-        end_date = DATE_END_MOUD;
-    END;
-    
-    IF end_date - start_date < &MOUD_leniency THEN DELETE;
-RUN;
-
-/*===========================================*/
-/* 4. Final Sorting and Removing Duplicates  */
-/*===========================================*/
-/* Sorting by ID ensures that data is properly organized for the next steps. 
-   The SQL step below removes any duplicate records to ensure that each episode 
-   is uniquely represented. */
-
-PROC SORT data=moud;
-    BY ID;
-RUN;
-
-PROC SQL;
-   CREATE TABLE moud 
-   AS SELECT DISTINCT * 
-   FROM moud;
-QUIT;
-
-/*============================================*/
-/* 5. Removing Episodes with Short Durations  */
-/*============================================*/
-/* In this step, treatment episodes with durations shorter than the leniency threshold 
-   are removed to ensure the dataset only contains valid treatment episodes. */
-
-DATA moud;
-    SET moud;
-    BY ID;
-    
-    IF end_date - start_date < &MOUD_leniency THEN DELETE;
-
-    LAG_ED = LAG(END_DATE);
-    
-    IF FIRST.ID THEN diff = .;
-    ELSE diff = start_date - LAG_ED;
-    
-    IF end_date < LAG_ED THEN temp_flag = 1;
-    ELSE temp_flag = 0;
-
-    IF FIRST.ID THEN flag_mim = 0;
-    ELSE IF diff < 0 AND temp_flag = 1 THEN flag_mim = 1;
-    ELSE flag_mim = 0;
-
-    IF flag_mim = 1 THEN DELETE;
-RUN;
-
-/*=========================================*/
-/* 6. Filtering Data by Date Range and ID  */
-/*=========================================*/
-/* Finally, we filter the data to only include women in our cohort and treatment episodes that ended in or after 2014 */
-
-data moud;
-    set moud;
-    where DATE_START_YEAR_MOUD >= 2014;
-run;
-
-PROC SQL;
-    CREATE TABLE moud AS 
-    SELECT * 
-    FROM moud
-    WHERE ID IN (SELECT DISTINCT ID FROM oud_distinct);
-QUIT;
-
-/*============================*/
-/* 7. Identifying Missing IDs */
-/*============================*/
-/* This step identifies IDs in the `oud_preg` dataset that do not have matching records in the 
+/*====================*/
+/* 1. Identifying Missing IDs */
+/*====================*/
+/* This step identifies IDs in the FINAL_COHORT that do not have matching records in the cleaned
    `moud` dataset. The result is saved in the `missing_ids` table. */
 
 proc sql;
    create table missing_ids as
-   select a.ID
-   from oud_preg as a
-   where not exists (select 1 from moud as b where a.ID = b.ID);
+   select ID
+   from FINAL_COHORT
+   where EVER_MOUD_CLEAN = 0;
 quit;
 
-/*================================*/
-/* 8. Creating Two MOUD Datasets  */
-/*================================*/
-/* This dataset contains all records from `moud`, which will be used for further analysis of MOUD duration. */
+/*====================*/
+/* 2. Creating Two MOUD Datasets */
+/*====================*/
+/* This dataset contains all records from the cleaned MOUD dataset, which will be used for further analysis of MOUD cessation
+because you are only eligble for MOUD cessation if you are currently taking MOUD */
 
 DATA moud_duration;
-    SET moud;
+    SET moud_demo;
 RUN;
 
-/* This step completes the final dataset `moud_full` by taking the moud dataset and creating additional observations 
-for those in the OUD cohort that did not have a record from the `moud` dataset. This dataset will be used to assess MOUD initiation */
+/* This step makes an expanded `moud_full` dataset by taking the cleaned moud dataset and creating additional observations 
+for those in the OUD cohort that did not have a clean MOUD episode. This dataset will be used to assess MOUD initiation
+because all with OUD contiribute eligblie person-time toward MOUD initation */
 
 DATA moud_full;
-    SET moud;
+    SET moud_demo;
 RUN;
 
 proc sql;
-   insert into moud_full (ID, episode_id)
-   select ID, "."
+   insert into moud_full (ID)
+   select ID
    from missing_ids;
 quit;
 
 /*=====================================*/
-/* 9. Prepare Pregnancy Tables         */
+/* 3. Prepare Pregnancy Tables         */
 /*=====================================*/
 /* This portion processes birth and infant data to generate monthly pregnancy and postpartum period flags for each birth. It first extracts relevant birth records from `PHDBIRTH.BIRTH_MOM` based on a specified year range and 
 retrieves gestational age from `PHDBIRTH.BIRTH_INFANT`, merging them using `BIRTH_LINK_ID`. The script then estimates pregnancy duration based on gestational age and determines the start and end months of pregnancy. 
@@ -3627,15 +3525,13 @@ DATA months; DO month = 1 to 12; OUTPUT; END; RUN;
 DATA years; DO year = &start_year to &end_year; OUTPUT; END; RUN;
 
 /*=====================================*/
-/* 10. Macro for flag generation       */
+/* 4. Macro for flag generation       */
 /*=====================================*/
-/* This section of the code defines a macro that merges demographic data from `PHDSPINE.DEMO` 
-to the input dataset, filters based on gender, and creates a table that flags the presence of treatment 
-episodes across a specified range of months and years. It also handles the creation of flags for pregnancy 
-and post-partum periods by calculating the relevant months based on gestational age, ensuring the correct assignment 
-of treatment and post-partum periods across multiple years. The final output includes flags for each month indicating 
-the stage of pregnancy or post-partum status for each individual. THe code potion is wrapped in a macro so that two datasets,
-moud_init and moud_duration, can be run sequentially through the same data manipulation steps. Dataset moud_init includes
+/* This section of the code defines a macro that merges creates the cartesian produce of the input moud datasets for Jan 2014-Dec 2022.
+It merges demographic data from `PHDSPINE.DEMO` to the long dataset, and creates a table that flags the presence of treatment 
+episodes across a specified range of months and years. It also merges flags for pregnancy and post-partum periods. The final output includes flags for each month indicating 
+the stage of pregnancy or post-partum status, an onoging MOUD episode, an MOUD initation, or an MOUD cessation event for each individual. 
+The code potion is wrapped in a macro so that two datasets, moud_init and moud_duration, can be run sequentially through the same data manipulation steps. Dataset moud_init includes
 all IDs in the Maternal OUD cohort (to analyze MOUD initation outcomes since all with OUD are eligible) while dataset moud_duration 
 is a subset of only those that had an MOUD episode (to analyze MOUD duration and cessation since being on MOUD is required to eligiblity) */
 
@@ -3657,7 +3553,7 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	                else . end as pregnancy_start_month,
 	           case when b.pregnancy_start_year is not null then b.pregnancy_start_year 
 	                else . end as pregnancy_start_year
-	    from moud_table a /* Original MOUD data */
+	    from moud_table a
 	    left join pregnancy_flags b
 	    on a.ID = b.ID 
 	       and a.month = b.month 
@@ -3691,8 +3587,8 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	/* Create a summary dataset with a flag indicating whether a month overlaps with the MOUD episode */
     data moud_summary;
         set moud_table;
-        start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
-        end_month_year = mdy(DATE_END_MONTH_MOUD, 1, DATE_END_YEAR_MOUD);
+        start_month_year = mdy(new_start_month, 1, new_start_year);
+        end_month_year = mdy(new_end_month, 1, new_end_year);
         target_month_year = mdy(month, 1, year);
 
         if start_month_year <= target_month_year <= end_month_year then
@@ -3705,8 +3601,8 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	data moud_spine_posttxt;
 	    set moud_table;
 	
-	    start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
-	    end_month_year = mdy(DATE_END_MONTH_MOUD, 1, DATE_END_YEAR_MOUD);
+	    start_month_year = mdy(new_start_month, 1, new_start_year);
+	    end_month_year = mdy(new_end_month, 1, new_end_year);
 	    target_month_year = mdy(month, 1, year);
 	
 	    if target_month_year = end_month_year then
@@ -3750,11 +3646,11 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 	    set moud_table;
 	    by episode_id year month;
 	
-	    moud_start_month_year = mdy(DATE_START_MONTH_MOUD, 1, DATE_START_YEAR_MOUD);
+	    moud_start_month_year = mdy(new_start_month, 1, new_start_year);
 	    pregnancy_start_month_year = mdy(pregnancy_start_month, 1, pregnancy_start_year);
 	    first_preg_start_month_year = mdy(first_preg_month, 1, first_preg_year);
-	
-	    if first.episode_id then do;
+
+        if first.episode_id then do;
 	        if moud_init ne 1 then moud_start_group = .; 
 	    end;
 	
@@ -3823,9 +3719,36 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
     /* Create moud cessation variable */
 	data MOUD_TABLE;
 	    set MOUD_TABLE;
-	    if DATE_END_MONTH_MOUD = MONTH and DATE_END_YEAR_MOUD = YEAR then moud_cessation = 1;
+	    if new_end_month = MONTH and new_start_year = YEAR then moud_cessation = 1;
 	    else moud_cessation = 0;
 	run;
+
+    proc sort data=moud_table;
+    	by episode_id year month;
+	run;
+	
+	data check_overlap;
+	    set moud_table;
+	    by episode_id year month;
+	    
+	    retain ongoing_episode count;
+	    
+	    if first.episode_id then ongoing_episode = 0;
+	
+	    if moud_init = 1 then do;
+	        if ongoing_episode = 1 then count + 1;
+	        ongoing_episode = 1;
+	    end;
+	    
+	    if moud_cessation = 1 then ongoing_episode = 0;
+	
+	run;
+	
+	title "Check Overlap in MOUD starts";
+	proc means data=check_overlap max;
+	    var count;
+	run;
+	title;
 
 	data prepared_data;
     	set moud_table;
@@ -3838,7 +3761,6 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 		/* Create a unique time index */
 		time_index = (year - 2014) * 12 + month;
 		   
-		/* Categorize individuals based on pregnancy and post-partum status */
 		if preg_flag = 1 then group = 1; /* Pregnant */
 		else if preg_flag = 2 then group = 2; /* 0-6 months post-partum */
 		else if preg_flag = 3 then group = 3; /* 7-12 months post-partum */
@@ -3980,7 +3902,7 @@ is a subset of only those that had an MOUD episode (to analyze MOUD duration and
 %mend;
 
 /*=================================================================*/
-/* 11. MOUD Duration Stats and Cessation Rates by Pregnancy Status */
+/* 5. MOUD Duration Stats and Cessation Rates by Pregnancy Status */
 /*=================================================================*/
 /* This section creates summary tables (`PERSON_TIME` and `PERIOD_SUMMARY`) to calculate the number of eligible cessation periods and actual MOUD cessation events for each individual. 
 These tables are merged with demographic data, including variables such as race, sex, education, incarceration history, and homelessness status. Additional variables are created, including an indicator for injection drug use (`IDU_EVIDENCE`) and age groups. 
@@ -4191,9 +4113,9 @@ quit;
 title;
 
 /*=================================================================*/
-/* 12. MOUD Duration Stats and Cessation Rates by MOUD Start Time  */
+/* 6. MOUD Duration Stats and Cessation Rates by MOUD Start Time  */
 /*=================================================================*/
-/* This section does the same thing as section 11 but rather than pregnancy status as the group of anlaysis, it uses MOUD start time relative to pregnancy as the group of analysis (i.e. MOUD start before, during, or after pregnancy)
+/* This section does the same thing as section 11 but rather than pregnancy status as the group of analysis, it uses MOUD start time relative to pregnancy as the group of analysis (i.e. MOUD start before, during, or after pregnancy)
 So, it begins with summarized MOUD start group information, merging this with a prepared dataset that tracks individuals by ID, month, and year. The script then calculates person-time eligible for cessation and summarizes cessation events by MOUD start group. 
 Demographic and clinical data, including homelessness history, incarceration, birth indicators, and HCV status, are integrated into the final dataset. Additional derived variables, such as age and an indicator for injection drug use (IDU) evidence, are created. 
 Next, generate statistical summaries of MOUD cessation rates overall and stratified by key demographic and clinical characteristics using a macro for automated subgroup analysis. */
@@ -4377,13 +4299,13 @@ quit;
 title;
 
 /*============================================*/
-/* 13. MOUD Primary and Secondary Initation   */
+/* 7. MOUD Primary and Secondary Initation   */
 /*============================================*/
-/* This section again repeats 11 and 12 on a different dataset. MOUD_FULL contains all IDs from the cohort (both those who did and did not have MOUD episodes) compared to MOUD_DURATION that only contained IDs that had an episode of MOUD.
+/* This section again repeats the previous sections on a different dataset. MOUD_FULL contains all IDs from the cohort (both those who did and did not have MOUD episodes) compared to MOUD_DURATION that only contained IDs that had an episode of MOUD.
 This section begins by merging OUD-related information into a prepared dataset and calculates the earliest OUD case report period for each individual. It then determines the number of events (e.g., MOUD initiation) occurring before the case report. 
 The dataset is further refined by filtering records based on time criteria and calculating eligibility and censoring variables related to MOUD initiation and reinitiation. 
 The code then aggregates person-time data for MOUD initiation and reinitiation, merges demographic data, and categorizes homelessness history. 
-It also identifies individuals with injection drug use (IDU) history based on available datasets. Age groups are assigned, and overall follow-up time statistics are calculated. 
+It also identifies individuals with IDU history based on available datasets. Age groups are assigned, and overall follow-up time statistics are calculated. 
 Finally, it generates summary statistics and stratified analyses of MOUD initiation and reinitiation rates by key demographic variables (e.g., age, race, education, homelessness, incarceration, foreign-born status, and IDU history). 
 The analysis uses a macro to generate stratified tables efficiently. */
 
@@ -4486,6 +4408,7 @@ proc sql;
     select 
         ID, 
         group,
+        sum(eligible_init+eligible_reinit) as total_eligible_init,
         sum(eligible_init) as eligible_init,
         sum(eligible_reinit) as eligible_reinit
     from PREPARED_DATA
@@ -4496,6 +4419,7 @@ proc sql;
     create table PERIOD_SUMMARY as
     select ID,
            group,
+           sum(moud_init) as moud_init,
            sum(moud_primaryinit) as moud_primaryinit,
            sum(moud_reinit) as moud_reinit
     from PREPARED_DATA
@@ -4587,6 +4511,7 @@ proc sql;
     create table summed_data as
     select 
         ID,
+        sum(total_eligible_init) as total_eligible_init,
         sum(eligible_init) as total_person_time_init,
         sum(eligible_reinit) as total_person_time_reinit
     from 
@@ -4597,12 +4522,14 @@ quit;
 
 title "Summary statistics for Overall Follow-up Time";
 proc means data=summed_data mean median std min max q1 q3;
-    var total_person_time_init total_person_time_reinit;
+    var total_eligible_init total_person_time_init total_person_time_reinit;
 run;
 
 title 'Moud Initiation and Reinitiation, Overall';
 proc sql;
-    select 
+    select
+        sum(moud_init) as moud_init,
+        sum(total_eligible_init) as total_eligible_init,
         sum(moud_primaryinit) as moud_primaryinit,
         sum(eligible_init) as eligible_init,
         sum(moud_reinit) as moud_reinit,
@@ -4616,6 +4543,14 @@ proc sql;
     select 
         group,
         count(*) as total_n,
+        
+        sum(moud_init) as moud_init,
+        sum(total_eligible_init) as total_eligible_init,
+        calculated moud_init / calculated total_eligible_init as moud_init_rate format=8.4,
+        (calculated moud_init - 1.96 * sqrt(calculated moud_init)) / calculated total_eligible_init as moud_init_rate_lower format=8.4,
+        (calculated moud_init + 1.96 * sqrt(calculated moud_init)) / calculated total_eligible_init as moud_init_rate_upper format=8.4,
+
+
         sum(moud_primaryinit) as moud_primaryinit,
         sum(eligible_init) as eligible_init,
         calculated moud_primaryinit / calculated eligible_init as moud_primaryinit_rate format=8.4,
@@ -4639,6 +4574,14 @@ proc sql;
         group,
         &group_by_vars,
         count(*) as total_n,
+        
+        sum(moud_init) as moud_init,
+        sum(total_eligible_init) as total_eligible_init,
+        calculated moud_init / calculated total_eligible_init as moud_init_rate format=8.4,
+        (calculated moud_init - 1.96 * sqrt(calculated moud_init)) / calculated total_eligible_init as moud_init_rate_lower format=8.4,
+        (calculated moud_init + 1.96 * sqrt(calculated moud_init)) / calculated total_eligible_init as moud_init_rate_upper format=8.4,
+
+
         sum(moud_primaryinit) as moud_primaryinit,
         sum(eligible_init) as eligible_init,
         calculated moud_primaryinit / calculated eligible_init as moud_primaryinit_rate format=8.4,
@@ -5433,7 +5376,7 @@ proc sql;
         ID,
         month,
         year,
-        max(moud_start_group) as moud_start_group  /* Keep maximum MOUD initiation during pregnancy flag */
+        max(moud_start_group) as moud_start_group
     from moud_spine_preg
     group by ID, month, year;
 quit;
@@ -5558,10 +5501,8 @@ run;
 DATA PERIOD_SUMMARY_FINAL;
     SET PERIOD_SUMMARY_FINAL;
 		    
-	    /* Calculate the age using the current year dynamically */
     age = YEAR(TODAY()) - YOB;
 		    
-	    /* Apply the format to create the age_grp variable */
     age_grp = PUT(age, age_grps_five.); 
 RUN;
 
@@ -5615,3 +5556,604 @@ quit;
 %calculate_rates(OTHER_SUBSTANCE_USE, 'Overdoses by moud_start_group Group, Stratified by OTHER_SUBSTANCE_USE');
 %calculate_rates(rural_group, 'Overdoses by moud_start_group Group, Stratified by rural_group');
 title;
+
+/*==========================================*/
+/* MV Model Arrays and                      */
+/* Test to see if Log-Binomials Converge    */
+/*==========================================*/
+
+data FINAL_COHORT_FILT;
+    set FINAL_COHORT;
+    if FINAL_RE NE 9 and EDUCATION_GROUP NE 'Other or Unknown' and HOMELESS_HISTORY_GROUP NE 'Unknown' and INSURANCE_CAT NE 'Other/Missing';
+run;
+
+title "Table 2, MV EVER_MOUD w/ agegrp_num";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+
+title "Table 2, MV EVER_MOUD w/ oud_age";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+title;
+
+title "Table 2, MV EVER_MOUD_CLEAN w/ agegrp_num";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+
+title "Table 2, MV EVER_MOUD_CLEAN w/ oud_age";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_MOUD_CLEAN(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+title;
+
+title "Table 2, MV EVER_OD w/ agegrp_num";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+
+title "Table 2, MV EVER_OD w/ oud_age";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_OD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+title;
+
+title "Table 2, MV EVER_FOD w/ agegrp_num";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+
+title "Table 2, MV EVER_FOD w/ oud_age";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_FOD(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+title;
+
+title "Table 2, MV EVER_6MO w/ agegrp_num";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') agegrp_num (ref='3') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT agegrp_num OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+
+title "Table 2, MV EVER_6MO w/ oud_age";
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP IDU_EVIDENCE rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') HOMELESS_HISTORY_GROUP (ref='No') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE HOMELESS_HISTORY_GROUP CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+proc glimmix data=FINAL_COHORT_FILT noclprint noitprint;
+    class FINAL_RE (ref='1') INSURANCE_CAT (ref='Medicaid') OTHER_SUBSTANCE_USE (ref='0') EVER_INCARCERATED (ref='0') HOMELESS_HISTORY_GROUP (ref='No') IDU_EVIDENCE (ref='0') CONFIRMED_HCV_INDICATOR (ref='0') rural_group (ref='Urban');
+    model EVER_6MO(event='1') = FINAL_RE INSURANCE_CAT oud_age OTHER_SUBSTANCE_USE EVER_INCARCERATED HOMELESS_HISTORY_GROUP IDU_EVIDENCE CONFIRMED_HCV_INDICATOR rural_group / dist=binary link=logit solution oddsratio;
+run;
+title;
+
+%macro Table2MOUD(var, ref=);
+    title "Table 2, Crude, Log-Binomial";
+    proc glimmix data=FINAL_COHORT noclprint noitprint;
+        class &var (ref=&ref);
+        model EVER_MOUD(event='1') = &var / dist=binomial link=log solution;
+        lsmeans &var / ilink cl; 
+    run;
+%mend;
+
+%Table2MOUD(FINAL_RE, ref ='1');
+%Table2MOUD(agegrp_num, ref ='3');
+%Table2MOUD(EVER_INCARCERATED, ref ='0');
+%Table2MOUD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2MOUD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2MOUD(EDUCATION_GROUP, ref ='HS or less');
+%Table2MOUD(HIV_DIAG, ref ='0');
+%Table2MOUD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2MOUD(IJI_DIAG, ref ='0');
+%Table2MOUD(EVER_IDU_HCV, ref ='0');
+%Table2MOUD(IDU_EVIDENCE, ref ='0');
+%Table2MOUD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2MOUD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2MOUD(INSURANCE_CAT, ref ='Medicaid');
+%Table2MOUD(rural_group, ref ='Urban');
+
+%macro Table2MOUD(var, ref=);
+    title "Table 2, Crude, Log-Binomial";
+    proc glimmix data=FINAL_COHORT noclprint noitprint;
+        class &var (ref=&ref);
+        model EVER_MOUD_CLEAN(event='1') = &var / dist=binomial link=log solution;
+        lsmeans &var / ilink cl; 
+    run;
+%mend;
+
+%Table2MOUD(FINAL_RE, ref ='1');
+%Table2MOUD(agegrp_num, ref ='3');
+%Table2MOUD(EVER_INCARCERATED, ref ='0');
+%Table2MOUD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2MOUD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2MOUD(EDUCATION_GROUP, ref ='HS or less');
+%Table2MOUD(HIV_DIAG, ref ='0');
+%Table2MOUD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2MOUD(IJI_DIAG, ref ='0');
+%Table2MOUD(EVER_IDU_HCV, ref ='0');
+%Table2MOUD(IDU_EVIDENCE, ref ='0');
+%Table2MOUD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2MOUD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2MOUD(INSURANCE_CAT, ref ='Medicaid');
+%Table2MOUD(rural_group, ref ='Urban');
+
+%macro Table2OD(var, ref=);
+    title "Table 2, Crude, Log-Binomial";
+    proc glimmix data=FINAL_COHORT noclprint noitprint;
+        class &var (ref=&ref);
+        model EVER_OD(event='1') = &var / dist=binomial link=log solution;
+        lsmeans &var / ilink cl; 
+    run;
+%mend;
+
+%Table2OD(FINAL_RE, ref ='1');
+%Table2OD(agegrp_num, ref ='3');
+%Table2OD(EVER_INCARCERATED, ref ='0');
+%Table2OD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2OD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2OD(EDUCATION_GROUP, ref ='HS or less');
+%Table2OD(HIV_DIAG, ref ='0');
+%Table2OD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2OD(IJI_DIAG, ref ='0');
+%Table2OD(EVER_IDU_HCV, ref ='0');
+%Table2OD(IDU_EVIDENCE, ref ='0');
+%Table2OD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2OD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2OD(INSURANCE_CAT, ref ='Medicaid');
+%Table2OD(rural_group, ref ='Urban');
+
+%macro Table2OD(var, ref=);
+    title "Table 2, Crude, Log-Binomial";
+    proc glimmix data=FINAL_COHORT noclprint noitprint;
+        class &var (ref=&ref);
+        model EVER_FOD(event='1') = &var / dist=binomial link=log solution;
+        lsmeans &var / ilink cl; 
+    run;
+%mend;
+
+%Table2OD(FINAL_RE, ref ='1');
+%Table2OD(agegrp_num, ref ='3');
+%Table2OD(EVER_INCARCERATED, ref ='0');
+%Table2OD(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table2OD(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table2OD(EDUCATION_GROUP, ref ='HS or less');
+%Table2OD(HIV_DIAG, ref ='0');
+%Table2OD(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table2OD(IJI_DIAG, ref ='0');
+%Table2OD(EVER_IDU_HCV, ref ='0');
+%Table2OD(IDU_EVIDENCE, ref ='0');
+%Table2OD(MENTAL_HEALTH_DIAG, ref ='0');
+%Table2OD(OTHER_SUBSTANCE_USE, ref ='0');
+%Table2OD(INSURANCE_CAT, ref ='Medicaid');
+%Table2OD(rural_group, ref ='Urban');
+
+
+%macro Table26MO(var, ref=);
+    title "Table 2, Crude, Log-Binomial";
+    proc glimmix data=FINAL_COHORT noclprint noitprint;
+        class &var (ref=&ref);
+        model EVER_6MO(event='1') = &var / dist=binomial link=log solution;
+        lsmeans &var / ilink cl; 
+    run;
+%mend;
+
+%Table26MO(FINAL_RE, ref ='1');
+%Table26MO(agegrp_num, ref ='3');
+%Table26MO(EVER_INCARCERATED, ref ='0');
+%Table26MO(HOMELESS_HISTORY_GROUP, ref ='No');
+%Table26MO(LANGUAGE_SPOKEN_GROUP, ref ='English');
+%Table26MO(EDUCATION_GROUP, ref ='HS or less');
+%Table26MO(HIV_DIAG, ref ='0');
+%Table26MO(CONFIRMED_HCV_INDICATOR, ref ='0');
+%Table26MO(IJI_DIAG, ref ='0');
+%Table26MO(EVER_IDU_HCV, ref ='0');
+%Table26MO(IDU_EVIDENCE, ref ='0');
+%Table26MO(MENTAL_HEALTH_DIAG, ref ='0');
+%Table26MO(OTHER_SUBSTANCE_USE, ref ='0');
+%Table26MO(INSURANCE_CAT, ref ='Medicaid');
+%Table26MO(rural_group, ref ='Urban');
