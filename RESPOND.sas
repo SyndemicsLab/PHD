@@ -1611,6 +1611,16 @@ PROC SQL;
 	GROUP BY od_death, year, month, age_grp_five;
 QUIT;
 
+PROC EXPORT DATA = death_yearly
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
 PROC EXPORT DATA = death_yearly_sex
 	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Sex_&formatted_date..csv"
 	DBMS = csv REPLACE;
