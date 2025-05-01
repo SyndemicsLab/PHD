@@ -170,20 +170,28 @@ DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
 						WHERE= (MED_FROM_DATE_YEAR IN &year));
 	cnt_oud_apcd = 0;
 	oud_apcd = 0;
-	ARRAY vars1 {*} ID MED_ECODE MED_ADM_DIAGNOSIS
-					MED_ICD_PROC1-MED_ICD_PROC7
-					MED_ICD1-MED_ICD25
-					MED_DIS_DIAGNOSIS
-                    MED_PROC_CODE;
-		DO i = 1 TO dim(vars1);
-		IF vars1[i] in &ICD THEN cnt_oud_apcd = cnt_oud_apcd+1;
-		END;
-		DROP= i;
+
+    ARRAY icd_fields {*} MED_ECODE MED_ADM_DIAGNOSIS
+                         MED_ICD1-MED_ICD25
+                         MED_DIS_DIAGNOSIS;
+
+    ARRAY proc_fields {*} MED_ICD_PROC1-MED_ICD_PROC7
+                          MED_PROC_CODE;
+
+	DO i = 1 TO dim(icd_fields);
+		IF icd_fields[i] IN &ICD THEN cnt_oud_apcd = cnt_oud_apcd + 1;
+	END;
+	
+    DO j = 1 TO dim(proc_fields);
+        IF proc_fields[i] IN &PROC THEN cnt_oud_apcd = cnt_oud_apcd + 1;
+    END;
+
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
 	IF oud_apcd = 0 THEN DELETE;
 
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
+    DROP i j;
 RUN;
 
 DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
