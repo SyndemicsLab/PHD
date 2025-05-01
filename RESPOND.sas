@@ -1527,3 +1527,126 @@ PROC EXPORT
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_Five_&formatted_date..csv"
 	DBMS= csv REPLACE;
 RUN;
+
+/*==============================*/
+/*     All Cause Mortality      */
+/*==============================*/
+
+PROC SQL;
+    CREATE TABLE death_raw AS
+    SELECT DISTINCT death.MONTH_DEATH AS month, death.YEAR_DEATH AS year,
+                    death.ID, death.od_death,
+                    demo.FINAL_RE, demo.FINAL_SEX, demo.YOB
+    FROM PHDDEATH.DEATH death
+    LEFT JOIN PHDSPINE.demographics demo ON demo.ID = death.ID
+    INNER JOIN oud_yearly oud ON oud.ID = death.ID;
+QUIT;
+
+DATA death_raw;
+    SET death_raw;
+
+	age_grp_five = put(year - YOB, age_grps_five.);
+	age_grp_twenty = put(year - YOB, age_grps_twenty.);
+RUN;
+
+PROC SQL;
+    CREATE TABLE death_yearly AS 
+    SELECT DISTINCT od_death, year,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year;
+
+	CREATE TABLE death_monthly AS 
+	SELECT DISTINCT od_death, year, month, 
+		   		   IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw 
+	GROUP BY od_death, year, month;
+
+	CREATE TABLE death_yearly_sex AS 
+	SELECT DISTINCT od_death, year, FINAL_SEX,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, FINAL_SEX;
+
+	CREATE TABLE death_monthly_sex AS 
+	SELECT DISTINCT od_death, year, month, FINAL_SEX,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, FINAL_SEX;
+
+	CREATE TABLE death_yearly_race AS 
+	SELECT DISTINCT od_death, year, FINAL_RE,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, FINAL_RE;
+
+	CREATE TABLE death_monthly_race AS 
+	SELECT DISTINCT od_death, year, month, FINAL_RE,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, FINAL_RE;
+
+	CREATE TABLE death_yearly_twenty AS 
+	SELECT DISTINCT od_death, year, age_grp_twenty,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, age_grp_twenty;
+
+	CREATE TABLE death_monthly_twenty AS 
+	SELECT DISTINCT od_death, year, month, age_grp_twenty,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, age_grp_twenty;
+
+	CREATE TABLE death_yearly_five AS 
+	SELECT DISTINCT od_death, year, age_grp_five,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, age_grp_five;
+
+	CREATE TABLE death_monthly_five AS 
+	SELECT DISTINCT od_death, year, month, age_grp_five,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, age_grp_five;
+QUIT;
+
+PROC EXPORT DATA = death_yearly_sex
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Sex_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_yearly_five
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Five_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_yearly_twenty
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Twenty_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_race
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Race_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_sex
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Sex_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_twenty
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Twenty_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_five
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Five_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
