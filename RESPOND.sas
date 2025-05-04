@@ -1538,7 +1538,7 @@ PROC SQL;
                     death.ID, death.od_death,
                     demo.FINAL_RE, demo.FINAL_SEX, demo.YOB
     FROM PHDDEATH.DEATH death
-    LEFT JOIN PHDSPINE.demographics demo ON demo.ID = death.ID
+    LEFT JOIN PHDSPINE.DEMO demo ON demo.ID = death.ID
     INNER JOIN oud_yearly oud ON oud.ID = death.ID;
 QUIT;
 
