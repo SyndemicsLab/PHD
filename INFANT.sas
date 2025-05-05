@@ -3062,6 +3062,20 @@ run;
 %ChiSquareTest(WELL_CHILD, DISCH_WITH_MOM);
 %ChiSquareTest(AGE_BIRTH_GROUP, MOUD_DURING_PREG);
 
+%ChiSquareTest(HOMELESS_HISTORY_GROUP, OTHER_SUBSTANCE_USE);
+%ChiSquareTest(HOMELESS_HISTORY_GROUP, EVER_INCARCERATED);
+%ChiSquareTest(HOMELESS_HISTORY_GROUP, MOUD_DURING_PREG);
+%ChiSquareTest(OTHER_SUBSTANCE_USE, EVER_INCARCERATED);
+%ChiSquareTest(OTHER_SUBSTANCE_USE, MOUD_DURING_PREG);
+%ChiSquareTest(EVER_INCARCERATED, MOUD_DURING_PREG);
+
+%ChiSquareTest(prenat_site, KOTELCHUCK);
+%ChiSquareTest(prenat_site, MOTHER_EDU_GROUP);
+%ChiSquareTest(prenat_site, FOREIGN_BORN);
+%ChiSquareTest(KOTELCHUCK, MOTHER_EDU_GROUP);
+%ChiSquareTest(KOTELCHUCK, FOREIGN_BORN);
+%ChiSquareTest(MOTHER_EDU_GROUP, FOREIGN_BORN);
+
 %macro TableDISCH_WITH_MOM(var, format, strata1, strata2);
     title "Table, Stratified by &strata1 and &strata2";
 
@@ -3221,79 +3235,520 @@ title; */
 
 /* Step 3: Run multivariable analysis with selected variables */
 
-title 'GliMMIX Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH w/ cluster SE by MOM_ID';
-	proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') DISCH_WITH_MOM (ref='No') WELL_CHILD (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH / dist=binary link=logit solution oddsratio;
-    random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf. WELL_CHILD flagf.;
+data FINAL_INFANT_COHORT_COV;
+    length MOMS_FINAL_RE_CAT $30;
+    set FINAL_INFANT_COHORT_COV;
+    if MOMS_FINAL_RE = 1 then MOMS_FINAL_RE_CAT = 'White Non-Hispanic';
+    else if MOMS_FINAL_RE = 2 then MOMS_FINAL_RE_CAT = 'Black non-Hispanic';
+    else if MOMS_FINAL_RE = 4 then MOMS_FINAL_RE_CAT = 'Hispanic';
+    else if MOMS_FINAL_RE = 3 then MOMS_FINAL_RE_CAT = 'Other non-Hispanic (Asian/PI/AI)';
+    else if MOMS_FINAL_RE = 5 then MOMS_FINAL_RE_CAT = 'Other non-Hispanic (Asian/PI/AI)';
+    else MOMS_FINAL_RE_CAT = 'Missing';
 run;
 
-/* title 'GENMOD Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH with GEE by MOM_ID';
-proc genmod data=FINAL_INFANT_COHORT_COV;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') DISCH_WITH_MOM (ref='No') WELL_CHILD (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH / dist=binomial link=logit;
-    repeated subject=MOM_ID / type=cs;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf. WELL_CHILD flagf.;
-run; */
+%Table2Crude(MOMS_FINAL_RE_CAT, ref = 'White Non-Hispanic')
+%Table2Crude_Strat(MOMS_FINAL_RE_CAT, ref = 'White Non-Hispanic')
+
+/* Model 1: Base Model */
+title 'Model 1: Base';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf.;
+run;
+
+/* Model 1a: Base + OTHER_SUBSTANCE_USE */
+title 'Model 1a: Base + OTHER_SUBSTANCE_USE';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf. 
+           OTHER_SUBSTANCE_USE flagf.;
+run;
+
+/* Model 1b: Base + PRENAT_SITE */
+title 'Model 1b: Base + PRENAT_SITE';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP PRENAT_SITE
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf.
+           PRENAT_SITE prenat_site_fmt.;
+run;
+
+/* Model 1c: Base + MOTHER_EDU_GROUP */
+title 'Model 1c: Base + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf.;
+run;
+
+/* Model 1d: Base + OTHER_SUBSTANCE_USE + PRENAT_SITE */
+title 'Model 1d: Base + OTHER_SUBSTANCE_USE + PRENAT_SITE';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE PRENAT_SITE
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf. 
+           OTHER_SUBSTANCE_USE flagf.
+           PRENAT_SITE prenat_site_fmt.;
+
+run;
+
+/* Model 1e: Base + OTHER_SUBSTANCE_USE + MOTHER_EDU_GROUP */
+title 'Model 1e: Base + OTHER_SUBSTANCE_USE + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf. 
+           OTHER_SUBSTANCE_USE flagf.;
+run;
+
+/* Model 1f: Base + PRENAT_SITE + MOTHER_EDU_GROUP */
+title 'Model 1f: Base + PRENAT_SITE + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP PRENAT_SITE MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf.
+           PRENAT_SITE prenat_site_fmt.;
+run;
+
+/* Model 2: Base + ALL 3 additional covariates */
+title 'Model 2: Base + OTHER_SUBSTANCE_USE + PRENAT_SITE + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE PRENAT_SITE MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           WELL_CHILD flagf. 
+           OTHER_SUBSTANCE_USE flagf.
+           PRENAT_SITE prenat_site_fmt.;
+run;
 
 proc sort data=FINAL_INFANT_COHORT_COV;
     by WELL_CHILD;
 run;
 
-title 'GLIMMIX Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH w/ cluster SE by MOM_ID where WCC =1';
-	proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+/* Model 1: Base Model */
+title 'Model 1: Base';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
 	by WELL_CHILD;
     where WELL_CHILD = 1;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') DISCH_WITH_MOM (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH / dist=binary link=logit solution oddsratio;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP
+                                           / dist=binary link=logit solution oddsratio;
     random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf. WELL_CHILD flagf.;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf.;
 run;
 
-/* title 'GENMOD Logistic: Unstratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH with GEE by MOM_ID where WELL_CHILD=1';
-proc genmod data=FINAL_INFANT_COHORT_COV;
-    by WELL_CHILD;
+/* Model 1a: Base + OTHER_SUBSTANCE_USE */
+title 'Model 1a: Base + OTHER_SUBSTANCE_USE';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
     where WELL_CHILD = 1;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') DISCH_WITH_MOM (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG DISCH_WITH_MOM AGE_BIRTH / dist=binomial link=logit;
-    repeated subject=MOM_ID / type=cs;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. DISCH_WITH_MOM flagf.;
-run; */
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           OTHER_SUBSTANCE_USE flagf.;
+run;
+
+/* Model 1b: Base + PRENAT_SITE */
+title 'Model 1b: Base + PRENAT_SITE';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
+    where WELL_CHILD = 1;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP PRENAT_SITE
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           PRENAT_SITE prenat_site_fmt.;
+run;
+
+/* Model 1c: Base + MOTHER_EDU_GROUP */
+title 'Model 1c: Base + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
+    where WELL_CHILD = 1;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf.;
+run;
+
+/* Model 1d: Base + OTHER_SUBSTANCE_USE + PRENAT_SITE */
+title 'Model 1d: Base + OTHER_SUBSTANCE_USE + PRENAT_SITE';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
+    where WELL_CHILD = 1;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE PRENAT_SITE
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           OTHER_SUBSTANCE_USE flagf.
+           PRENAT_SITE prenat_site_fmt.;
+
+run;
+
+/* Model 1e: Base + OTHER_SUBSTANCE_USE + MOTHER_EDU_GROUP */
+title 'Model 1e: Base + OTHER_SUBSTANCE_USE + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
+    where WELL_CHILD = 1;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           OTHER_SUBSTANCE_USE flagf.;
+run;
+
+/* Model 1f: Base + PRENAT_SITE + MOTHER_EDU_GROUP */
+title 'Model 1f: Base + PRENAT_SITE + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
+    where WELL_CHILD = 1;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP PRENAT_SITE MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           PRENAT_SITE prenat_site_fmt.;
+run;
+
+/* Model 2: Base + ALL 3 additional covariates */
+title 'Model 2: Base + OTHER_SUBSTANCE_USE + PRENAT_SITE + MOTHER_EDU_GROUP';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+	by WELL_CHILD;
+    where WELL_CHILD = 1;
+
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          DISCH_WITH_MOM (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          OTHER_SUBSTANCE_USE (ref='No') 
+          PRENAT_SITE (ref='Private Physicians Office') 
+          MOTHER_EDU_GROUP (ref='HS or GED')
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG DISCH_WITH_MOM AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE PRENAT_SITE MOTHER_EDU_GROUP
+                                           / dist=binary link=logit solution oddsratio;
+    random intercept / subject=MOM_ID;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           DISCH_WITH_MOM flagf. 
+           OTHER_SUBSTANCE_USE flagf.
+           PRENAT_SITE prenat_site_fmt.;
+run;
 
 proc sort data=FINAL_INFANT_COHORT_COV;
     by DISCH_WITH_MOM;
 run;
 
-title 'GLIMMIX Logistic: Stratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH w/ cluster SE by MOM_ID where DISCH_WITH_MOM = 1';
-	proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
+title 'GLIMMIX Logistic: Stratified MV; adjusted for MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH HOMELESS_HISTORY_GROUP OTHER_SUBSTANCE_USE EVER_INCARCERATED w/ cluster SE by MOM_ID where DISCH_WITH_MOM = 1';
+proc glimmix data=FINAL_INFANT_COHORT_COV noclprint noitprint;
     by DISCH_WITH_MOM;
     where DISCH_WITH_MOM = 1;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') GESTATIONAL_AGE_CAT (ref='Term') WELL_CHILD (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH / dist=binary link=logit solution oddsratio;
+    class MOMS_FINAL_RE_CAT (ref='White Non-Hispanic') 
+          COUNTY (ref='MIDDLESEX') 
+          FOREIGN_BORN (ref='No') 
+          LD_PAY (ref='Public') 
+          MOUD_DURING_PREG (ref='No') 
+          HCV_DIAG (ref='No') 
+          GESTATIONAL_AGE_CAT (ref='Term') 
+          WELL_CHILD (ref='No') 
+          HOMELESS_HISTORY_GROUP (ref='No') 
+          MOM_ID;
+    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE_CAT COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG 
+                                           HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH 
+                                           HOMELESS_HISTORY_GROUP
+                                           / dist=binary link=logit solution oddsratio;
     random intercept / subject=MOM_ID;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
+    format FOREIGN_BORN fbornf. 
+           LD_PAY ld_pay_fmt. 
+           MOUD_DURING_PREG flagf. 
+           HCV_DIAG flagf. 
+           WELL_CHILD flagf. 
+           DISCH_WITH_MOM flagf.;
 run;
-
-/* title 'GENMOD Logistic: Stratified MV; adjusted for MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH with GEE by MOM_ID where DISCH_WITH_MOM=1';
-proc genmod data=FINAL_INFANT_COHORT_COV;
-    by DISCH_WITH_MOM;
-    where DISCH_WITH_MOM = 1;
-    class MOMS_FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') FOREIGN_BORN (ref='No') LD_PAY (ref='Public') MOUD_DURING_PREG (ref='No') HCV_DIAG (ref='No') GESTATIONAL_AGE_CAT (ref='Term') WELL_CHILD (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = MOMS_FINAL_RE COUNTY FOREIGN_BORN LD_PAY MOUD_DURING_PREG HCV_DIAG GESTATIONAL_AGE_CAT WELL_CHILD AGE_BIRTH / dist=binomial link=logit;
-    repeated subject=MOM_ID / type=cs;
-    format MOMS_FINAL_RE raceef. FOREIGN_BORN fbornf. LD_PAY ld_pay_fmt. MOUD_DURING_PREG flagf. HCV_DIAG flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
-run;
-
-title 'GENMOD Logistic: Stratified MV; adjusted for FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD with GEE by MOM_ID where DISCH_WITH_MOM=0';
-proc genmod data=FINAL_INFANT_COHORT_COV;
-    by DISCH_WITH_MOM;
-    where DISCH_WITH_MOM = 0;
-    class FINAL_RE (ref='White Non-Hispanic') COUNTY (ref='MIDDLESEX') MOUD_DURING_PREG (ref='No') MATINF_HEPC (ref='No') GESTATIONAL_AGE_CAT (ref='Term') WELL_CHILD (ref='No') MOM_ID;
-    model APPROPRIATE_Testing(event='1') = FINAL_RE COUNTY MOUD_DURING_PREG MATINF_HEPC GESTATIONAL_AGE_CAT WELL_CHILD / dist=binomial link=logit;
-    repeated subject=MOM_ID / type=cs;
-    format FINAL_RE raceef. MOUD_DURING_PREG flagf. MATINF_HEPC flagf. WELL_CHILD flagf. DISCH_WITH_MOM flagf.;
-run; */
 
 data FINAL_INFANT_COHORT_COV;
     length INFANT_FINAL_RE $30;
