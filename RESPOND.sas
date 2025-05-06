@@ -1535,7 +1535,7 @@ RUN;
 PROC SQL;
     CREATE TABLE death_raw AS
     SELECT DISTINCT death.MONTH_DEATH AS month, death.YEAR_DEATH AS year,
-                    death.ID, death.od_death,
+                    death.ID, death.opioid_death as od_death,
                     demo.FINAL_RE, demo.FINAL_SEX, demo.YOB
     FROM PHDDEATH.DEATH death
     LEFT JOIN PHDSPINE.DEMO demo ON demo.ID = death.ID
