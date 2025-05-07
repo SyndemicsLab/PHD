@@ -170,20 +170,28 @@ DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
 						WHERE= (MED_FROM_DATE_YEAR IN &year));
 	cnt_oud_apcd = 0;
 	oud_apcd = 0;
-	ARRAY vars1 {*} ID MED_ECODE MED_ADM_DIAGNOSIS
-					MED_ICD_PROC1-MED_ICD_PROC7
-					MED_ICD1-MED_ICD25
-					MED_DIS_DIAGNOSIS
-                    MED_PROC_CODE;
-		DO i = 1 TO dim(vars1);
-		IF vars1[i] in &ICD THEN cnt_oud_apcd = cnt_oud_apcd+1;
-		END;
-		DROP= i;
+
+    ARRAY icd_fields {*} MED_ECODE MED_ADM_DIAGNOSIS
+                         MED_ICD1-MED_ICD25
+                         MED_DIS_DIAGNOSIS;
+
+    ARRAY proc_fields {*} MED_ICD_PROC1-MED_ICD_PROC7
+                          MED_PROC_CODE;
+
+	DO i = 1 TO dim(icd_fields);
+		IF icd_fields[i] IN &ICD THEN cnt_oud_apcd = cnt_oud_apcd + 1;
+	END;
+	
+    DO j = 1 TO dim(proc_fields);
+        IF proc_fields[i] IN &PROC THEN cnt_oud_apcd = cnt_oud_apcd + 1;
+    END;
+
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
 	IF oud_apcd = 0 THEN DELETE;
 
 	year_apcd = MED_FROM_DATE_YEAR;
     month_apcd = MED_FROM_DATE_MONTH;
+    DROP i j;
 RUN;
 
 DATA pharm (KEEP= year_pharm month_pharm oud_pharm ID);
@@ -1518,4 +1526,137 @@ PROC EXPORT
 	DATA= doc_length_five
 	OUTFILE= "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/IncarcerationsLength_Five_&formatted_date..csv"
 	DBMS= csv REPLACE;
+RUN;
+
+/*==============================*/
+/*     All Cause Mortality      */
+/*==============================*/
+
+PROC SQL;
+    CREATE TABLE death_raw AS
+    SELECT DISTINCT death.MONTH_DEATH AS month, death.YEAR_DEATH AS year,
+                    death.ID, death.opioid_death as od_death,
+                    demo.FINAL_RE, demo.FINAL_SEX, demo.YOB
+    FROM PHDDEATH.DEATH death
+    LEFT JOIN PHDSPINE.DEMO demo ON demo.ID = death.ID
+    INNER JOIN oud_yearly oud ON oud.ID = death.ID;
+QUIT;
+
+DATA death_raw;
+    SET death_raw;
+
+	age_grp_five = put(year - YOB, age_grps_five.);
+	age_grp_twenty = put(year - YOB, age_grps_twenty.);
+RUN;
+
+PROC SQL;
+    CREATE TABLE death_yearly AS 
+    SELECT DISTINCT od_death, year,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year;
+
+	CREATE TABLE death_monthly AS 
+	SELECT DISTINCT od_death, year, month, 
+		   		   IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw 
+	GROUP BY od_death, year, month;
+
+	CREATE TABLE death_yearly_sex AS 
+	SELECT DISTINCT od_death, year, FINAL_SEX,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, FINAL_SEX;
+
+	CREATE TABLE death_monthly_sex AS 
+	SELECT DISTINCT od_death, year, month, FINAL_SEX,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, FINAL_SEX;
+
+	CREATE TABLE death_yearly_race AS 
+	SELECT DISTINCT od_death, year, FINAL_RE,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, FINAL_RE;
+
+	CREATE TABLE death_monthly_race AS 
+	SELECT DISTINCT od_death, year, month, FINAL_RE,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, FINAL_RE;
+
+	CREATE TABLE death_yearly_twenty AS 
+	SELECT DISTINCT od_death, year, age_grp_twenty,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, age_grp_twenty;
+
+	CREATE TABLE death_monthly_twenty AS 
+	SELECT DISTINCT od_death, year, month, age_grp_twenty,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, age_grp_twenty;
+
+	CREATE TABLE death_yearly_five AS 
+	SELECT DISTINCT od_death, year, age_grp_five,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, age_grp_five;
+
+	CREATE TABLE death_monthly_five AS 
+	SELECT DISTINCT od_death, year, month, age_grp_five,
+		   			IFN(count(DISTINCT ID) IN (1:10), -1, count(DISTINCT ID)) AS N_ID
+	FROM death_raw
+	GROUP BY od_death, year, month, age_grp_five;
+QUIT;
+
+PROC EXPORT DATA = death_yearly
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_yearly_sex
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Sex_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_yearly_five
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Five_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_yearly_twenty
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Yearly_Twenty_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_race
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Race_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_sex
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Sex_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_twenty
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Twenty_&formatted_date..csv"
+	DBMS = csv REPLACE;
+RUN;
+
+PROC EXPORT DATA = death_monthly_five
+	OUTFILE = "/sas/data/DPH/OPH/PHD/FOLDERS/SUBSTANCE_USE_CODE/RESPOND/RESPOND UPDATE/DeathCount_Monthly_Five_&formatted_date..csv"
+	DBMS = csv REPLACE;
 RUN;
