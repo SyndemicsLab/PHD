@@ -177,7 +177,7 @@ DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
 	END;
 	
     DO j = 1 TO dim(proc_fields);
-        IF proc_fields[i] IN &PROC THEN cnt_oud_apcd = cnt_oud_apcd + 1;
+        IF proc_fields[j] IN &PROC THEN cnt_oud_apcd = cnt_oud_apcd + 1;
     END;
 
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
