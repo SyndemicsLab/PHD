@@ -431,9 +431,6 @@ DATA casemix (KEEP = ID oud_cm year_cm month_cm);
     IF sum(oud_ed, oud_hd, oud_oo) > 0 THEN oud_cm = 1;
     ELSE oud_cm = 0;
     IF oud_cm = 0 THEN DELETE;
-
-	year_cm = min(year_oo, year_hd, year_cm);
-    month_cm = min(month_oo, month_hd, month_cm);
 RUN;
 
 /* BSAS */
