@@ -389,7 +389,7 @@ DATA oo (KEEP= ID oud_oo year_oo month_oo);
                     OO_PRINCIPALEXTERNAL_CAUSECODE;
 
     DO k = 1 TO dim(vars2);
-        IF SUBSTR(VNAME(vars2[k]), 1) = 'OO_PROC' THEN 
+        IF SUBSTR(VNAME(vars2[k]), 1) = in ('OO_PROC', 'OO_CPT') THEN 
             IF vars2[k] IN &PROC THEN 
                cnt_oud_oo = cnt_oud_oo + 1;
             ELSE IF vars2[k] IN &ICD THEN 
