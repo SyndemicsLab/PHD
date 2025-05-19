@@ -344,10 +344,6 @@ RUN;
 
 /* HD MERGE */
 PROC SQL;
-    CREATE TABLE pharm AS
-    SELECT DISTINCT * 
-    FROM pharm;
-
 	CREATE TABLE hd_diag AS
 	SELECT DISTINCT *
 	FROM hd_diag;
