@@ -984,10 +984,11 @@ DATA moud_demo;
     BY ID;
 	
 	IF new_end_date - new_start_date < &MOUD_leniency THEN DELETE;
-	
+	NED = lag(new_end_date);
+
 	IF FIRST.ID THEN diff = .; 
-	ELSE diff = new_start_date - lag(new_end_date);
-    IF new_end_date < lag(new_end_date) THEN temp_flag = 1;
+	ELSE diff = new_start_date - NED;
+    IF new_end_date < NED THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF first.ID THEN flag_mim = 0;
@@ -999,6 +1000,8 @@ DATA moud_demo;
     age = new_start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
     age_grp_twenty = put(age, age_grps_twenty.);
+
+    drop NED;
 RUN;
 
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five age_grp_twenty);
