@@ -256,10 +256,8 @@ DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm month_cm);
         ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
 	ELSE oud_cm_ed = 0;
 	
-	IF oud_cm_ed > 0 THEN do;
 	year_cm = ED_ADMIT_YEAR;
     month_cm = ED_ADMIT_MONTH;
-    end;
 RUN;
 
 /* ED_DIAG */
@@ -322,10 +320,8 @@ DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd month_hd);
      HD_ECODE IN &ICD THEN oud_hd_raw = 1;
 	ELSE oud_hd_raw = 0;
 
-IF oud_hd_raw > 0 THEN do;
     year_hd = HD_ADMIT_YEAR;
     month_hd = HD_ADMIT_MONTH;
-end;
 RUN;
 
 /* HD DIAG DATA */
