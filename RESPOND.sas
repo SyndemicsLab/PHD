@@ -271,6 +271,8 @@ DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
 	SET PHDCM.ED_DIAG (KEEP= ED_ID ED_DIAG);
 	IF ED_DIAG in &ICD THEN oud_cm_ed_diag = 1;
 	ELSE oud_cm_ed_diag = 0;
+
+    IF oud_cm_ed_diag = 0 THEN DELETE;
 RUN;
 
 /* ED_PROC */
@@ -335,6 +337,8 @@ DATA hd_diag (KEEP= HD_ID oud_hd_diag);
 	SET PHDCM.HD_DIAG (KEEP= HD_ID HD_DIAG);
 	IF HD_DIAG in &ICD THEN oud_hd_diag = 1;
 	ELSE oud_hd_diag = 0;
+
+    IF oud_hd_diag = 0 THEN DELETE;
 RUN;
 
 /* HD PROC DATA */
@@ -342,6 +346,8 @@ DATA hd_proc(KEEP= HD_ID oud_hd_proc);
 	SET PHDCM.HD_PROC(KEEP = HD_ID HD_PROC);
 	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
 	ELSE oud_hd_proc = 0;
+    
+    IF oud_hd_proc = 0 THEN DELETE;
 RUN;
 
 /* HD MERGE */
