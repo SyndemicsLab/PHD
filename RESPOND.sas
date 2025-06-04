@@ -74,12 +74,12 @@ PROC FORMAT;
 	    'T40603A','T40603D','T40604A','T40604D', 
 	    'T40691A','T40692A','T40693A','T40694A', 
 	    'T40691D','T40692D','T40693D','T40694D', /* Overdose Codes */ 
-        'G2067','G2068','G2069','G2070','G2071',
-	    'G2072','G2074','G2075','G2076','G2077', 
-	    'G2078','G2079','G2080','H0020','HZ81ZZZ',
- 	    'HZ91ZZZ','HZ94ZZZ','J0570','J0571','J0572',
-  	    'J0573','J0574','J0575','J2315','Q9991',
-   	    'Q9992','S0109', /* MOUD */
+        'T40411A', 'T40411D', 'T40412A', 'T40412D',
+        'T40413A', 'T40413D', 'T40414A', 'T40414D', 
+        'T40421A', 'T40421D', 'T40422A', 'T40422D',
+        'T40423A', 'T40423D', 'T40424A', 'T40424D', 
+        'T40491A', 'T40491D', 'T40492A', 'T40492D',
+        'T40493A', 'T40493D', 'T40494A', 'T40494D',
 	    'F1193','F1199'/* Additional RESPOND */);
            
 %LET PROC = ('G2067','G2068','G2069','G2070', 
@@ -183,7 +183,7 @@ DATA apcd (KEEP= ID oud_apcd year_apcd month_apcd);
 	END;
 	
     DO j = 1 TO dim(proc_fields);
-        IF proc_fields[i] IN &PROC THEN cnt_oud_apcd = cnt_oud_apcd + 1;
+        IF proc_fields[j] IN &PROC THEN cnt_oud_apcd = cnt_oud_apcd + 1;
     END;
 
 	IF cnt_oud_apcd > 0 THEN oud_apcd = 1;
@@ -262,10 +262,8 @@ DATA casemix_ed (KEEP= ID oud_cm_ed ED_ID year_cm month_cm);
         ED_PRINCIPLE_ECODE IN &ICD THEN oud_cm_ed = 1;
 	ELSE oud_cm_ed = 0;
 	
-	IF oud_cm_ed > 0 THEN do;
 	year_cm = ED_ADMIT_YEAR;
     month_cm = ED_ADMIT_MONTH;
-    end;
 RUN;
 
 /* ED_DIAG */
@@ -273,6 +271,8 @@ DATA casemix_ed_diag (KEEP= oud_cm_ed_diag ED_ID);
 	SET PHDCM.ED_DIAG (KEEP= ED_ID ED_DIAG);
 	IF ED_DIAG in &ICD THEN oud_cm_ed_diag = 1;
 	ELSE oud_cm_ed_diag = 0;
+
+    IF oud_cm_ed_diag = 0 THEN DELETE;
 RUN;
 
 /* ED_PROC */
@@ -328,10 +328,8 @@ DATA hd (KEEP= HD_ID ID oud_hd_raw year_hd month_hd);
      HD_ECODE IN &ICD THEN oud_hd_raw = 1;
 	ELSE oud_hd_raw = 0;
 
-IF oud_hd_raw > 0 THEN do;
     year_hd = HD_ADMIT_YEAR;
     month_hd = HD_ADMIT_MONTH;
-end;
 RUN;
 
 /* HD DIAG DATA */
@@ -339,6 +337,8 @@ DATA hd_diag (KEEP= HD_ID oud_hd_diag);
 	SET PHDCM.HD_DIAG (KEEP= HD_ID HD_DIAG);
 	IF HD_DIAG in &ICD THEN oud_hd_diag = 1;
 	ELSE oud_hd_diag = 0;
+
+    IF oud_hd_diag = 0 THEN DELETE;
 RUN;
 
 /* HD PROC DATA */
@@ -346,14 +346,12 @@ DATA hd_proc(KEEP= HD_ID oud_hd_proc);
 	SET PHDCM.HD_PROC(KEEP = HD_ID HD_PROC);
 	IF HD_PROC IN &PROC THEN oud_hd_proc = 1;
 	ELSE oud_hd_proc = 0;
+    
+    IF oud_hd_proc = 0 THEN DELETE;
 RUN;
 
 /* HD MERGE */
 PROC SQL;
-    CREATE TABLE pharm AS
-    SELECT DISTINCT * 
-    FROM pharm;
-
 	CREATE TABLE hd_diag AS
 	SELECT DISTINCT *
 	FROM hd_diag;
@@ -399,9 +397,10 @@ DATA oo (KEEP= ID oud_oo year_oo month_oo);
                     OO_PRINCIPALEXTERNAL_CAUSECODE;
 
     DO k = 1 TO dim(vars2);
-        IF SUBSTR(VNAME(vars2[k]), 1) = 'OO_PROC' THEN 
+        IF SUBSTR(VNAME(vars2[k]), 1) in ('OO_PROC', 'OO_CPT') THEN DO; 
             IF vars2[k] IN &PROC THEN 
                cnt_oud_oo = cnt_oud_oo + 1;
+        END;
             ELSE IF vars2[k] IN &ICD THEN 
                cnt_oud_oo = cnt_oud_oo + 1;
     END;
@@ -441,9 +440,6 @@ DATA casemix (KEEP = ID oud_cm year_cm month_cm);
     IF sum(oud_ed, oud_hd, oud_oo) > 0 THEN oud_cm = 1;
     ELSE oud_cm = 0;
     IF oud_cm = 0 THEN DELETE;
-
-	year_cm = min(year_oo, year_hd, year_cm);
-    month_cm = min(month_oo, month_hd, month_cm);
 RUN;
 
 /* BSAS */
@@ -1000,10 +996,11 @@ DATA moud_demo;
     BY ID;
 	
 	IF new_end_date - new_start_date < &MOUD_leniency THEN DELETE;
-	
+	NED = lag(new_end_date);
+
 	IF FIRST.ID THEN diff = .; 
-	ELSE diff = new_start_date - lag(new_end_date);
-    IF new_end_date < lag(new_end_date) THEN temp_flag = 1;
+	ELSE diff = new_start_date - NED;
+    IF new_end_date < NED THEN temp_flag = 1;
     ELSE temp_flag = 0;
 
     IF first.ID THEN flag_mim = 0;
@@ -1015,6 +1012,8 @@ DATA moud_demo;
     age = new_start_year - YOB;
     age_grp_five = put(age, age_grps_five.);
     age_grp_twenty = put(age, age_grps_twenty.);
+
+    drop NED;
 RUN;
 
 DATA moud_expanded(KEEP= ID month year treatment FINAL_SEX FINAL_RE age_grp_five age_grp_twenty);
