@@ -35,4 +35,6 @@ Jianing (Jenny) Wang - Original creation of code under Chapter55 \
 Ryan O'Dea - Development/Overhaul to PHD Standards \
 Sarah Munroe - Development of the PreVenT branch  \
 Amy Bettano - Development and day-to-day oversight of the Public Health Data Warehouse \
-Devon Dunn - Massachusetts DPH PHD Liaison
+Devon Dunn - Massachusetts DPH PHD Liaison \
+Kareeena Anil Mulchandani - Continued Development of PHD code \
+
