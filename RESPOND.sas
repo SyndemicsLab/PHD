@@ -2,7 +2,7 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 4/27/2023 			*/
-/* Updated: 12/30/2024   		*/
+/* Updated: 06/20/2025   		*/
 /*==============================*/
 /* 
 Overall, the logic behind the known capture is fairly simple: 
@@ -19,7 +19,7 @@ stratified by Year (or Year and Month), Race, Sex, and Age
 /*==============================*/
 /*  	GLOBAL VARIABLES   		*/
 /*==============================*/
-%LET year = (2015:2022);
+%LET year = (2015:2023);
 %LET MOUD_leniency = 30;
 %LET DOC_leniency = 35;
 %LET today = %sysfunc(today(), date9.);
@@ -548,7 +548,7 @@ RUN;
 As a final series of steps:
 1. APCD-Pharm, APCD-Medical, Casemix, Death, PMP, Matris, 
    BSAS are joined together on the cartesian coordinate of Months 
-   (1:12), Year (2015:2021), and SPINE (Race, Sex, ID)
+   (1:12), Year (2015:2023), and SPINE (Race, Sex, ID)
 2. The sum of the fabricated flags is taken. If the sum is strictly
    greater than zero, then the master flag is set to 1. 
    Zeros are deleted
