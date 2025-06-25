@@ -16,19 +16,18 @@ The PHD has several evolving tools to aid researchings in their collaboration an
 On a weekly basis, the PHD will also send out updates to variable changes or database additions.
 # The PHD-RESPOND Project
 The purpose of MA DPH's PHDW integration with the RESPOND model is the provide raw data for use in estimation of model parameters, and parameter tuning through providing outcome targets. This documentation and the RESPOND project are kept up through [Boston Medical Center's Syndemics Lab](https://www.syndemicslab.org/)
-RESPOND relies primarily on four unique scripts, and uses information derived from a fifth:
-1. *RESPOND*: Develops the Opioid Use Disorder (OUD) cohort by looking through APCD, Casemix, Death, Matris, PMP, and BSAS. This script forms the basis for other scripts when involving the 'OUD Cohort.' The second part of the script Utilizes the PHD created MOUD Spine dataset to determine how many people are starting, or in, either methadone, buprenorphine, or naltrexone treatments.
+RESPOND relies primarily on three distinct scripts:
+1. *RESPOND*: Develops the Opioid Use Disorder (OUD) cohort by looking through APCD, Casemix, Death, Matris, PMP, and BSAS. This script forms the basis for other scripts when involving the 'OUD Cohort.' 
+    1. Building on the creation of the OUD Cohort, the second part of the script utilizes the PHD created MOUD Spine dataset to determine how many people are starting, or in, either methadone, buprenorphine, or naltrexone treatments.
+    2. Using the defined OUD Cohort, we the extract incarcerations data from the PHD. If a person has a record of OUD before their time in a house of corrections, they will be accounted for. If the OUD diagnoses occurs after their stay in house of corrects, they would not be included in the incarcerated count.
+    3. Using the defined OUD Cohort, we extract death data - both by cause of overdose and additionally through background mortality
 2. *Overdose*: Draws fatal and nonfatal overdoses from the Overdose spine.
-3. *DeathCount*: Creates counts of fatal overdoses and aids in output parameter tuning of RESPOND
-4. *ICDFreq*: While not a necessary script, this allows us to gather information about what ICD codes are 'hit' given their frequencies respective to our question of gathering people with OUD.
-5. *Incarcerations*: Creates the count of Incarcerated people with OUD - Because incarceration status indicates non-existence elsewhere in the data, if someone is tagged as 'OUD' prior to their incarceration duration, the 'OUD' status is forwarded through incarceration period and counted as such. 
+3. *Detox*: Searches for detoxification from opioids count data from BSAS.
 # In the Repo
 Within this Repo there are scripts that have been approved through the PHD by their internal Data Brief process. Output naming conventions for data are *_Ten* or *_Five* indicate age bins, *Monthly* indicates that the counting method is by month rather than year. These scripts output:
-1. *RESPOND*: Age, Sex, Race stratifications *x* Monthly, Yearly *x* OUDCount, MOUDCount, MOUDStart, MOUDEnds, OUDOrigin
+1. *RESPOND*: Age, Sex, Race stratifications *x* Monthly, Yearly *x* OUDCount, MOUDCount, MOUDStart, MOUDEnds, OUDOrigin, Incarcerations, IncarcerationsLength, DeathCount
 2. *Overdose*: Age, Sex, Race stratifications *x* Monthly, Yearly *x* Overdose
-3. *DeathCount*: DeathCount_Ten; DeathCount_Five; DeathCountMonthly
-4. *ICDFreq*: ICDFreq
-5. *Incarcerations*: Age, Sex, Race stratifications *x* Monthly, Yearly, Length
+3. *Detox*: Age, Sex, Race stratifications *x* Monthly, Yearly
 
 # Attribution and Lineage
 Jianing (Jenny) Wang - Original creation of code under Chapter55 \
