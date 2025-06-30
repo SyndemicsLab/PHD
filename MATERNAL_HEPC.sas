@@ -893,13 +893,11 @@ RUN;
 DATA HCV_STATUS;
     SET PHDHEPC.HCV;
     BY ID EVENT_DATE_HCV;
-    IF FIRST.ID THEN DO;
-        IF EVENT_YEAR_HCV >= 2014 THEN DO;
-            HCV_SEROPOSITIVE_INDICATOR = 1;
-            CONFIRMED_HCV_INDICATOR = (DISEASE_STATUS_HCV = 1);
-            OUTPUT;
-        END;
-    END;
+	IF FIRST.ID AND EVENT_YEAR_HCV >= 2014 THEN DO;
+	    HCV_SEROPOSITIVE_INDICATOR = 1;
+	    CONFIRMED_HCV_INDICATOR = (DISEASE_STATUS_HCV = 1);
+	    OUTPUT;
+	END;
 KEEP ID AGE_HCV EVENT_MONTH_HCV EVENT_YEAR_HCV EVENT_DATE_HCV HCV_SEROPOSITIVE_INDICATOR CONFIRMED_HCV_INDICATOR RES_CODE_HCV;
 RUN;
 
@@ -3580,7 +3578,7 @@ run;
 /* Pull in DAA treatment starts claims data and summarize the prescritpions by ID. Outcomes inlcude the frequency of DAA initaitons without prior linkage.
 The section of code that is commented out previoulsy explored the mean and median starts and overall distirbution of DAA epidsodes per ID as well as
 the distribution of months between consecutive DAA starts to better define refills of primary prescription compared to retreatment. 
-That output showed that 85.8% of DAA “restarts” occurred after just 1 month and over 92.99% “restarted” within 2 months  
+That output showed that 85.8% of DAA restarts occurred after just 1 month and over 92.99% restarted within 2 months  
 i.e. these were prescription refills for the same treatment episode; 61.9% of individuals had exactly 2 prescription claims and 89.9% had 3 prescription claims. 
 So, we updated the code logic to only retain the first DAA start in our final analysis */
 
@@ -3699,7 +3697,7 @@ proc univariate data=want_nonzero noprint;
 run;
 
 proc print data=summary_stats_nonzero;
-  title 'Summary Statistics of Number of DAA Starts per ID (Only IDs with ≥1 DAA Start)';
+  title 'Summary Statistics of Number of DAA Starts per ID (Only IDs with at least 1 DAA Start)';
 run;
 
 data daa_intervals (keep=ID months_between DAA_order);
