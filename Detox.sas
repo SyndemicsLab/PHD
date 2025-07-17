@@ -2,7 +2,7 @@
 /* Project: RESPOND    			*/
 /* Author: Ryan O'Dea  			*/ 
 /* Created: 11/25/2024 			*/
-/* Updated:                		*/
+/* Updated: 07/17/2025          */
 /*==============================*/
 /* 
 Pulls detox admissions to BSAS - intended to extend to detox admission to the APCD
@@ -10,7 +10,7 @@ Pulls detox admissions to BSAS - intended to extend to detox admission to the AP
 /*==============================*/
 /*  	GLOBAL VARIABLES   		*/
 /*==============================*/
-%LET year = (2015:2022);
+%LET year = (2015:2023);
 %LET today = %sysfunc(today(), date9.);
 %LET formatted_date = %sysfunc(translate(&today, %str(_), %str(/)));
 /* future use with apcd */
