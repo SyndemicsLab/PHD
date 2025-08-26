@@ -55,7 +55,7 @@ RUN;
 
 PROC SQL;
 	CREATE TABLE overdose_monthly AS 
-	SELECT age_grp_five, fod, OD_YEAR AS year, OD_MONTH AS month,
+	SELECT fod, OD_YEAR AS year, OD_MONTH AS month,
 	IFN(COUNT(DISTINCT ID) IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID
 	FROM OD
 	GROUP BY fod, OD_YEAR, OD_MONTH;
