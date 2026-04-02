@@ -353,25 +353,6 @@ RUN;
 /*  	                    BSAS - data_pull.sasnb                            */
 /*============================================================================*/
 
-
-/*
-Like Matris, the BSAS dataset involves some PHD level encoding.
-We tag a record with our flag, `OUD_BSAS`, if
-`CLT_ENR_PRIMARY_DRUG`, `CLT_ENR_SECONDARY_DRUG`,
-`CLT_ENR_TERTIARY_DRUG` are in the encoded list: (5,6,7,21,22,23,24,26)
-or if `PHD_PRV_SERV_CAT = 7` (Opioid Treatment).
-
-Descriptions of the BSAS drugs respective to
-PHD level documentation
-1. 5: Heroin
-2. 6: Non-Rx Methadone
-3. 7: Other Opiates
-4. 21: Oxycodone
-5. 22: Non-Rx Suboxone
-6. 23: Rx Opiates
-7. 24: Non-Rx Opiates
-8. 26: Fentanyl
- */
 DATA bsas (KEEP=ID oud_bsas year_bsas month_bsas);
     SET PHDBSAS.BSAS (KEEP=ID CLT_ENR_OVERDOSES_LIFE CLT_ENR_PRIMARY_DRUG
         CLT_ENR_SECONDARY_DRUG CLT_ENR_TERTIARY_DRUG PDM_PRV_SERV_CAT
@@ -387,13 +368,10 @@ DATA bsas (KEEP=ID oud_bsas year_bsas month_bsas);
     month_bsas=ENR_MONTH_BSAS;
 RUN;
 
-/* MATRIS */
+/*============================================================================*/
+/*  	                  MATRIS - data_pull.sasnb                            */
+/*============================================================================*/
 
-/*
-The MATRIS Dataset depends on PHD level encoding of variables
-`OPIOID_ORI_MATRIS` and `OPIOID_ORISUBCAT_MATRIS` to
-construct our flag variable, `OUD_MATRIS`.
- */
 DATA matris (KEEP=ID oud_matris year_matris month_matris);
     SET PHDEMS.MATRIS (KEEP=ID OPIOID_ORI_MATRIS OPIOID_ORISUBCAT_MATRIS
         inc_year_matris inc_month_matris AGE_MATRIS AGE_UNITS_MATRIS WHERE=
@@ -407,15 +385,11 @@ DATA matris (KEEP=ID oud_matris year_matris month_matris);
     month_matris=inc_month_matris;
 RUN;
 
-/* DEATH */
 
-/*
-The Death dataset holds the official cause and manner of
-death assigned by physicians and medical examiners. For our
-purposes, we are only interested in the variable `OPIOID_DEATH`
-which is based on 'ICD10 codes or literal search' from other
-PHD sources.
- */
+/*============================================================================*/
+/*  	                   DEATH - data_pull.sasnb                            */
+/*============================================================================*/
+
 DATA death (KEEP=ID oud_death year_death month_death);
     SET PHDDEATH.DEATH (KEEP=ID OPIOID_DEATH YEAR_DEATH AGE_DEATH WHERE=
         (YEAR_DEATH IN &year));
@@ -427,12 +401,10 @@ DATA death (KEEP=ID oud_death year_death month_death);
     month_death=MONTH_DEATH;
 RUN;
 
-/* PMP */
+/*============================================================================*/
+/*  	                     PMP - data_pull.sasnb                            */
+/*============================================================================*/
 
-/*
-Within the PMP dataset, we only use the `BUPRENORPHINE_PMP`
-to define the flag `OUD_PMP` - conditioned on BUP_CAT_PMP = 1.
- */
 DATA pmp (KEEP=ID oud_pmp year_pmp month_pmp);
     SET PHDPMP.PMP (KEEP=ID BUPRENORPHINE_PMP date_filled_year date_filled_month
         BUP_CAT_PMP WHERE=(date_filled_year IN &year));
@@ -444,23 +416,9 @@ DATA pmp (KEEP=ID oud_pmp year_pmp month_pmp);
     month_pmp=date_filled_month;
 RUN;
 
-/*===========================*/
-/*      MAIN MERGE           */
-/*===========================*/
-
-/*
-As a final series of steps:
-1. APCD-Pharm, APCD-Medical, Casemix, Death, PMP, Matris,
-BSAS are joined together on the cartesian coordinate of Months
-(1:12), Year (2015:2023), and SPINE (Race, Sex, ID)
-2. The sum of the fabricated flags is taken. If the sum is strictly
-greater than zero, then the master flag is set to 1.
-Zeros are deleted
-4. We select distinct ID, Age Bins, Race, Year, and Month and
-output the count of those detected with OUD
-5. Any count that is between 1 and 10 are suppressed and set to -1,
-any zeros are true zeros
- */
+/*============================================================================*/
+/*  	                FINAL MERGE - data_pull.sasnb                         */
+/*============================================================================*/
 
 %dedup_tables(list=oo bsas matris death pmp);
 
@@ -534,6 +492,10 @@ RUN;
 %finalize_oud_input(in_ds=oud_monthly, out_ds=oud_monthly);
 %finalize_oud_input(in_ds=oud_yearly, out_ds=oud_yearly);
 
+/*============================================================================*/
+/*  	                OUD Counts - output.sasnb                             */
+/*============================================================================*/
+
 PROC SQL;
     CREATE TABLE oud_out_yearly AS SELECT DISTINCT year, IFN(COUNT(DISTINCT ID)
         IN (1:10), -1, COUNT(DISTINCT ID)) AS N_ID FROM oud_yearly GROUP BY
@@ -587,18 +549,9 @@ QUIT;
 %export_csv(data=oud_race_monthly, name=OUDCount_Race_Monthly);
 %export_csv(data=oud_race_yearly, name=OUDCount_Race_Yearly);
 
-/* Data Origin Location */
-
-/*
-Data used by the Capture Re-Capture Method (CRC) is pulled from
-the Public Health Data Warehouse (PHDW) and is non-stratified.
-This data details how many people are within the combination of
-databases we pull from. For example, a row detailing '1' in the
-APCD and Casemix column would indicate that 'x' people in the
-N_ID column were 'captured' in both APCD and Casemix in the time
-of interest (a given year.) This extends to all six of the
-databases we currently pull from.
- */
+/*============================================================================*/
+/*  	             Data Origin Location - output.sasnb                      */
+/*============================================================================*/
 
  /* region format-ignore */
 PROC SQL;
@@ -675,28 +628,10 @@ QUIT;
 %export_csv(data=oud_origin_race, name=OUDOrigin_Race);
 %export_csv(data=oud_origin_sex, name=OUDOrigin_Sex);
 
-/*==============================*/
-/*         MOUD Counts          */
-/*==============================*/
+/*============================================================================*/
+/*  	                MOUD Counts - output.sasnb                            */
+/*============================================================================*/
 
-/*
-The goal of this portion of the script is to extract MOUD counts and
-starts while treating it as a formal subset of the code defined above
-(OUDCounts.) The table most used in this portion is the relatively-new
-SPINE.MOUD table.
-MOUD Starts are immediately given through SPINE.MOUD's DATE_START_*_MOUD
-MOUD Counts, on the other hand, require a type of 'expansion', where we
-create a new dataset filling out the months inbetween DATE_START_*_MOUD and
-DATE_END_*_MOUD.
-
-Restrictions:
-1. If the lapse between a record's end date and the next record's
-start date is < 7, we merge the two records together.
-2. After this merge, if there are any more records which are <7 they
-are removed from counts/starts tabulation
-3. If medication A is found to be completely encompassed by another
-medication B, then we remove the record of medication A.
- */
 DATA moud;
     SET PHDSPINE.MOUD;
 RUN;
@@ -922,21 +857,10 @@ QUIT;
 %export_csv(data=moud_ends_sex, name=MOUDEnds_Sex);
 %export_csv(data=moud_ends_race, name=MOUDEnds_Race);
 
-/*==============================*/
-/*  	CORRECTIONS        		*/
-/*==============================*/
+/*============================================================================*/
+/*  	                Corrections - output.sasnb                            */
+/*============================================================================*/
 
-/*
-This portion of the script is designed to take the OUD cohort we've built above
-and observe corrections only after someone has been identified as having OUD.
-Then, using the department of corrections dates, we build out the times each ID is
-inside of DOC to obtain the counts.
-
-It should be noted that individuals only appear in the DOC database AFTER their release
-therefore, we also extract the distribution of time spent inside of a correctional facility
-in order to estimate how many people we may be missing from the data as the date grows closer
-to the last date of data available in the PHD
- */
 PROC SQL;
     CREATE TABLE monthly_min_date AS SELECT DISTINCT ID, FINAL_RE, FINAL_SEX,
         YOB, MIN(INPUT(CAT(year, PUT(month, Z2.)), YYMMN6.)) AS min_date FORMAT=
@@ -1117,10 +1041,10 @@ QUIT;
 %export_csv(data=doc_length_twenty, name=IncarcerationsLength_Twenty);
 %export_csv(data=doc_length_five, name=IncarcerationsLength_Five);
 
-/*==============================*/
-/*     All Cause Mortality      */
+/*============================================================================*/
+/*  	           All Cause Mortality - output.sasnb                         */
+/*============================================================================*/
 
-/*==============================*/
 PROC SQL;
     CREATE TABLE death_raw AS SELECT DISTINCT death.MONTH_DEATH AS month,
         death.YEAR_DEATH AS year, death.ID, death.opioid_death as od_death,
