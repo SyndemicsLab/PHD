@@ -1,2 +1,4 @@
 .vscode/
 .DS_Store
+notebooks/phd/*
+.ipynb_checkpoints/
