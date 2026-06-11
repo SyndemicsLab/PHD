@@ -1,0 +1,8 @@
+{
+  "bundle": "t004_doc_freq_length",
+  "source_file": "RESPOND.sas",
+  "source_blob_sha": "ccbf94227450089c03cf61852924a76d4e8997c9",
+  "source_commit": "400760865b26d394966c9c26ff99a5053246deaf",
+  "tier": "real_data",
+  "notes": "Incarceration length-of-stay distribution: PROC FREQ TABLES with OUT= (one-way and crosstab by race/sex/age band) then DATA-step small-cell suppression (COUNT<10 -> -1). doc_frq_tmp seeded directly with realistic stay lengths; export path rewritten to ./output/. PROC FREQ + suppression logic verbatim."
+}

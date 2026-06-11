@@ -1,0 +1,8 @@
+{
+  "bundle": "t002_detox_cartesian_shell",
+  "source_file": "Detox.sas",
+  "source_blob_sha": "92bb7deba0e65fcb88e5c4417226bbf489d12757",
+  "source_commit": "400760865b26d394966c9c26ff99a5053246deaf",
+  "tier": "real_data",
+  "notes": "Demographic shell build: %scan/%substr parse of the &year range, then the cartesian cross of demographics x months x years. PHDSPINE.DEMO replaced by a seeded 10-row table (incl. excluded FINAL_RE=9 / FINAL_SEX=99 rows to exercise the DELETEs); export path rewritten to ./output/. Shell logic verbatim."
+}

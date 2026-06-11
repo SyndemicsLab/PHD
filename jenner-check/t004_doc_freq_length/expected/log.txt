@@ -1,0 +1,82 @@
+Jenner 0.1.0 (Unlicensed - limited to 100 observations)
+Get a license at https://jenneranalytics.com/license
+
+NOTE: Option OBS changed to 100.
+NOTE: DATA doc_frq_tmp
+
+NOTE: Processing inline DATALINES (15 lines)
+
+NOTE: Read 15 rows from DATALINES.
+NOTE: Wrote doc_frq_tmp (15 rows, 6 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: PROC FREQ
+NOTE: Output dataset doc_length has 5 observations and 3 variables.
+NOTE: ODS plot written: freq_n_days.spec.json
+NOTE: PROC FREQ statement used.
+NOTE: PROC FREQ
+NOTE: Output dataset doc_length_race has 8 observations and 4 variables.
+NOTE: ODS plot written: freq_mosaic_final_re_n_days.spec.json
+NOTE: PROC FREQ statement used.
+NOTE: PROC FREQ
+NOTE: Output dataset doc_length_sex has 8 observations and 4 variables.
+NOTE: ODS plot written: freq_mosaic_final_sex_n_days.spec.json
+NOTE: PROC FREQ statement used.
+NOTE: PROC FREQ
+NOTE: Output dataset doc_length_twenty has 5 observations and 4 variables.
+NOTE: ODS plot written: freq_mosaic_age_grp_twenty_n_days.spec.json
+NOTE: PROC FREQ statement used.
+NOTE: PROC FREQ
+NOTE: Output dataset doc_length_five has 7 observations and 4 variables.
+NOTE: ODS plot written: freq_mosaic_age_grp_five_n_days.spec.json
+NOTE: PROC FREQ statement used.
+NOTE: DATA doc_length_twenty
+
+
+NOTE: Read 5 rows from doc_length_twenty.
+NOTE: Wrote doc_length_twenty (5 rows, 2 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA doc_length_five
+
+
+NOTE: Read 7 rows from doc_length_five.
+NOTE: Wrote doc_length_five (7 rows, 2 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA doc_length_sex
+
+
+NOTE: Read 8 rows from doc_length_sex.
+NOTE: Wrote doc_length_sex (8 rows, 2 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA doc_length_race
+
+
+NOTE: Read 8 rows from doc_length_race.
+NOTE: Wrote doc_length_race (8 rows, 2 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA doc_length
+
+
+NOTE: Read 5 rows from doc_length.
+NOTE: Wrote doc_length (5 rows, 2 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: PROC PRINT data=doc_length
+
+NOTE: PROC PRINT completed: 5 observations printed, 2 variables
+NOTE: PROC PRINT data=doc_length_race
+
+NOTE: PROC PRINT completed: 8 observations printed, 2 variables
+NOTE: PROC EXPORT data=doc_length outfile=./output/IncarcerationsLength.csv
+
+NOTE: Exported 5 rows to ./output/IncarcerationsLength.csv.

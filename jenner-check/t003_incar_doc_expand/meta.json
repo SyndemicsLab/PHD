@@ -1,0 +1,8 @@
+{
+  "bundle": "t003_incar_doc_expand",
+  "source_file": "RESPOND.sas",
+  "source_blob_sha": "ccbf94227450089c03cf61852924a76d4e8997c9",
+  "source_commit": "400760865b26d394966c9c26ff99a5053246deaf",
+  "tier": "real_data",
+  "notes": "Incarceration expansion: BY/RETAIN leniency merge of stays then a day-by-day DO loop emitting a row on each month boundary (DAY(INTNX('MONTH',date,0,'SAME'))=1). PHDDOC.DOC join replaced by a seeded doc_monthly (incl. two stays within the leniency window to exercise the merge); export path rewritten to ./output/. Merge + day-loop logic verbatim."
+}

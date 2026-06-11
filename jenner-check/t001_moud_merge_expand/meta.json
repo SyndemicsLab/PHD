@@ -1,0 +1,8 @@
+{
+  "bundle": "t001_moud_merge_expand",
+  "source_file": "RESPOND.sas",
+  "source_blob_sha": "ccbf94227450089c03cf61852924a76d4e8997c9",
+  "source_commit": "400760865b26d394966c9c26ff99a5053246deaf",
+  "tier": "real_data",
+  "notes": "MOUD count-expansion: BY/RETAIN/LAG leniency merge of treatment episodes then INTCK/INTNX month-by-month expansion. PHDSPINE.MOUD join replaced by a seeded moud_demo (5 episodes incl. two methadone stays within the leniency window to exercise the merge); hardcoded export path rewritten to ./output/. Merge + expansion logic verbatim."
+}

@@ -1,0 +1,45 @@
+Jenner 0.1.0 (Unlicensed - limited to 100 observations)
+Get a license at https://jenneranalytics.com/license
+
+NOTE: Option OBS changed to 100.
+NOTE: DATA doc_monthly
+
+NOTE: Processing inline DATALINES (4 lines)
+
+NOTE: Read 4 rows from DATALINES.
+NOTE: Wrote doc_monthly (4 rows, 6 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: PROC SORT data=doc_monthly
+
+NOTE: Unlicensed mode - input limited to 100 observations.
+NOTE: Read 4 rows from doc_monthly.
+NOTE: Wrote doc_monthly (4 rows, 6 columns).
+NOTE: PROC SORT statement used.
+NOTE: DATA doc_monthly
+
+
+NOTE: Read 4 rows from doc_monthly.
+NOTE: Wrote doc_monthly (3 rows, 6 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA incar_monthly
+
+
+NOTE: Read 3 rows from doc_monthly.
+NOTE: Wrote incar_monthly (35 rows, 7 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: PROC SQL 
+
+NOTE: Table incar_monthly created.
+NOTE: PROC SQL statement used.
+NOTE: PROC PRINT data=incar_monthly
+
+NOTE: PROC PRINT completed: 35 observations printed, 4 variables
+NOTE: PROC EXPORT data=incar_monthly outfile=./output/incar_monthly.csv
+
+NOTE: Exported 35 rows to ./output/incar_monthly.csv.

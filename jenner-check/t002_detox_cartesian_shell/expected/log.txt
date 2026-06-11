@@ -1,0 +1,57 @@
+Jenner 0.1.0 (Unlicensed - limited to 100 observations)
+Get a license at https://jenneranalytics.com/license
+
+NOTE: Option OBS changed to 100.
+NOTE: Library PHDSPINE assigned path=./phdspine_lib.
+NOTE: DATA PHDSPINE.DEMO
+
+NOTE: Processing inline DATALINES (10 lines)
+
+NOTE: Read 10 rows from DATALINES.
+NOTE: Wrote PHDSPINE.DEMO (10 rows, 3 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA demographics
+
+
+NOTE: Read 10 rows from PHDSPINE.DEMO.
+NOTE: Wrote demographics (8 rows, 3 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA months
+
+
+NOTE: Wrote months (12 rows, 1 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: DATA years
+
+
+NOTE: Wrote years (9 rows, 1 columns).
+NOTE: DATA elapsed:
+  wall  0.00 seconds
+  cpu   0.00 seconds
+NOTE: PROC SQL 
+
+NOTE: Table demographics_monthly created.
+NOTE: PROC SQL statement used.
+NOTE: PROC SQL 
+
+NOTE: Table demographics_yearly created.
+NOTE: PROC SQL statement used.
+NOTE: PROC SQL 
+
+NOTE: Table shell_summary created.
+NOTE: PROC SQL statement used.
+NOTE: PROC PRINT data=years
+
+NOTE: PROC PRINT completed: 9 observations printed, 1 variables
+NOTE: PROC PRINT data=shell_summary
+
+NOTE: PROC PRINT completed: 1 observations printed, 1 variables
+NOTE: PROC EXPORT data=demographics_yearly outfile=./output/demographics_yearly_shell.csv
+
+NOTE: Exported 72 rows to ./output/demographics_yearly_shell.csv.

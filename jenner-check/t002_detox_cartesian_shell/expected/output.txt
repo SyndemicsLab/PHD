@@ -1,0 +1,18 @@
+                                                Configured year scaffold                                                
+
+  Obs  YEAR
+    1  2015
+    2  2016
+    3  2017
+    4  2018
+    5  2019
+    6  2020
+    7  2021
+    8  2022
+    9  2023
+
+                               Monthly shell row count (demographics x 12 months x years)                               
+
+  Obs  MONTHLY_ROWS
+    1           864
+

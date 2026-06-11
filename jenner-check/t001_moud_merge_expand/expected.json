@@ -1,0 +1,20 @@
+{
+  "_captured_at": "2026-06-11T18:31:00.132224+00:00",
+  "_captured_run_id": "r_019eb7f296da7d92ad0db1fa4384015c",
+  "status": "ok",
+  "exit_code": 0,
+  "log_contains": [
+    "Wrote moud_demo (5 rows, 11 columns).",
+    "Wrote moud_expanded (44 rows, 6 columns).",
+    "PROC PRINT completed: 43 observations printed, 6 variables",
+    "Exported 43 rows to ./output/moud_expanded.csv."
+  ],
+  "log_does_not_contain": [
+    "ERROR:",
+    "[JENNER-ERROR"
+  ],
+  "diagnostics": {
+    "parse_warnings": [],
+    "runtime_warnings": []
+  }
+}

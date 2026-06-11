@@ -1,0 +1,19 @@
+{
+  "_captured_at": "2026-06-11T18:31:00.132224+00:00",
+  "_captured_run_id": "r_019eb7f2ca7f741385dd2799e47723a9",
+  "status": "ok",
+  "exit_code": 0,
+  "log_contains": [
+    "Wrote doc_frq_tmp (15 rows, 6 columns).",
+    "Output dataset doc_length has 5 observations and 3 variables.",
+    "Output dataset doc_length_race has 8 observations and 4 variables."
+  ],
+  "log_does_not_contain": [
+    "ERROR:",
+    "[JENNER-ERROR"
+  ],
+  "diagnostics": {
+    "parse_warnings": [],
+    "runtime_warnings": []
+  }
+}
